@@ -100,12 +100,14 @@ jobs:
           echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
           echo "latest_ipa_name=$LATEST_IPA_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Upload fakesigned IPA
+      - name: Upload fakesigned IPA artifact for PR checks
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: AidokuLegacy-iOS12-fakesigned-ipa
           path: artifacts/*.ipa
           if-no-files-found: error
+          compression-level: 0
 
       - name: Publish direct IPA release asset
         if: github.event_name != 'pull_request'
@@ -125,3 +127,8 @@ jobs:
               --title "$TITLE" \
               --notes "Direct-download fakesigned Aidoku Legacy IPA for iOS 12."
           fi
+
+      - name: Add direct IPA link to summary
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Direct IPA: https://github.com/${{ github.repository }}/releases/download/legacy-ios12-latest/${{ steps.buildipa.outputs.latest_ipa_name }}" >> "$GITHUB_STEP_SUMMARY"

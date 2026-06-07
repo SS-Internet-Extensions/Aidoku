@@ -67,12 +67,24 @@ private enum LegacyReaderMode: String, CaseIterable {
 
     static var current: LegacyReaderMode {
         if
-            let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+            let rawValue = persistedRawValue,
             let mode = LegacyReaderMode(rawValue: rawValue)
         {
             return mode
         }
-        return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.fitToScreen") ? .pagedLTR : .verticalScroll
+        return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.fitToScreen") ? .verticalFit : .verticalScroll
+    }
+
+    static func setCurrent(_ mode: LegacyReaderMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: defaultsKey)
+        UserDefaults.standard.set(mode != .verticalScroll, forKey: "AidokuLegacy.reader.fitToScreen")
+    }
+
+    private static var persistedRawValue: String? {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            return UserDefaults.standard.string(forKey: defaultsKey)
+        }
+        return UserDefaults.standard.persistentDomain(forName: bundleID)?[defaultsKey] as? String
     }
 
     var title: String {
@@ -80,7 +92,7 @@ private enum LegacyReaderMode: String, CaseIterable {
             case .verticalScroll:
                 return "Vertical Scroll"
             case .verticalFit:
-                return "Vertical Page Fit"
+                return "Vertical Fit to Screen"
             case .pagedLTR:
                 return "Paged Left to Right"
             case .pagedRTL:
@@ -110,11 +122,6 @@ private enum LegacyReaderMode: String, CaseIterable {
         }
     }
 
-    var next: LegacyReaderMode {
-        guard let index = LegacyReaderMode.allCases.firstIndex(of: self) else { return .pagedLTR }
-        let nextIndex = LegacyReaderMode.allCases.index(after: index)
-        return nextIndex == LegacyReaderMode.allCases.endIndex ? LegacyReaderMode.allCases[0] : LegacyReaderMode.allCases[nextIndex]
-    }
 }
 
 private extension Notification.Name {
@@ -769,7 +776,7 @@ final class LegacySettingsViewController: UITableViewController {
         switch row {
             case .readerMode:
                 let mode = LegacyReaderMode.current
-                cell.textLabel?.text = "Reader Mode"
+                cell.textLabel?.text = "Reader Layout"
                 cell.detailTextLabel?.text = "\(mode.title) - \(mode.detail)"
             case .readerMemory:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
@@ -801,10 +808,7 @@ final class LegacySettingsViewController: UITableViewController {
         guard let row = Row(rawValue: indexPath.row) else { return }
         switch row {
             case .readerMode:
-                let mode = LegacyReaderMode.current.next
-                UserDefaults.standard.set(mode.rawValue, forKey: LegacyReaderMode.defaultsKey)
-                UserDefaults.standard.set(mode != .verticalScroll, forKey: "AidokuLegacy.reader.fitToScreen")
-                tableView.reloadRows(at: [indexPath], with: .automatic)
+                showReaderModePicker(from: indexPath)
             case .readerMemory:
                 let key = "AidokuLegacy.reader.downsampleImages"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
@@ -825,6 +829,33 @@ final class LegacySettingsViewController: UITableViewController {
             case .about:
                 break
         }
+    }
+
+    private func showReaderModePicker(from indexPath: IndexPath) {
+        let currentMode = LegacyReaderMode.current
+        let alert = UIAlertController(
+            title: "Reader Layout",
+            message: "Choose how chapter pages are displayed.",
+            preferredStyle: .actionSheet
+        )
+        for mode in LegacyReaderMode.allCases {
+            let title = mode == currentMode ? "\(mode.title) (Current)" : mode.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                LegacyReaderMode.setCurrent(mode)
+                self?.tableView.reloadRows(at: [indexPath], with: .automatic)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
     }
 
     private func confirmClearHistory() {
@@ -3494,7 +3525,9 @@ private final class LegacyReaderViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
+        navigationController?.navigationBar.isTranslucent = false
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
@@ -3507,7 +3540,14 @@ private final class LegacyReaderViewController: UITableViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        enforceReaderContainer()
+        navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
         updateReaderMode()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        enforceReaderContainer(relayout: false)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -3530,6 +3570,13 @@ private final class LegacyReaderViewController: UITableViewController {
         coordinator.animate(alongsideTransition: nil) { _ in
             self.updateReaderMode()
             self.tableView.reloadData()
+        }
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        if fitToScreen {
+            tableView.reloadData()
         }
     }
 
@@ -3625,10 +3672,22 @@ private final class LegacyReaderViewController: UITableViewController {
     @objc private func toggleBars() {
         barsHidden.toggle()
         navigationController?.setNavigationBarHidden(barsHidden, animated: true)
-        tabBarController?.tabBar.isHidden = barsHidden
-        UIView.animate(withDuration: 0.2) {
+        enforceReaderContainer()
+        UIView.animate(withDuration: 0.2, animations: {
             self.setNeedsStatusBarAppearanceUpdate()
-        }
+        }, completion: { _ in
+            self.updateReaderMode()
+            if self.fitToScreen {
+                self.tableView.reloadData()
+            }
+        })
+    }
+
+    private func enforceReaderContainer(relayout: Bool = true) {
+        tabBarController?.tabBar.isHidden = true
+        guard relayout else { return }
+        tabBarController?.view.setNeedsLayout()
+        tabBarController?.view.layoutIfNeeded()
     }
 
     private func isImagePage(at indexPath: IndexPath) -> Bool {
@@ -3737,7 +3796,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
+        navigationController?.navigationBar.isTranslucent = false
         view.backgroundColor = UIColor.black
 
         let layout = UICollectionViewFlowLayout()
@@ -3773,6 +3834,17 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         loadPages()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        enforceReaderContainer()
+        navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        enforceReaderContainer(relayout: false)
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         pendingHistorySaveWorkItem?.cancel()
@@ -3798,6 +3870,11 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                 self.scrollTo(pageIndex: current, animated: false)
             }
         }
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        collectionView?.collectionViewLayout.invalidateLayout()
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -3928,10 +4005,19 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     @objc private func toggleBars() {
         barsHidden.toggle()
         navigationController?.setNavigationBarHidden(barsHidden, animated: true)
-        tabBarController?.tabBar.isHidden = barsHidden
-        UIView.animate(withDuration: 0.2) {
+        enforceReaderContainer()
+        UIView.animate(withDuration: 0.2, animations: {
             self.setNeedsStatusBarAppearanceUpdate()
-        }
+        }, completion: { _ in
+            self.collectionView.collectionViewLayout.invalidateLayout()
+        })
+    }
+
+    private func enforceReaderContainer(relayout: Bool = true) {
+        tabBarController?.tabBar.isHidden = true
+        guard relayout else { return }
+        tabBarController?.view.setNeedsLayout()
+        tabBarController?.view.layoutIfNeeded()
     }
 
     private func recordHistory(pageIndex: Int, force: Bool) {
