@@ -7,6 +7,8 @@
 
 import UIKit
 import Darwin
+import SDWebImage
+import SDWebImageWebPCoder
 
 @UIApplicationMain
 final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
@@ -19,6 +21,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         let window = UIWindow(frame: UIScreen.main.bounds)
         window.tintColor = LegacyPalette.accent
         registerDefaults()
+        registerImageCoders()
         window.rootViewController = LegacyTabBarController()
         self.window = window
         window.makeKeyAndVisible()
@@ -36,6 +39,10 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.backgroundColor": "black"
             ]
         )
+    }
+
+    private func registerImageCoders() {
+        SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
     }
 }
 

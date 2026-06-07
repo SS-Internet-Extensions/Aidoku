@@ -8,6 +8,8 @@
 import UIKit
 import WebKit
 import ImageIO
+import SDWebImage
+import SDWebImageWebPCoder
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 
@@ -195,6 +197,7 @@ final class LegacyImageLoader {
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 25
         configuration.httpAdditionalHeaders = [
+            "Accept": "image/webp,image/*,*/*;q=0.8",
             "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
@@ -232,6 +235,10 @@ final class LegacyImageLoader {
     }
 
     func makeImage(from data: Data, maxPixelHeight: CGFloat) -> UIImage? {
+        if isWebP(data) {
+            return makeWebPImage(from: data, maxPixelHeight: maxPixelHeight)
+        }
+
         guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
             return UIImage(data: data)
         }
@@ -248,6 +255,30 @@ final class LegacyImageLoader {
             return UIImage(data: data)
         }
         return UIImage(cgImage: cgImage)
+    }
+
+    private func makeWebPImage(from data: Data, maxPixelHeight: CGFloat) -> UIImage? {
+        guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
+            return SDImageWebPCoder.shared.decodedImage(with: data, options: nil)
+        }
+        let maxPixelSize = max(800, Int(maxPixelHeight))
+        return SDImageWebPCoder.shared.decodedImage(
+            with: data,
+            options: [.decodeThumbnailPixelSize: CGSize(width: maxPixelSize, height: maxPixelSize)]
+        )
+    }
+
+    private func isWebP(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        let bytes = [UInt8](data.prefix(12))
+        return bytes[0] == 0x52
+            && bytes[1] == 0x49
+            && bytes[2] == 0x46
+            && bytes[3] == 0x46
+            && bytes[8] == 0x57
+            && bytes[9] == 0x45
+            && bytes[10] == 0x42
+            && bytes[11] == 0x50
     }
 
     static func placeholder(size: CGSize = CGSize(width: 44, height: 62)) -> UIImage {
@@ -2835,6 +2866,9 @@ private extension URLRequest {
         if value(forHTTPHeaderField: "User-Agent") == nil {
             setValue(aidokuLegacyImageUserAgent, forHTTPHeaderField: "User-Agent")
         }
+        if value(forHTTPHeaderField: "Accept") == nil {
+            setValue("image/webp,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        }
         let cookieHeaders = HTTPCookie.requestHeaderFields(with: HTTPCookieStorage.shared.cookies(for: url) ?? [])
         for (key, value) in cookieHeaders {
             if key == "Cookie", let existing = self.value(forHTTPHeaderField: "Cookie"), !existing.isEmpty {
@@ -3325,7 +3359,7 @@ final class LegacyPageImageCell: UITableViewCell {
     private func decodeFailureMessage(data: Data, response: HTTPURLResponse?) -> String {
         let contentType = headerValue("Content-Type", in: response)?.lowercased() ?? ""
         if contentType.contains("webp") {
-            return "Unsupported image format: WebP on iOS 12."
+            return "WebP image failed to decode."
         }
         if contentType.contains("avif") {
             return "Unsupported image format: AVIF on iOS 12."
