@@ -7,6 +7,7 @@
 
 import AidokuRunner
 import CloudKit
+import Darwin
 import Nuke
 import SwiftUI
 
@@ -105,6 +106,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        let isLegacyIPadAir = UIDevice.current.isFirstGenerationIPadAir
+        let defaultPortraitRows = isLegacyIPadAir
+            ? 4
+            : UIDevice.current.userInterfaceIdiom == .pad ? 5 : 2
+        let defaultLandscapeRows = isLegacyIPadAir
+            ? 5
+            : UIDevice.current.userInterfaceIdiom == .pad ? 6 : 4
+
         UserDefaults.standard.register(
             defaults: [
                 "Flag.isSideloaded": Self.isSideloaded, // for icloud sync setting
@@ -115,8 +124,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 "General.appearance": 0,
                 "General.useSystemAppearance": true,
                 "Appearance.layout": "standard",
-                "Appearance.customPortraitRows": UIDevice.current.userInterfaceIdiom == .pad ? 5 : 2,
-                "Appearance.customLandscapeRows": UIDevice.current.userInterfaceIdiom == .pad ? 6 : 4,
+                "Appearance.customPortraitRows": defaultPortraitRows,
+                "Appearance.customLandscapeRows": defaultLandscapeRows,
 
                 "Library.sortOption": 2, // lastOpened
                 "Library.sortAscending": false,
@@ -150,9 +159,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 "Reader.readingMode": "auto",
                 "Reader.skipDuplicateChapters": true,
                 "Reader.markDuplicateChapters": true,
-                "Reader.downsampleImages": false,
+                "Reader.downsampleImages": isLegacyIPadAir,
                 "Reader.upscaleImages": false,
-                "Reader.upscaleMaxHeight": 2000,
+                "Reader.upscaleMaxHeight": isLegacyIPadAir ? 1200 : 2000,
                 "Reader.cropBorders": false,
                 "Reader.disableQuickActions": false,
                 "Reader.disableDoubleTap": false,
@@ -160,9 +169,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 "Reader.hideBarsOnSwipe": false,
                 "Reader.tapZones": "disabled",
                 "Reader.invertTapZones": false,
-                "Reader.animatePageTransitions": true,
+                "Reader.animatePageTransitions": !isLegacyIPadAir,
                 "Reader.backgroundColor": "black",
-                "Reader.pagesToPreload": 2,
+                "Reader.pagesToPreload": isLegacyIPadAir ? 1 : 2,
                 "Reader.pagedPageLayout": "auto",
                 "Reader.pagedPageOffset": false,
                 "Reader.splitWideImages": false,
@@ -200,7 +209,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 "Library.downloadOnlyOnWifi": false,
                 "Library.deleteDownloadAfterReading": false,
                 "Downloads.compress": true,
-                "Downloads.parallel": true,
+                "Downloads.parallel": !isLegacyIPadAir,
                 "Downloads.background": true
             ]
         )
@@ -288,6 +297,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         InterfaceOrientationCoordinator.shared.supportedOrientations
+    }
+}
+
+private extension UIDevice {
+    var isFirstGenerationIPadAir: Bool {
+        ["iPad4,1", "iPad4,2", "iPad4,3"].contains(modelIdentifier)
+    }
+
+    var modelIdentifier: String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+
+        let mirror = Mirror(reflecting: systemInfo.machine)
+        return mirror.children.reduce(into: "") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return }
+            identifier.append(Character(UnicodeScalar(UInt8(value))))
+        }
     }
 }
 

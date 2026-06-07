@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1B7DD46FCE6712CB663DDDDD /* LegacyRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88487D89C9F30FB426F0BEE1 /* LegacyRootViewController.swift */; };
 		002C0AC12EC0F44D0071CE82 /* LAPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 002C0AC02EC0F44D0071CE82 /* LAPolicy.swift */; };
 		002C0AC22EC0F44D0071CE82 /* LAPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 002C0AC02EC0F44D0071CE82 /* LAPolicy.swift */; };
 		04B48CF82CD6836100F719D0 /* ShikimoriTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B48CF72CD6835D00F719D0 /* ShikimoriTracker.swift */; };
@@ -588,6 +589,13 @@
 		FBFF58912E7F2642009367B7 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFF58902E7F2641009367B7 /* Settings.swift */; };
 		FBFF58932E7F2BF5009367B7 /* SettingView+Environment.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFF58922E7F2BEF009367B7 /* SettingView+Environment.swift */; };
 		FBFF58952E807282009367B7 /* DoneButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFF58942E807280009367B7 /* DoneButton.swift */; };
+		65AA0A51A24D3865BD23C5D8 /* LegacyAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD0910F1E04C30D9CE2F55AE /* LegacyAppDelegate.swift */; };
+		72FB2AB4FEE4CF2B81F6238D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CD5A3EED2B9E36E61B24E5BF /* LaunchScreen.storyboard */; };
+		D2B5A9A5C0E34B0B8F2D1101 /* LegacySourceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B5A9A4C0E34B0B8F2D1101 /* LegacySourceCatalog.swift */; };
+		A12B34C56D78E90F12345681 /* AidokuRunnerLegacyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12B34C56D78E90F12345671 /* AidokuRunnerLegacyModels.swift */; };
+		A12B34C56D78E90F12345682 /* AidokuRunnerLegacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */; };
+		A12B34C56D78E90F12345683 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */; };
+		A12B34C56D78E90F12345691 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A12B34C56D78E90F12345690 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -616,6 +624,7 @@
 		4875B8242BA6F2C3001E39CA /* MangaUpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MangaUpdateManager.swift; sourceTree = "<group>"; };
 		48E20A262B78420E00BFFED8 /* NavigationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationController.swift; sourceTree = "<group>"; };
 		66C7E95A2ED77BB50026FD6C /* ImageProcessingSettingsKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageProcessingSettingsKey.swift; sourceTree = "<group>"; };
+		88487D89C9F30FB426F0BEE1 /* LegacyRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyRootViewController.swift; sourceTree = "<group>"; };
 		723D3AF82E0DC5A5003ED4CF /* DownloadedMangaInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadedMangaInfo.swift; sourceTree = "<group>"; };
 		723D3AFB2E0DC5C4003ED4CF /* DownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
 		723D3AFC2E0DC5C4003ED4CF /* DownloadedMangaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadedMangaView.swift; sourceTree = "<group>"; };
@@ -1070,6 +1079,13 @@
 		FBFF58902E7F2641009367B7 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		FBFF58922E7F2BEF009367B7 /* SettingView+Environment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingView+Environment.swift"; sourceTree = "<group>"; };
 		FBFF58942E807280009367B7 /* DoneButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneButton.swift; sourceTree = "<group>"; };
+		BD7261EF7E2790F0E49F3410 /* AidokuLegacy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AidokuLegacy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD5A3EED2B9E36E61B24E5BF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		D2B5A9A4C0E34B0B8F2D1101 /* LegacySourceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySourceCatalog.swift; sourceTree = "<group>"; };
+		FD0910F1E04C30D9CE2F55AE /* LegacyAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAppDelegate.swift; sourceTree = "<group>"; };
+		A12B34C56D78E90F12345671 /* AidokuRunnerLegacyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyModels.swift; sourceTree = "<group>"; };
+		A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacy.swift; sourceTree = "<group>"; };
+		A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyPackageInstaller.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1108,6 +1124,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		38CD763596D181273EF5D1C7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A12B34C56D78E90F12345691 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1353,6 +1377,7 @@
 			children = (
 				FB1B482A277CE18D0056D02C /* Shared */,
 				FB1B4858277CE55B0056D02C /* iOS */,
+				E9F4A46B61A0051A6474A26B /* iOSLegacy */,
 				FB1B483C277CE1920056D02C /* macOS */,
 				FBB44E732EC635620032EFBB /* AidokuTests */,
 				FB1B4836277CE1920056D02C /* Products */,
@@ -1391,6 +1416,7 @@
 			children = (
 				FB1B4835277CE1920056D02C /* Aidoku.app */,
 				FB1B483B277CE1920056D02C /* Aidoku.app */,
+				BD7261EF7E2790F0E49F3410 /* AidokuLegacy.app */,
 				FBB44E722EC635620032EFBB /* AidokuTests.xctest */,
 			);
 			name = Products;
@@ -1422,6 +1448,20 @@
 				FB4EEBDE27A4F5AF005081A3 /* iOS.entitlements */,
 			);
 			path = iOS;
+			sourceTree = "<group>";
+		};
+		E9F4A46B61A0051A6474A26B /* iOSLegacy */ = {
+			isa = PBXGroup;
+			children = (
+				FD0910F1E04C30D9CE2F55AE /* LegacyAppDelegate.swift */,
+				88487D89C9F30FB426F0BEE1 /* LegacyRootViewController.swift */,
+				D2B5A9A4C0E34B0B8F2D1101 /* LegacySourceCatalog.swift */,
+				A12B34C56D78E90F12345671 /* AidokuRunnerLegacyModels.swift */,
+				A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */,
+				A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */,
+				CD5A3EED2B9E36E61B24E5BF /* LaunchScreen.storyboard */,
+			);
+			path = iOSLegacy;
 			sourceTree = "<group>";
 		};
 		FB1B4862277CE7370056D02C /* Old Models */ = {
@@ -2410,6 +2450,26 @@
 			productReference = FBB44E722EC635620032EFBB /* AidokuTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		96E2D1C64547A63A64E4A30D /* AidokuLegacy (iOS 12) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 669FC6FF3B2AD297CE0FCDB3 /* Build configuration list for PBXNativeTarget "AidokuLegacy (iOS 12)" */;
+			buildPhases = (
+				F2909DF6BABD1306566D2B75 /* Sources */,
+				38CD763596D181273EF5D1C7 /* Frameworks */,
+				26236F2B6B37FA1178C9EBCF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "AidokuLegacy (iOS 12)";
+			packageProductDependencies = (
+				A12B34C56D78E90F12345690 /* ZIPFoundation */,
+			);
+			productName = AidokuLegacy;
+			productReference = BD7261EF7E2790F0E49F3410 /* AidokuLegacy.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -2427,6 +2487,10 @@
 					FB1B483A277CE1920056D02C = {
 						CreatedOnToolsVersion = 13.2.1;
 						LastSwiftMigration = 1340;
+					};
+					96E2D1C64547A63A64E4A30D = {
+						CreatedOnToolsVersion = 26.0;
+						LastSwiftMigration = 2600;
 					};
 					FBB44E712EC635620032EFBB = {
 						CreatedOnToolsVersion = 26.0;
@@ -2498,6 +2562,7 @@
 			projectRoot = "";
 			targets = (
 				FB1B4834277CE1920056D02C /* Aidoku (iOS) */,
+				96E2D1C64547A63A64E4A30D /* AidokuLegacy (iOS 12) */,
 				FB1B483A277CE1920056D02C /* Aidoku (macOS) */,
 				FBB44E712EC635620032EFBB /* AidokuTests */,
 			);
@@ -2529,6 +2594,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		26236F2B6B37FA1178C9EBCF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				72FB2AB4FEE4CF2B81F6238D /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3139,6 +3212,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F2909DF6BABD1306566D2B75 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				65AA0A51A24D3865BD23C5D8 /* LegacyAppDelegate.swift in Sources */,
+				1B7DD46FCE6712CB663DDDDD /* LegacyRootViewController.swift in Sources */,
+				D2B5A9A5C0E34B0B8F2D1101 /* LegacySourceCatalog.swift in Sources */,
+				A12B34C56D78E90F12345681 /* AidokuRunnerLegacyModels.swift in Sources */,
+				A12B34C56D78E90F12345682 /* AidokuRunnerLegacy.swift in Sources */,
+				A12B34C56D78E90F12345683 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -3547,6 +3633,68 @@
 			};
 			name = Release;
 		};
+		3A57655CBAE1D60F2C7E53F8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Aidoku Legacy";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aidoku.AidokuLegacy;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = APPL;
+				PRODUCT_NAME = AidokuLegacy;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A7992349279B689A631A845C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Aidoku Legacy";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aidoku.AidokuLegacy;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = APPL;
+				PRODUCT_NAME = AidokuLegacy;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -3582,6 +3730,15 @@
 			buildConfigurations = (
 				FBB44E792EC635620032EFBB /* Debug */,
 				FBB44E7A2EC635620032EFBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		669FC6FF3B2AD297CE0FCDB3 /* Build configuration list for PBXNativeTarget "AidokuLegacy (iOS 12)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A57655CBAE1D60F2C7E53F8 /* Debug */,
+				A7992349279B689A631A845C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -3686,6 +3843,11 @@
 			productName = MarkdownUI;
 		};
 		FB7B7ED7278CE949001E6EAF /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FB7B7ED6278CE949001E6EAF /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+		A12B34C56D78E90F12345690 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = FB7B7ED6278CE949001E6EAF /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
