@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftSoup
+import UIKit
 import Wasm3Legacy
 
 struct Env: SourceLibrary {
@@ -426,8 +427,17 @@ struct Net: SourceLibrary {
         }
     }
 
-    func getImage(descriptor _: Int32) -> Int32 {
-        return Result.notAnImage.rawValue
+    func getImage(descriptor: Int32) -> Int32 {
+        guard let request = store.fetch(from: descriptor) as? NetRequest else {
+            return Result.invalidDescriptor.rawValue
+        }
+        guard let data = request.responseData else {
+            return Result.missingData.rawValue
+        }
+        guard UIImage(data: data) != nil else {
+            return Result.notAnImage.rawValue
+        }
+        return store.store(data)
     }
 
     func getStatusCode(descriptor: Int32) -> Int32 {

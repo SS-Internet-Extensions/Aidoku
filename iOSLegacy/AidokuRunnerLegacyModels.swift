@@ -106,7 +106,7 @@ struct AidokuRunnerLegacySourceInfo: Codable {
     }
 }
 
-struct AidokuRunnerLegacyManga: Hashable {
+struct AidokuRunnerLegacyManga: Hashable, Codable {
     var sourceKey: String
     let key: String
     var title: String
@@ -119,7 +119,7 @@ struct AidokuRunnerLegacyManga: Hashable {
     var chapters: [AidokuRunnerLegacyChapter]?
 }
 
-struct AidokuRunnerLegacyChapter: Hashable {
+struct AidokuRunnerLegacyChapter: Hashable, Codable {
     let key: String
     var title: String?
     var chapterNumber: Float?
@@ -133,7 +133,8 @@ struct AidokuRunnerLegacyChapter: Hashable {
 
 struct AidokuRunnerLegacyPage: Hashable {
     enum Content: Hashable {
-        case url(URL)
+        case url(URL, context: [String: String]?)
+        case image(Data)
         case text(String)
         case zipFile(url: URL, filePath: String)
     }
@@ -185,6 +186,10 @@ protocol AidokuRunnerLegacyRunner {
         completion: @escaping (Result<AidokuRunnerLegacyMangaPageResult, Error>) -> Void
     )
 
+    func getListings(
+        completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    )
+
     func getMangaUpdate(
         manga: AidokuRunnerLegacyManga,
         needsDetails: Bool,
@@ -200,6 +205,7 @@ protocol AidokuRunnerLegacyRunner {
 
     func getImageRequest(
         url: URL,
+        context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
     )
 }
@@ -231,6 +237,12 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
     }
 
+    func getListings(
+        completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    ) {
+        completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
     func getMangaUpdate(
         manga: AidokuRunnerLegacyManga,
         needsDetails: Bool,
@@ -250,6 +262,7 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
 
     func getImageRequest(
         url: URL,
+        context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))

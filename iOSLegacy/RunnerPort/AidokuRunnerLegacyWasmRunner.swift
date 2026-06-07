@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 import Wasm3Legacy
 
 struct AidokuRunnerLegacyWasmBackendFactory: AidokuRunnerLegacyBackendFactory {
@@ -90,6 +91,28 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         }
     }
 
+    func getListings(
+        completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.dynamicListings else {
+                return []
+            }
+            let function = try self.module.findFunction(name: "get_listings")
+            let result: Int32 = try function.call()
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder()
+                .decode([Listing].self, from: data)
+                .map {
+                    AidokuRunnerLegacyListing(
+                        id: $0.id,
+                        name: $0.name,
+                        kind: AidokuRunnerLegacyListingKind(rawValue: $0.kind.rawValue) ?? .default
+                    )
+                }
+        }
+    }
+
     func getMangaUpdate(
         manga: AidokuRunnerLegacyManga,
         needsDetails: Bool,
@@ -126,12 +149,13 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             let data = try self.handleResult(result: result)
             return try PostcardDecoder()
                 .decode([PageCodable].self, from: data)
-                .compactMap { $0.into()?.legacy }
+                .compactMap { $0.into()?.legacy(store: self.store) }
         }
     }
 
     func getImageRequest(
         url: URL,
+        context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
     ) {
         run(completion: completion) {
@@ -141,7 +165,13 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             let function = try self.module.findFunction(name: "get_image_request")
             let urlPointer = try self.store.storeEncoded(url.absoluteString)
             defer { self.store.remove(at: urlPointer) }
-            let result: Int32 = try function.call(urlPointer, Int32(-1))
+            let contextPointer = try self.store.storeOptionalEncoded(context)
+            defer {
+                if contextPointer >= 0 {
+                    self.store.remove(at: contextPointer)
+                }
+            }
+            let result: Int32 = try function.call(urlPointer, contextPointer)
             let data = try self.handleResult(result: result)
             let requestPointer = try PostcardDecoder().decode(Int32.self, from: data)
             defer { self.store.remove(at: requestPointer) }
@@ -282,15 +312,24 @@ private extension MangaPageResult {
 }
 
 private extension Page {
-    var legacy: AidokuRunnerLegacyPage? {
+    func legacy(store: GlobalStore) -> AidokuRunnerLegacyPage? {
         switch content {
-            case .url(let url, _):
-                return AidokuRunnerLegacyPage(content: .url(url), hasDescription: hasDescription, description: description)
+            case .url(let url, let context):
+                return AidokuRunnerLegacyPage(content: .url(url, context: context), hasDescription: hasDescription, description: description)
             case .text(let string):
                 return AidokuRunnerLegacyPage(content: .text(string), hasDescription: hasDescription, description: description)
             case .zipFile(let url, let filePath):
                 return AidokuRunnerLegacyPage(content: .zipFile(url: url, filePath: filePath), hasDescription: hasDescription, description: description)
-            case .image:
+            case .image(let imageRef):
+                defer { store.remove(at: imageRef) }
+                if let data = store.fetch(from: imageRef) as? Data {
+                    return AidokuRunnerLegacyPage(content: .image(data), hasDescription: hasDescription, description: description)
+                }
+                if let image = store.fetch(from: imageRef) as? UIImage {
+                    if let data = image.pngData() ?? image.jpegData(compressionQuality: 0.95) {
+                        return AidokuRunnerLegacyPage(content: .image(data), hasDescription: hasDescription, description: description)
+                    }
+                }
                 return nil
         }
     }
