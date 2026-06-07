@@ -149,6 +149,63 @@ struct AidokuRunnerLegacyMangaPageResult {
     var hasNextPage: Bool
 }
 
+struct AidokuRunnerLegacyMangaWithChapter: Hashable {
+    var manga: AidokuRunnerLegacyManga
+    var chapter: AidokuRunnerLegacyChapter
+}
+
+struct AidokuRunnerLegacyHome: Hashable {
+    var components: [AidokuRunnerLegacyHomeComponent]
+}
+
+struct AidokuRunnerLegacyHomeComponent: Hashable {
+    var title: String?
+    var subtitle: String?
+    var value: Value
+
+    enum Value: Hashable {
+        case imageScroller(
+            links: [AidokuRunnerLegacyHomeLink],
+            autoScrollInterval: TimeInterval?,
+            width: Int?,
+            height: Int?
+        )
+        case bigScroller(entries: [AidokuRunnerLegacyManga], autoScrollInterval: TimeInterval?)
+        case scroller(entries: [AidokuRunnerLegacyHomeLink], listing: AidokuRunnerLegacyListing?)
+        case mangaList(
+            ranking: Bool,
+            pageSize: Int?,
+            entries: [AidokuRunnerLegacyHomeLink],
+            listing: AidokuRunnerLegacyListing?
+        )
+        case mangaChapterList(
+            pageSize: Int?,
+            entries: [AidokuRunnerLegacyMangaWithChapter],
+            listing: AidokuRunnerLegacyListing?
+        )
+        case filters([AidokuRunnerLegacyHomeFilterItem])
+        case links([AidokuRunnerLegacyHomeLink])
+    }
+}
+
+struct AidokuRunnerLegacyHomeFilterItem: Hashable {
+    var title: String
+    var values: [AidokuRunnerLegacyFilterValue]?
+}
+
+struct AidokuRunnerLegacyHomeLink: Hashable {
+    var title: String
+    var subtitle: String?
+    var imageUrl: String?
+    var value: Value?
+
+    enum Value: Hashable {
+        case url(String)
+        case listing(AidokuRunnerLegacyListing)
+        case manga(AidokuRunnerLegacyManga)
+    }
+}
+
 struct AidokuRunnerLegacySortDefault: Codable, Hashable {
     let index: Int
     let ascending: Bool
@@ -446,6 +503,10 @@ protocol AidokuRunnerLegacyRunner {
         completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
     )
 
+    func getHome(
+        completion: @escaping (Result<AidokuRunnerLegacyHome, Error>) -> Void
+    )
+
     func getFilters(
         completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
     )
@@ -499,6 +560,12 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
 
     func getListings(
         completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    ) {
+        completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func getHome(
+        completion: @escaping (Result<AidokuRunnerLegacyHome, Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
     }

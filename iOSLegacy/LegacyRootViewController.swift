@@ -727,6 +727,7 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
 
 final class LegacySourceMenuViewController: UITableViewController {
     private enum Row {
+        case home
         case search
         case listing(AidokuRunnerLegacyListing)
         case website(URL)
@@ -751,7 +752,11 @@ final class LegacySourceMenuViewController: UITableViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         tableView.backgroundColor = LegacyPalette.background
-        rows = [.search]
+        rows = []
+        if source.runner.features.providesHome {
+            rows.append(.home)
+        }
+        rows.append(.search)
         rows.append(contentsOf: source.staticListings.map { .listing($0) })
         if source.runner.features.dynamicListings {
             rows.append(.message(title: "Loading Listings...", subtitle: nil))
@@ -775,6 +780,9 @@ final class LegacySourceMenuViewController: UITableViewController {
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         switch rows[indexPath.row] {
+            case .home:
+                cell.textLabel?.text = "Home"
+                cell.detailTextLabel?.text = "Run get_home"
             case .search:
                 cell.textLabel?.text = "Search Manga"
                 cell.detailTextLabel?.text = "Run get_search_manga_list"
@@ -796,6 +804,8 @@ final class LegacySourceMenuViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         switch rows[indexPath.row] {
+            case .home:
+                navigationController?.pushViewController(LegacySourceHomeViewController(source: source), animated: true)
             case .search:
                 navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: nil), animated: true)
             case .listing(let listing):
@@ -822,12 +832,14 @@ final class LegacySourceMenuViewController: UITableViewController {
                     let dynamicRows = listings
                         .filter { !existing.contains($0.id) }
                         .map { Row.listing($0) }
-                    let insertIndex = min(1 + self.source.staticListings.count, self.rows.count)
+                    let prefixCount = self.source.runner.features.providesHome ? 2 : 1
+                    let insertIndex = min(prefixCount + self.source.staticListings.count, self.rows.count)
                     self.rows.insert(contentsOf: dynamicRows, at: insertIndex)
                 case .failure(let error):
+                    let prefixCount = self.source.runner.features.providesHome ? 2 : 1
                     self.rows.insert(
                         .message(title: "Listings Unavailable", subtitle: error.localizedDescription),
-                        at: min(1 + self.source.staticListings.count, self.rows.count)
+                        at: min(prefixCount + self.source.staticListings.count, self.rows.count)
                     )
             }
             self.tableView.reloadData()
@@ -835,9 +847,291 @@ final class LegacySourceMenuViewController: UITableViewController {
     }
 }
 
+final class LegacySourceHomeViewController: UITableViewController {
+    private enum Row {
+        case header(title: String?, subtitle: String?)
+        case link(AidokuRunnerLegacyHomeLink)
+        case manga(AidokuRunnerLegacyManga)
+        case chapter(AidokuRunnerLegacyMangaWithChapter)
+        case filter(AidokuRunnerLegacyHomeFilterItem)
+        case listing(AidokuRunnerLegacyListing, title: String)
+    }
+
+    private let source: AidokuRunnerLegacySource
+    private var rows: [Row] = []
+    private var message = "Loading home..."
+    private var isLoading = false
+
+    init(source: AidokuRunnerLegacySource) {
+        self.source = source
+        super.init(style: .plain)
+        title = source.name
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+        tableView.rowHeight = 86
+        refreshControl = UIRefreshControl()
+        refreshControl?.addTarget(self, action: #selector(loadHome), for: .valueChanged)
+        loadHome()
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return rows.isEmpty ? 1 : rows.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "HomeCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "HomeCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+        cell.imageView?.image = nil
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+
+        guard !rows.isEmpty else {
+            cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+            cell.textLabel?.text = isLoading ? "Loading..." : message
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        switch rows[indexPath.row] {
+            case .header(let title, let subtitle):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .headline)
+                cell.textLabel?.text = title ?? "Home"
+                cell.detailTextLabel?.text = subtitle
+                cell.accessoryType = .none
+                cell.selectionStyle = .none
+            case .link(let link):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+                cell.textLabel?.text = link.title
+                cell.detailTextLabel?.text = link.subtitle ?? detailText(for: link.value)
+                loadImage(for: link, into: cell, at: indexPath)
+            case .manga(let manga):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+                cell.textLabel?.text = manga.title
+                cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description
+                loadCover(for: manga, into: cell, at: indexPath)
+            case .chapter(let entry):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+                cell.textLabel?.text = entry.manga.title
+                cell.detailTextLabel?.text = chapterSubtitle(entry.chapter)
+                loadCover(for: entry.manga, into: cell, at: indexPath)
+            case .filter(let item):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+                cell.textLabel?.text = item.title
+                cell.detailTextLabel?.text = "Search with this filter"
+            case .listing(_, let title):
+                cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+                cell.textLabel?.text = title
+                cell.detailTextLabel?.text = "View more"
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard !rows.isEmpty else { return }
+        switch rows[indexPath.row] {
+            case .header:
+                return
+            case .link(let link):
+                open(linkValue: link.value)
+            case .manga(let manga):
+                navigationController?.pushViewController(
+                    LegacyMangaDetailViewController(source: source, manga: manga),
+                    animated: true
+                )
+            case .chapter(let entry):
+                navigationController?.pushViewController(
+                    LegacyReaderViewController(source: source, manga: entry.manga, chapter: entry.chapter),
+                    animated: true
+                )
+            case .filter(let item):
+                navigationController?.pushViewController(
+                    LegacyMangaListViewController(
+                        source: source,
+                        listing: nil,
+                        initialFilters: item.values ?? [],
+                        allowsEmptySearch: true,
+                        titleOverride: item.title
+                    ),
+                    animated: true
+                )
+            case .listing(let listing, _):
+                navigationController?.pushViewController(
+                    LegacyMangaListViewController(source: source, listing: listing),
+                    animated: true
+                )
+        }
+    }
+
+    @objc private func loadHome() {
+        guard !isLoading else { return }
+        isLoading = true
+        message = "Loading home..."
+        tableView.reloadData()
+        source.runner.getHome { [weak self] result in
+            guard let self = self else { return }
+            self.isLoading = false
+            self.refreshControl?.endRefreshing()
+            switch result {
+                case .success(let home):
+                    self.rows = self.rows(from: home)
+                    self.message = self.rows.isEmpty ? "No home content." : ""
+                case .failure(let error):
+                    self.rows = []
+                    self.message = error.localizedDescription
+            }
+            self.tableView.reloadData()
+        }
+    }
+
+    private func rows(from home: AidokuRunnerLegacyHome) -> [Row] {
+        var rows = [Row]()
+        for component in home.components {
+            if component.title != nil || component.subtitle != nil {
+                rows.append(.header(title: component.title, subtitle: component.subtitle))
+            }
+            switch component.value {
+                case .imageScroller(let links, _, _, _):
+                    rows.append(contentsOf: links.map { .link($0) })
+                case .bigScroller(let entries, _):
+                    rows.append(contentsOf: entries.map { .manga($0) })
+                case .scroller(let entries, let listing):
+                    rows.append(contentsOf: entries.map { .link($0) })
+                    if let listing = listing {
+                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                    }
+                case .mangaList(_, _, let entries, let listing):
+                    rows.append(contentsOf: entries.map { .link($0) })
+                    if let listing = listing {
+                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                    }
+                case .mangaChapterList(_, let entries, let listing):
+                    rows.append(contentsOf: entries.map { .chapter($0) })
+                    if let listing = listing {
+                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                    }
+                case .filters(let items):
+                    rows.append(contentsOf: items.map { .filter($0) })
+                case .links(let links):
+                    rows.append(contentsOf: links.map { .link($0) })
+            }
+        }
+        return rows
+    }
+
+    private func open(linkValue: AidokuRunnerLegacyHomeLink.Value?) {
+        guard let linkValue = linkValue else { return }
+        switch linkValue {
+            case .url(let urlString):
+                guard let url = URL(string: urlString, relativeTo: source.urls.first)?.absoluteURL else { return }
+                navigationController?.pushViewController(
+                    LegacySourceWebViewController(url: url, title: source.name),
+                    animated: true
+                )
+            case .listing(let listing):
+                navigationController?.pushViewController(
+                    LegacyMangaListViewController(source: source, listing: listing),
+                    animated: true
+                )
+            case .manga(let manga):
+                navigationController?.pushViewController(
+                    LegacyMangaDetailViewController(source: source, manga: manga),
+                    animated: true
+                )
+        }
+    }
+
+    private func detailText(for value: AidokuRunnerLegacyHomeLink.Value?) -> String? {
+        switch value {
+            case .url(let url):
+                return url
+            case .listing(let listing):
+                return listing.name
+            case .manga(let manga):
+                return manga.authors?.joined(separator: ", ") ?? manga.description
+            case .none:
+                return nil
+        }
+    }
+
+    private func chapterSubtitle(_ chapter: AidokuRunnerLegacyChapter) -> String? {
+        if let title = chapter.title, !title.isEmpty {
+            return title
+        }
+        if let number = chapter.chapterNumber {
+            return "Chapter \(number)"
+        }
+        return chapter.scanlators?.joined(separator: ", ")
+    }
+
+    private func loadImage(for link: AidokuRunnerLegacyHomeLink, into cell: UITableViewCell, at indexPath: IndexPath) {
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        guard let url = imageURL(for: link) else { return }
+        LegacyImageLoader.shared.load(url: url, targetHeight: 130) { image in
+            guard
+                let visibleIndexPath = self.tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+        }
+    }
+
+    private func loadCover(for manga: AidokuRunnerLegacyManga, into cell: UITableViewCell, at indexPath: IndexPath) {
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        guard let url = manga.coverURL(relativeTo: source.urls.first) else { return }
+        LegacyImageLoader.shared.load(url: url, targetHeight: 130) { image in
+            guard
+                let visibleIndexPath = self.tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+        }
+    }
+
+    private func imageURL(for link: AidokuRunnerLegacyHomeLink) -> URL? {
+        if
+            let imageUrl = link.imageUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !imageUrl.isEmpty
+        {
+            if let url = URL(string: imageUrl), url.scheme != nil {
+                return url
+            }
+            if let baseURL = source.urls.first {
+                return URL(string: imageUrl, relativeTo: baseURL)?.absoluteURL
+            }
+            return URL(string: imageUrl)
+        }
+
+        if case .some(.manga(let manga)) = link.value {
+            return manga.coverURL(relativeTo: source.urls.first)
+        }
+        return nil
+    }
+}
+
 final class LegacyMangaListViewController: UITableViewController {
     private let source: AidokuRunnerLegacySource
     private let listing: AidokuRunnerLegacyListing?
+    private let initialFilters: [AidokuRunnerLegacyFilterValue]
+    private let allowsEmptySearch: Bool
     private let searchController = UISearchController(searchResultsController: nil)
     private var searchDebounceTimer: Timer?
 
@@ -849,11 +1143,19 @@ final class LegacyMangaListViewController: UITableViewController {
     private var isLoading = false
     private var message = "Enter a search term."
 
-    init(source: AidokuRunnerLegacySource, listing: AidokuRunnerLegacyListing?) {
+    init(
+        source: AidokuRunnerLegacySource,
+        listing: AidokuRunnerLegacyListing?,
+        initialFilters: [AidokuRunnerLegacyFilterValue] = [],
+        allowsEmptySearch: Bool = false,
+        titleOverride: String? = nil
+    ) {
         self.source = source
         self.listing = listing
+        self.initialFilters = initialFilters
+        self.allowsEmptySearch = allowsEmptySearch
         super.init(style: .plain)
-        title = listing?.name ?? "Search"
+        title = titleOverride ?? listing?.name ?? "Search"
     }
 
     @available(*, unavailable)
@@ -886,10 +1188,15 @@ final class LegacyMangaListViewController: UITableViewController {
             )
             navigationItem.rightBarButtonItem?.isEnabled = false
             loadSavedFilters()
+            if !initialFilters.isEmpty {
+                enabledFilters = initialFilters
+            }
             loadFilters()
         }
 
         if listing != nil {
+            load(reset: true)
+        } else if allowsEmptySearch || !initialFilters.isEmpty {
             load(reset: true)
         }
     }
@@ -1000,15 +1307,20 @@ final class LegacyMangaListViewController: UITableViewController {
         if let listing = listing {
             source.runner.getMangaList(listing: listing, page: page, completion: completion)
         } else {
-            let query = searchController.searchBar.text ?? ""
-            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let query = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard allowsEmptySearch || !query.isEmpty || !enabledFilters.isEmpty else {
                 isLoading = false
                 message = "Enter a search term."
                 refreshControl?.endRefreshing()
                 tableView.reloadData()
                 return
             }
-            source.runner.getSearchMangaList(query: query, page: page, filters: enabledFilters, completion: completion)
+            source.runner.getSearchMangaList(
+                query: query.isEmpty ? nil : query,
+                page: page,
+                filters: enabledFilters,
+                completion: completion
+            )
         }
     }
 
@@ -1082,7 +1394,7 @@ extension LegacyMangaListViewController: UISearchResultsUpdating {
         guard listing == nil else { return }
         searchDebounceTimer?.invalidate()
         let query = searchController.searchBar.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard query.count >= 2 else {
+        guard query.count >= 2 || allowsEmptySearch || !enabledFilters.isEmpty else {
             entries = []
             hasNextPage = false
             message = query.isEmpty ? "Enter a search term." : "Keep typing..."

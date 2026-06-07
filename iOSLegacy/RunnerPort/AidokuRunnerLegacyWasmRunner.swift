@@ -112,6 +112,22 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         }
     }
 
+    func getHome(
+        completion: @escaping (Result<AidokuRunnerLegacyHome, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.providesHome else {
+                throw SourceError.unimplemented
+            }
+            let function = try self.module.findFunction(name: "get_home")
+            let result: Int32 = try function.call()
+            let data = try self.handleResult(result: result)
+            var home = try PostcardDecoder().decode(Home.self, from: data)
+            home.setSourceKey(self.sourceKey)
+            return home.legacy(sourceKey: self.sourceKey)
+        }
+    }
+
     func getFilters(
         completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
     ) {
@@ -280,6 +296,114 @@ private extension Manga {
             url: url,
             tags: tags,
             chapters: chapters?.map { $0.legacy }
+        )
+    }
+}
+
+private extension Listing {
+    var legacy: AidokuRunnerLegacyListing {
+        return AidokuRunnerLegacyListing(
+            id: id,
+            name: name,
+            kind: AidokuRunnerLegacyListingKind(rawValue: kind.rawValue) ?? .default
+        )
+    }
+}
+
+private extension Home {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyHome {
+        return AidokuRunnerLegacyHome(
+            components: components.map { $0.legacy(sourceKey: sourceKey) }
+        )
+    }
+}
+
+private extension HomeComponent {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyHomeComponent {
+        return AidokuRunnerLegacyHomeComponent(
+            title: title,
+            subtitle: subtitle,
+            value: value.legacy(sourceKey: sourceKey)
+        )
+    }
+}
+
+private extension HomeComponent.Value {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyHomeComponent.Value {
+        switch self {
+            case .imageScroller(let links, let autoScrollInterval, let width, let height):
+                return .imageScroller(
+                    links: links.map { $0.legacy(sourceKey: sourceKey) },
+                    autoScrollInterval: autoScrollInterval,
+                    width: width,
+                    height: height
+                )
+            case .bigScroller(let entries, let autoScrollInterval):
+                return .bigScroller(
+                    entries: entries.map { $0.legacy(sourceKey: sourceKey) },
+                    autoScrollInterval: autoScrollInterval
+                )
+            case .scroller(let entries, let listing):
+                return .scroller(
+                    entries: entries.map { $0.legacy(sourceKey: sourceKey) },
+                    listing: listing?.legacy
+                )
+            case .mangaList(let ranking, let pageSize, let entries, let listing):
+                return .mangaList(
+                    ranking: ranking,
+                    pageSize: pageSize,
+                    entries: entries.map { $0.legacy(sourceKey: sourceKey) },
+                    listing: listing?.legacy
+                )
+            case .mangaChapterList(let pageSize, let entries, let listing):
+                return .mangaChapterList(
+                    pageSize: pageSize,
+                    entries: entries.map { $0.legacy(sourceKey: sourceKey) },
+                    listing: listing?.legacy
+                )
+            case .filters(let items):
+                return .filters(items.map { $0.legacy })
+            case .links(let links):
+                return .links(links.map { $0.legacy(sourceKey: sourceKey) })
+        }
+    }
+}
+
+private extension HomeFilterItem {
+    var legacy: AidokuRunnerLegacyHomeFilterItem {
+        return AidokuRunnerLegacyHomeFilterItem(title: title, values: values)
+    }
+}
+
+private extension HomeLink {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyHomeLink {
+        return AidokuRunnerLegacyHomeLink(
+            title: title,
+            subtitle: subtitle,
+            imageUrl: imageUrl,
+            value: value?.legacy(sourceKey: sourceKey)
+        )
+    }
+}
+
+private extension HomeLinkValue {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyHomeLink.Value {
+        switch self {
+            case .url(let url):
+                return .url(url)
+            case .listing(let listing):
+                return .listing(listing.legacy)
+            case .manga(let manga):
+                return .manga(manga.legacy(sourceKey: sourceKey))
+        }
+    }
+}
+
+private extension MangaWithChapter {
+    func legacy(sourceKey: String) -> AidokuRunnerLegacyMangaWithChapter {
+        return AidokuRunnerLegacyMangaWithChapter(
+            manga: manga.legacy(sourceKey: sourceKey),
+            chapter: chapter.legacy
         )
     }
 }
