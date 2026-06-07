@@ -506,6 +506,7 @@ final class LegacyHistoryViewController: UITableViewController {
 
 final class LegacySettingsViewController: UITableViewController {
     private enum Row: Int, CaseIterable {
+        case readerFitMode
         case readerMemory
         case clearImageCache
         case clearHistory
@@ -537,6 +538,10 @@ final class LegacySettingsViewController: UITableViewController {
         cell.selectionStyle = row == .about ? .none : .default
 
         switch row {
+            case .readerFitMode:
+                let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.fitToScreen")
+                cell.textLabel?.text = "Reader Page Fit"
+                cell.detailTextLabel?.text = enabled ? "Fit each page within the screen" : "Use long-scroll page heights"
             case .readerMemory:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
                 cell.textLabel?.text = "Reader Memory Mode"
@@ -561,6 +566,10 @@ final class LegacySettingsViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let row = Row(rawValue: indexPath.row) else { return }
         switch row {
+            case .readerFitMode:
+                let key = "AidokuLegacy.reader.fitToScreen"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
             case .readerMemory:
                 let key = "AidokuLegacy.reader.downsampleImages"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
@@ -1095,6 +1104,15 @@ final class LegacySourceMenuViewController: UITableViewController {
 }
 
 final class LegacySourceSettingsViewController: UITableViewController {
+    private enum LoginKeys {
+        static let loggedInValue = "logged_in"
+        static let usernameSuffix = ".username"
+        static let passwordSuffix = ".password"
+        static let cookieKeysSuffix = ".keys"
+        static let cookieValuesSuffix = ".values"
+        static let localStoragePrefix = ".ls."
+    }
+
     private enum Row {
         case languages
         case baseURL
@@ -1108,9 +1126,11 @@ final class LegacySourceSettingsViewController: UITableViewController {
 
     private let source: AidokuRunnerLegacySource
     private var sections: [Section] = []
+    private var settings: [AidokuRunnerLegacySettingItem] = []
 
     init(source: AidokuRunnerLegacySource) {
         self.source = source
+        self.settings = source.staticSettings
         super.init(style: .grouped)
         title = "Source Settings"
     }
@@ -1125,6 +1145,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
         navigationItem.largeTitleDisplayMode = .never
         tableView.backgroundColor = LegacyPalette.background
         buildSections()
+        loadSettings()
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
@@ -1178,6 +1199,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
     }
 
     private func buildSections() {
+        sections.removeAll()
         var sourceRows: [Row] = []
         if source.languages.count > 1 {
             sourceRows.append(.languages)
@@ -1190,7 +1212,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
         }
 
         var looseRows: [Row] = []
-        for setting in source.staticSettings {
+        for setting in settings {
             if setting.type == "group" || setting.type == "page" {
                 let rows = settingRows(in: setting.items ?? [])
                 if !rows.isEmpty {
@@ -1202,6 +1224,21 @@ final class LegacySourceSettingsViewController: UITableViewController {
         }
         if !looseRows.isEmpty {
             sections.append(Section(title: "Settings", rows: looseRows))
+        }
+    }
+
+    private func loadSettings() {
+        guard source.runner.features.dynamicSettings else { return }
+        source.getSettings { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let settings):
+                    self.settings = settings
+                    self.buildSections()
+                    self.tableView.reloadData()
+                case .failure(let error):
+                    self.showMessage(title: "Settings Failed", message: error.localizedDescription)
+            }
         }
     }
 
@@ -1218,9 +1255,15 @@ final class LegacySourceSettingsViewController: UITableViewController {
     }
 
     private func isEditable(_ setting: AidokuRunnerLegacySettingItem) -> Bool {
+        if setting.type == "link" {
+            return resolvedURL(for: setting) != nil
+        }
+        if setting.type == "button" {
+            return setting.notification != nil || setting.action != nil
+        }
         guard setting.key != nil else { return false }
         switch setting.type {
-            case "select", "segment", "multi-select", "multi-single-select", "switch", "toggle", "text", "stepper", "editable-list":
+            case "select", "segment", "multi-select", "multi-single-select", "switch", "toggle", "text", "stepper", "editable-list", "login":
                 return true
             default:
                 return false
@@ -1243,7 +1286,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
         ) { [weak self] selected, _ in
             guard let self = self else { return }
             if allowsMultiple {
-                UserDefaults.standard.set(selected, forKey: "\(self.source.key).languages")
+                UserDefaults.standard.set(Array(selected).sorted(), forKey: "\(self.source.key).languages")
             } else if let first = selected.first {
                 UserDefaults.standard.set(first, forKey: "\(self.source.key).language")
                 UserDefaults.standard.set([first], forKey: "\(self.source.key).languages")
@@ -1270,11 +1313,16 @@ final class LegacySourceSettingsViewController: UITableViewController {
     }
 
     private func edit(_ setting: AidokuRunnerLegacySettingItem) {
-        guard let key = setting.key else { return }
         switch setting.type {
+            case "link":
+                openLink(setting)
+            case "button":
+                notifySettingChanged(setting)
             case "switch", "toggle":
+                guard let key = setting.key else { return }
                 let defaultsKey = "\(source.key).\(key)"
                 UserDefaults.standard.set(!boolValue(for: setting), forKey: defaultsKey)
+                notifySettingChanged(setting)
                 tableView.reloadData()
             case "select", "segment":
                 openSettingPicker(setting: setting, allowsMultiple: false)
@@ -1284,6 +1332,8 @@ final class LegacySourceSettingsViewController: UITableViewController {
                 editText(setting: setting)
             case "editable-list":
                 editList(setting: setting)
+            case "login":
+                editLogin(setting)
             default:
                 return
         }
@@ -1304,10 +1354,11 @@ final class LegacySourceSettingsViewController: UITableViewController {
         ) { [weak self] selected, _ in
             guard let self = self else { return }
             if allowsMultiple {
-                UserDefaults.standard.set(selected, forKey: defaultsKey)
+                UserDefaults.standard.set(Array(selected).sorted(), forKey: defaultsKey)
             } else if let value = selected.first {
                 UserDefaults.standard.set(value, forKey: defaultsKey)
             }
+            self.notifySettingChanged(setting)
             self.tableView.reloadData()
         }
         navigationController?.pushViewController(picker, animated: true)
@@ -1331,6 +1382,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
             } else {
                 UserDefaults.standard.set(text, forKey: defaultsKey)
             }
+            self.notifySettingChanged(setting)
             self.tableView.reloadData()
         })
         present(alert, animated: true)
@@ -1355,9 +1407,203 @@ final class LegacySourceSettingsViewController: UITableViewController {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             UserDefaults.standard.set(values, forKey: defaultsKey)
+            self.notifySettingChanged(setting)
             self.tableView.reloadData()
         })
         present(alert, animated: true)
+    }
+
+    private func editLogin(_ setting: AidokuRunnerLegacySettingItem) {
+        guard setting.key != nil else { return }
+        if isLoggedIn(setting) {
+            confirmLogout(setting)
+            return
+        }
+
+        switch setting.method?.lowercased() {
+            case "web", "oauth":
+                openWebLogin(setting)
+            default:
+                openBasicLogin(setting)
+        }
+    }
+
+    private func openBasicLogin(_ setting: AidokuRunnerLegacySettingItem) {
+        guard let key = setting.key else { return }
+        let defaultsKey = "\(source.key).\(key)"
+        let alert = UIAlertController(
+            title: settingTitle(setting),
+            message: setting.subtitle ?? "Enter your source account credentials.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.text = UserDefaults.standard.string(forKey: defaultsKey + LoginKeys.usernameSuffix)
+            textField.placeholder = (setting.useEmail ?? false) ? "Email" : "Username"
+            textField.keyboardType = (setting.useEmail ?? false) ? .emailAddress : .default
+            textField.textContentType = (setting.useEmail ?? false) ? .emailAddress : .username
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addTextField { textField in
+            textField.text = UserDefaults.standard.string(forKey: defaultsKey + LoginKeys.passwordSuffix)
+            textField.placeholder = "Password"
+            textField.textContentType = .password
+            textField.isSecureTextEntry = true
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Log In", style: .default) { [weak self, weak alert] _ in
+            guard
+                let self = self,
+                let textFields = alert?.textFields,
+                textFields.count >= 2,
+                let username = textFields[0].text,
+                let password = textFields[1].text,
+                !username.isEmpty,
+                !password.isEmpty
+            else { return }
+            self.finishBasicLogin(setting: setting, username: username, password: password)
+        })
+        present(alert, animated: true)
+    }
+
+    private func finishBasicLogin(setting: AidokuRunnerLegacySettingItem, username: String, password: String) {
+        guard let key = setting.key else { return }
+        source.runner.handleBasicLogin(key: key, username: username, password: password) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(true):
+                    let defaultsKey = "\(self.source.key).\(key)"
+                    UserDefaults.standard.set(username, forKey: defaultsKey + LoginKeys.usernameSuffix)
+                    UserDefaults.standard.set(password, forKey: defaultsKey + LoginKeys.passwordSuffix)
+                    UserDefaults.standard.set(LoginKeys.loggedInValue, forKey: defaultsKey)
+                    self.notifySettingChanged(setting)
+                    self.tableView.reloadData()
+                case .success(false):
+                    self.showMessage(title: "Login Failed", message: "The source rejected the credentials.")
+                case .failure(let error):
+                    self.showMessage(title: "Login Failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func openWebLogin(_ setting: AidokuRunnerLegacySettingItem) {
+        guard let url = resolvedURL(for: setting) else {
+            showMessage(title: "Login Failed", message: "This source did not provide a login URL.")
+            return
+        }
+        let controller = LegacySourceWebViewController(
+            url: url,
+            title: settingTitle(setting),
+            localStorageKeys: setting.localStorageKeys ?? []
+        ) { [weak self] result in
+            self?.finishWebLogin(setting: setting, result: result)
+        }
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    private func finishWebLogin(setting: AidokuRunnerLegacySettingItem, result: LegacyWebLoginResult) {
+        guard let key = setting.key else { return }
+        guard !result.cookies.isEmpty || !result.localStorage.isEmpty else {
+            showMessage(title: "Login Failed", message: "No login cookies or local storage values were found.")
+            return
+        }
+        source.runner.handleWebLogin(key: key, cookies: result.cookies) { [weak self] loginResult in
+            guard let self = self else { return }
+            switch loginResult {
+                case .success(true):
+                    let defaultsKey = "\(self.source.key).\(key)"
+                    let cookieKeys = result.cookies.keys.sorted()
+                    let cookieValues = cookieKeys.map { result.cookies[$0] ?? "" }
+                    UserDefaults.standard.set(cookieKeys, forKey: defaultsKey + LoginKeys.cookieKeysSuffix)
+                    UserDefaults.standard.set(cookieValues, forKey: defaultsKey + LoginKeys.cookieValuesSuffix)
+                    for (storageKey, storageValue) in result.localStorage {
+                        UserDefaults.standard.set(storageValue, forKey: defaultsKey + LoginKeys.localStoragePrefix + storageKey)
+                    }
+                    UserDefaults.standard.set(LoginKeys.loggedInValue, forKey: defaultsKey)
+                    self.notifySettingChanged(setting)
+                    self.tableView.reloadData()
+                    self.navigationController?.popViewController(animated: true)
+                case .success(false):
+                    self.showMessage(title: "Login Failed", message: "The source did not accept the web login.")
+                case .failure(let error):
+                    self.showMessage(title: "Login Failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func confirmLogout(_ setting: AidokuRunnerLegacySettingItem) {
+        let alert = UIAlertController(
+            title: setting.logoutTitle ?? "Log Out",
+            message: "Remove saved login data for this source?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Log Out", style: .destructive) { [weak self] _ in
+            self?.logout(setting)
+        })
+        present(alert, animated: true)
+    }
+
+    private func logout(_ setting: AidokuRunnerLegacySettingItem) {
+        guard let key = setting.key else { return }
+        let defaultsKey = "\(source.key).\(key)"
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        UserDefaults.standard.removeObject(forKey: defaultsKey + LoginKeys.usernameSuffix)
+        UserDefaults.standard.removeObject(forKey: defaultsKey + LoginKeys.passwordSuffix)
+        UserDefaults.standard.removeObject(forKey: defaultsKey + LoginKeys.cookieKeysSuffix)
+        UserDefaults.standard.removeObject(forKey: defaultsKey + LoginKeys.cookieValuesSuffix)
+        for localStorageKey in setting.localStorageKeys ?? [] {
+            UserDefaults.standard.removeObject(forKey: defaultsKey + LoginKeys.localStoragePrefix + localStorageKey)
+        }
+        notifySettingChanged(setting)
+        tableView.reloadData()
+    }
+
+    private func openLink(_ setting: AidokuRunnerLegacySettingItem) {
+        guard let url = resolvedURL(for: setting) else { return }
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    private func notifySettingChanged(_ setting: AidokuRunnerLegacySettingItem) {
+        if let action = setting.action {
+            NotificationCenter.default.post(name: Notification.Name(action), object: nil)
+        }
+        if let notification = setting.notification {
+            source.runner.handleNotification(notification: notification) { result in
+                if case .failure(let error) = result {
+                    print("[AidokuLegacy] setting notification failed: \(error)")
+                }
+            }
+            NotificationCenter.default.post(name: Notification.Name(notification), object: nil)
+        }
+        for refresh in setting.refreshes ?? [] {
+            NotificationCenter.default.post(name: Notification.Name("refresh-\(refresh)"), object: nil)
+        }
+    }
+
+    private func isLoggedIn(_ setting: AidokuRunnerLegacySettingItem) -> Bool {
+        guard let key = setting.key else { return false }
+        return !(UserDefaults.standard.string(forKey: "\(source.key).\(key)") ?? "").isEmpty
+    }
+
+    private func resolvedURL(for setting: AidokuRunnerLegacySettingItem) -> URL? {
+        if let urlString = setting.url, let url = URL(string: urlString) {
+            return url
+        }
+        if
+            let urlKey = setting.urlKey,
+            let urlString = UserDefaults.standard.string(forKey: "\(source.key).\(urlKey)") ?? (urlKey == "url" ? currentBaseURL() : nil),
+            let url = URL(string: urlString)
+        {
+            return url
+        }
+        return source.urls.first
+    }
+
+    private func showMessage(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        (navigationController?.topViewController ?? self).present(alert, animated: true)
     }
 
     private func selectedLanguages() -> [String] {
@@ -1379,11 +1625,19 @@ final class LegacySourceSettingsViewController: UITableViewController {
     }
 
     private func detailText(for setting: AidokuRunnerLegacySettingItem) -> String? {
+        if setting.type == "link" {
+            return setting.subtitle ?? resolvedURL(for: setting)?.host
+        }
+        if setting.type == "button" {
+            return setting.subtitle
+        }
         guard let key = setting.key else { return nil }
         let defaultsKey = "\(source.key).\(key)"
         switch setting.type {
             case "switch", "toggle":
                 return boolValue(for: setting) ? "On" : "Off"
+            case "login":
+                return isLoggedIn(setting) ? "Logged in" : setting.subtitle ?? "Not logged in"
             case "multi-select", "multi-single-select", "editable-list":
                 let values = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
                 return values.isEmpty ? "None" : values.joined(separator: ", ")
@@ -2611,6 +2865,15 @@ final class LegacyReaderViewController: UITableViewController {
     private var lastSavedHistoryPageIndex: Int?
     private var lastHistorySaveDate = Date.distantPast
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
+    private var fitToScreen: Bool {
+        return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.fitToScreen")
+    }
+    private var readerPageSize: CGSize {
+        let insets = tableView.adjustedContentInset
+        let height = max(320, tableView.bounds.height - insets.top - insets.bottom)
+        let width = max(1, tableView.bounds.width)
+        return CGSize(width: width, height: height)
+    }
 
     init(
         source: AidokuRunnerLegacySource,
@@ -2637,7 +2900,13 @@ final class LegacyReaderViewController: UITableViewController {
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
+        updateReaderMode()
         loadPages()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        updateReaderMode()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -2649,15 +2918,29 @@ final class LegacyReaderViewController: UITableViewController {
         }
     }
 
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { _ in
+            self.updateReaderMode()
+            self.tableView.reloadData()
+        }
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return pages.isEmpty ? 1 : pages.count
     }
 
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        if fitToScreen, isImagePage(at: indexPath) {
+            return readerPageSize.height
+        }
         return pages.isEmpty ? 80 : UITableView.automaticDimension
     }
 
     override func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        if fitToScreen, isImagePage(at: indexPath) {
+            return readerPageSize.height
+        }
         return pages.isEmpty ? 80 : 900
     }
 
@@ -2678,7 +2961,12 @@ final class LegacyReaderViewController: UITableViewController {
             tableView?.beginUpdates()
             tableView?.endUpdates()
         }
-        cell.configure(page: pages[indexPath.row], source: source)
+        cell.configure(
+            page: pages[indexPath.row],
+            source: source,
+            availableSize: readerPageSize,
+            fitsViewport: fitToScreen
+        )
         return cell
     }
 
@@ -2719,6 +3007,21 @@ final class LegacyReaderViewController: UITableViewController {
             }
             self.tableView.reloadData()
             self.scrollToInitialPageIfNeeded()
+        }
+    }
+
+    private func updateReaderMode() {
+        tableView.isPagingEnabled = fitToScreen
+        tableView.decelerationRate = fitToScreen ? .fast : .normal
+    }
+
+    private func isImagePage(at indexPath: IndexPath) -> Bool {
+        guard !pages.isEmpty, pages.indices.contains(indexPath.row) else { return false }
+        switch pages[indexPath.row].content {
+            case .url(_, _), .image(_):
+                return true
+            case .text(_), .zipFile(_, _):
+                return false
         }
     }
 
@@ -2784,6 +3087,8 @@ final class LegacyPageImageCell: UITableViewCell {
     private var heightConstraint: NSLayoutConstraint!
     private var task: URLSessionDataTask?
     private var representedLoadID = UUID()
+    private var availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
+    private var fitsViewport = false
     var onHeightChange: (() -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -2826,13 +3131,23 @@ final class LegacyPageImageCell: UITableViewCell {
         pageImageView.image = nil
         pageLabel.text = nil
         pageImageView.isHidden = false
+        availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
+        fitsViewport = false
         heightConstraint.constant = 420
         onHeightChange = nil
     }
 
-    func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
+    func configure(
+        page: AidokuRunnerLegacyPage,
+        source: AidokuRunnerLegacySource,
+        availableSize: CGSize,
+        fitsViewport: Bool
+    ) {
         let loadID = UUID()
         representedLoadID = loadID
+        self.availableSize = availableSize
+        self.fitsViewport = fitsViewport
+        heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         switch page.content {
             case .url(let url, let context):
                 pageLabel.text = "Loading..."
@@ -2853,7 +3168,7 @@ final class LegacyPageImageCell: UITableViewCell {
                 pageImageView.isHidden = true
                 heightConstraint.constant = 180
                 pageLabel.text = text
-            case .zipFile:
+            case .zipFile(_, _):
                 pageImageView.isHidden = true
                 heightConstraint.constant = 180
                 pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
@@ -2979,9 +3294,14 @@ final class LegacyPageImageCell: UITableViewCell {
         pageLabel.text = nil
         pageImageView.isHidden = false
         pageImageView.image = image
-        let ratio = image.size.height / max(image.size.width, 1)
-        let targetHeight = min(max(UIScreen.main.bounds.width * ratio, 320), 2600)
-        heightConstraint.constant = targetHeight
+        if fitsViewport {
+            heightConstraint.constant = max(320, availableSize.height)
+        } else {
+            let width = max(availableSize.width, 1)
+            let ratio = image.size.height / max(image.size.width, 1)
+            let targetHeight = min(max(width * ratio, 320), 2600)
+            heightConstraint.constant = targetHeight
+        }
         onHeightChange?()
     }
 
@@ -3119,15 +3439,29 @@ private extension AidokuRunnerLegacyManga {
     }
 }
 
-final class LegacySourceWebViewController: UIViewController, WKNavigationDelegate {
+private struct LegacyWebLoginResult {
+    let cookies: [String: String]
+    let localStorage: [String: String]
+}
+
+private final class LegacySourceWebViewController: UIViewController, WKNavigationDelegate {
     private let initialURL: URL
     private let sourceTitle: String
+    private let localStorageKeys: [String]
+    private let loginCompletion: ((LegacyWebLoginResult) -> Void)?
     private var webView: WKWebView!
     private let progressView = UIProgressView(progressViewStyle: .bar)
 
-    init(url: URL, title: String) {
+    init(
+        url: URL,
+        title: String,
+        localStorageKeys: [String] = [],
+        loginCompletion: ((LegacyWebLoginResult) -> Void)? = nil
+    ) {
         self.initialURL = url
         self.sourceTitle = title
+        self.localStorageKeys = localStorageKeys
+        self.loginCompletion = loginCompletion
         super.init(nibName: nil, bundle: nil)
         self.title = title
     }
@@ -3139,6 +3473,7 @@ final class LegacySourceWebViewController: UIViewController, WKNavigationDelegat
 
     override func loadView() {
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -3148,10 +3483,14 @@ final class LegacySourceWebViewController: UIViewController, WKNavigationDelegat
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItems = [
+        var rightItems = [
             UIBarButtonItem(barButtonSystemItem: .action, target: self, action: #selector(openInSafari)),
             UIBarButtonItem(barButtonSystemItem: .refresh, target: self, action: #selector(reloadPage))
         ]
+        if loginCompletion != nil {
+            rightItems.insert(UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(finishLogin)), at: 0)
+        }
+        navigationItem.rightBarButtonItems = rightItems
         progressView.frame = CGRect(x: 0, y: 0, width: 120, height: 2)
         updateToolbar(animated: false)
         webView.addObserver(self, forKeyPath: #keyPath(WKWebView.estimatedProgress), options: [.new], context: nil)
@@ -3233,5 +3572,76 @@ final class LegacySourceWebViewController: UIViewController, WKNavigationDelegat
     @objc private func openInSafari() {
         guard let url = webView.url ?? URL(string: initialURL.absoluteString) else { return }
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    @objc private func finishLogin() {
+        collectLocalStorage { [weak self] localStorage in
+            guard let self = self else { return }
+            self.collectCookies { cookies in
+                self.loginCompletion?(LegacyWebLoginResult(cookies: cookies, localStorage: localStorage))
+            }
+        }
+    }
+
+    private func collectLocalStorage(completion: @escaping ([String: String]) -> Void) {
+        guard !localStorageKeys.isEmpty else {
+            completion([:])
+            return
+        }
+        guard
+            let keysData = try? JSONSerialization.data(withJSONObject: localStorageKeys, options: []),
+            let keysJSON = String(data: keysData, encoding: .utf8)
+        else {
+            completion([:])
+            return
+        }
+        let script = """
+        (function() {
+          var result = {};
+          \(keysJSON).forEach(function(key) {
+            var value = window.localStorage.getItem(key);
+            if (value !== null) { result[key] = value; }
+          });
+          return result;
+        })();
+        """
+        webView.evaluateJavaScript(script) { value, _ in
+            let dictionary = value as? [String: Any] ?? [:]
+            let strings = dictionary.reduce(into: [String: String]()) { result, item in
+                if let value = item.value as? String {
+                    result[item.key] = value
+                }
+            }
+            completion(strings)
+        }
+    }
+
+    private func collectCookies(completion: @escaping ([String: String]) -> Void) {
+        var cookies = cookieValues(from: HTTPCookieStorage.shared.cookies ?? [])
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] webCookies in
+            guard let self = self else { return }
+            for cookie in webCookies where self.isRelevant(cookie: cookie) {
+                HTTPCookieStorage.shared.setCookie(cookie)
+                cookies[cookie.name] = cookie.value
+            }
+            DispatchQueue.main.async {
+                completion(cookies)
+            }
+        }
+    }
+
+    private func cookieValues(from cookies: [HTTPCookie]) -> [String: String] {
+        return cookies.reduce(into: [String: String]()) { result, cookie in
+            guard isRelevant(cookie: cookie) else { return }
+            result[cookie.name] = cookie.value
+        }
+    }
+
+    private func isRelevant(cookie: HTTPCookie) -> Bool {
+        guard let host = initialURL.host?.lowercased(), !host.isEmpty else { return true }
+        let domain = cookie.domain
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        return domain == host || domain.hasSuffix(".\(host)") || host.hasSuffix(".\(domain)")
     }
 }

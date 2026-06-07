@@ -86,7 +86,34 @@ final class AidokuRunnerLegacySource {
     }
 
     var hasConfigurableSettings: Bool {
-        return !staticSettings.isEmpty || languages.count > 1 || ((config?.allowsBaseUrlSelect ?? false) && urls.count > 1)
+        return !staticSettings.isEmpty
+            || runner.features.dynamicSettings
+            || languages.count > 1
+            || ((config?.allowsBaseUrlSelect ?? false) && urls.count > 1)
+    }
+
+    func getSettings(completion: @escaping (Result<[AidokuRunnerLegacySettingItem], Error>) -> Void) {
+        guard runner.features.dynamicSettings else {
+            completion(.success(staticSettings))
+            return
+        }
+        runner.getSettings { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let dynamicSettings):
+                    let allSettings = self.staticSettings + dynamicSettings
+                    Self.registerDefaults(
+                        sourceKey: self.key,
+                        languages: self.languages,
+                        urls: self.urls,
+                        config: self.config,
+                        settings: allSettings
+                    )
+                    completion(.success(allSettings))
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
     }
 
     private static func iconURL(in sourceURL: URL) -> URL? {

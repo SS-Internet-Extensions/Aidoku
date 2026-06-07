@@ -212,26 +212,78 @@ struct AidokuRunnerLegacyJSONValue: Codable {
 struct AidokuRunnerLegacySettingItem: Codable {
     var type: String
     var key: String?
+    var action: String?
     var urlKey: String?
     var title: String?
     var subtitle: String?
     var footer: String?
+    var placeholder: String?
     var defaultValue: AidokuRunnerLegacyJSONValue?
     var values: [String]?
     var titles: [String]?
     var items: [AidokuRunnerLegacySettingItem]?
+    var notification: String?
+    var refreshes: [String]?
+    var requires: String?
+    var requiresFalse: String?
+    var authToOpen: Bool?
+    var authToDisable: Bool?
+    var url: String?
+    var destructive: Bool?
+    var external: Bool?
+    var logoutTitle: String?
+    var method: String?
+    var tokenUrl: String?
+    var pkce: Bool?
+    var callbackScheme: String?
+    var useEmail: Bool?
+    var localStorageKeys: [String]?
+    var minimumValue: Double?
+    var maximumValue: Double?
+    var stepValue: Double?
+    var autocapitalizationType: Int?
+    var autocorrectionType: Int?
+    var spellCheckingType: Int?
+    var keyboardType: Int?
+    var returnKeyType: Int?
 
     enum CodingKeys: String, CodingKey {
         case type
         case key
+        case action
         case urlKey
         case title
         case subtitle
         case footer
+        case placeholder
         case defaultValue = "default"
         case values
         case titles
         case items
+        case notification
+        case refreshes
+        case requires
+        case requiresFalse
+        case authToOpen
+        case authToDisable
+        case url
+        case destructive
+        case external
+        case logoutTitle
+        case method
+        case tokenUrl
+        case pkce
+        case callbackScheme
+        case useEmail
+        case localStorageKeys
+        case minimumValue
+        case maximumValue
+        case stepValue
+        case autocapitalizationType
+        case autocorrectionType
+        case spellCheckingType
+        case keyboardType
+        case returnKeyType
     }
 }
 
@@ -670,6 +722,14 @@ struct AidokuRunnerLegacySourceFeatures {
     var dynamicListings: Bool
     var processesPages: Bool
     var providesImageRequests: Bool
+    var providesPageDescriptions: Bool
+    var providesAlternateCovers: Bool
+    var providesBaseUrl: Bool
+    var handlesNotifications: Bool
+    var handlesDeepLinks: Bool
+    var handlesBasicLogin: Bool
+    var handlesWebLogin: Bool
+    var handlesMigration: Bool
 }
 
 struct AidokuRunnerLegacyImageRequest {
@@ -726,6 +786,10 @@ protocol AidokuRunnerLegacyRunner {
         completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
     )
 
+    func getSettings(
+        completion: @escaping (Result<[AidokuRunnerLegacySettingItem], Error>) -> Void
+    )
+
     func getMangaUpdate(
         manga: AidokuRunnerLegacyManga,
         needsDetails: Bool,
@@ -752,6 +816,24 @@ protocol AidokuRunnerLegacyRunner {
         context: [String: String]?,
         completion: @escaping (Result<UIImage?, Error>) -> Void
     )
+
+    func handleNotification(
+        notification: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+
+    func handleBasicLogin(
+        key: String,
+        username: String,
+        password: String,
+        completion: @escaping (Result<Bool, Error>) -> Void
+    )
+
+    func handleWebLogin(
+        key: String,
+        cookies: [String: String],
+        completion: @escaping (Result<Bool, Error>) -> Void
+    )
 }
 
 final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
@@ -762,7 +844,15 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         dynamicSettings: false,
         dynamicListings: false,
         processesPages: false,
-        providesImageRequests: false
+        providesImageRequests: false,
+        providesPageDescriptions: false,
+        providesAlternateCovers: false,
+        providesBaseUrl: false,
+        handlesNotifications: false,
+        handlesDeepLinks: false,
+        handlesBasicLogin: false,
+        handlesWebLogin: false,
+        handlesMigration: false
     )
 
     func getSearchMangaList(
@@ -800,6 +890,12 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
     }
 
+    func getSettings(
+        completion: @escaping (Result<[AidokuRunnerLegacySettingItem], Error>) -> Void
+    ) {
+        completion(.success([]))
+    }
+
     func getMangaUpdate(
         manga: AidokuRunnerLegacyManga,
         needsDetails: Bool,
@@ -833,5 +929,29 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         completion: @escaping (Result<UIImage?, Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func handleNotification(
+        notification: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        completion(.success(()))
+    }
+
+    func handleBasicLogin(
+        key: String,
+        username: String,
+        password: String,
+        completion: @escaping (Result<Bool, Error>) -> Void
+    ) {
+        completion(.success(true))
+    }
+
+    func handleWebLogin(
+        key: String,
+        cookies: [String: String],
+        completion: @escaping (Result<Bool, Error>) -> Void
+    ) {
+        completion(.success(true))
     }
 }

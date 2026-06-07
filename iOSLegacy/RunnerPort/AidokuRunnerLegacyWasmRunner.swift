@@ -53,7 +53,15 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             dynamicSettings: (try? module.findFunction(name: "get_settings")) != nil,
             dynamicListings: (try? module.findFunction(name: "get_listings")) != nil,
             processesPages: (try? module.findFunction(name: "process_page_image")) != nil,
-            providesImageRequests: (try? module.findFunction(name: "get_image_request")) != nil
+            providesImageRequests: (try? module.findFunction(name: "get_image_request")) != nil,
+            providesPageDescriptions: (try? module.findFunction(name: "get_page_description")) != nil,
+            providesAlternateCovers: (try? module.findFunction(name: "get_alternate_covers")) != nil,
+            providesBaseUrl: (try? module.findFunction(name: "get_base_url")) != nil,
+            handlesNotifications: (try? module.findFunction(name: "handle_notification")) != nil,
+            handlesDeepLinks: (try? module.findFunction(name: "handle_deep_link")) != nil,
+            handlesBasicLogin: (try? module.findFunction(name: "handle_basic_login")) != nil,
+            handlesWebLogin: (try? module.findFunction(name: "handle_web_login")) != nil,
+            handlesMigration: (try? module.findFunction(name: "handle_key_migration")) != nil
         )
 
         if let start = try? module.findFunction(name: "start") {
@@ -187,6 +195,20 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             let result: Int32 = try function.call()
             let data = try self.handleResult(result: result)
             return try PostcardDecoder().decode([AidokuRunnerLegacyFilter].self, from: data)
+        }
+    }
+
+    func getSettings(
+        completion: @escaping (Result<[AidokuRunnerLegacySettingItem], Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.dynamicSettings else {
+                return []
+            }
+            let function = try self.module.findFunction(name: "get_settings")
+            let result: Int32 = try function.call()
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode([AidokuRunnerLegacySettingItem].self, from: data)
         }
     }
 
@@ -330,6 +352,70 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
                 return UIImage(data: data)
             }
             return nil
+        }
+    }
+
+    func handleNotification(
+        notification: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.handlesNotifications else {
+                return
+            }
+            let function = try self.module.findFunction(name: "handle_notification")
+            let notificationPointer = try self.store.storeEncoded(notification)
+            defer { self.store.remove(at: notificationPointer) }
+            let _: Int32 = try function.call(notificationPointer)
+        }
+    }
+
+    func handleBasicLogin(
+        key: String,
+        username: String,
+        password: String,
+        completion: @escaping (Result<Bool, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.handlesBasicLogin else {
+                return true
+            }
+            let function = try self.module.findFunction(name: "handle_basic_login")
+            let keyPointer = try self.store.storeEncoded(key)
+            defer { self.store.remove(at: keyPointer) }
+            let usernamePointer = try self.store.storeEncoded(username)
+            defer { self.store.remove(at: usernamePointer) }
+            let passwordPointer = try self.store.storeEncoded(password)
+            defer { self.store.remove(at: passwordPointer) }
+
+            let result: Int32 = try function.call(keyPointer, usernamePointer, passwordPointer)
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode(Bool.self, from: data)
+        }
+    }
+
+    func handleWebLogin(
+        key: String,
+        cookies: [String: String],
+        completion: @escaping (Result<Bool, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.handlesWebLogin else {
+                return true
+            }
+            let function = try self.module.findFunction(name: "handle_web_login")
+            let cookieKeys = Array(cookies.keys)
+            let cookieValues = cookieKeys.map { cookies[$0] ?? "" }
+            let keyPointer = try self.store.storeEncoded(key)
+            defer { self.store.remove(at: keyPointer) }
+            let cookieKeysPointer = try self.store.storeEncoded(cookieKeys)
+            defer { self.store.remove(at: cookieKeysPointer) }
+            let cookieValuesPointer = try self.store.storeEncoded(cookieValues)
+            defer { self.store.remove(at: cookieValuesPointer) }
+
+            let result: Int32 = try function.call(keyPointer, cookieKeysPointer, cookieValuesPointer)
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode(Bool.self, from: data)
         }
     }
 
