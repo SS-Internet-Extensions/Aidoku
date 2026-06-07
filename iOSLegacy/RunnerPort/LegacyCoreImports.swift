@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftSoup
-import UIKit
 import Wasm3Legacy
 
 struct Env: SourceLibrary {
@@ -442,9 +441,6 @@ struct Net: SourceLibrary {
         }
         guard let data = request.responseData else {
             return Result.missingData.rawValue
-        }
-        guard UIImage(data: data) != nil else {
-            return Result.notAnImage.rawValue
         }
         return store.store(data)
     }

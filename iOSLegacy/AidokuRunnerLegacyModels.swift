@@ -258,6 +258,72 @@ struct AidokuRunnerLegacyChapter: Hashable, Codable {
     var url: URL?
     var language: String?
     var thumbnail: String?
+    var locked: Bool
+
+    init(
+        key: String,
+        title: String? = nil,
+        chapterNumber: Float? = nil,
+        volumeNumber: Float? = nil,
+        dateUploaded: Date? = nil,
+        scanlators: [String]? = nil,
+        url: URL? = nil,
+        language: String? = nil,
+        thumbnail: String? = nil,
+        locked: Bool = false
+    ) {
+        self.key = key
+        self.title = title
+        self.chapterNumber = chapterNumber
+        self.volumeNumber = volumeNumber
+        self.dateUploaded = dateUploaded
+        self.scanlators = scanlators
+        self.url = url
+        self.language = language
+        self.thumbnail = thumbnail
+        self.locked = locked
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        chapterNumber = try container.decodeIfPresent(Float.self, forKey: .chapterNumber)
+        volumeNumber = try container.decodeIfPresent(Float.self, forKey: .volumeNumber)
+        dateUploaded = try container.decodeIfPresent(Date.self, forKey: .dateUploaded)
+        scanlators = try container.decodeIfPresent([String].self, forKey: .scanlators)
+        url = try container.decodeIfPresent(URL.self, forKey: .url)
+        language = try container.decodeIfPresent(String.self, forKey: .language)
+        thumbnail = try container.decodeIfPresent(String.self, forKey: .thumbnail)
+        locked = try container.decodeIfPresent(Bool.self, forKey: .locked) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key, forKey: .key)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(chapterNumber, forKey: .chapterNumber)
+        try container.encodeIfPresent(volumeNumber, forKey: .volumeNumber)
+        try container.encodeIfPresent(dateUploaded, forKey: .dateUploaded)
+        try container.encodeIfPresent(scanlators, forKey: .scanlators)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(thumbnail, forKey: .thumbnail)
+        try container.encode(locked, forKey: .locked)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case title
+        case chapterNumber
+        case volumeNumber
+        case dateUploaded
+        case scanlators
+        case url
+        case language
+        case thumbnail
+        case locked
+    }
 }
 
 struct AidokuRunnerLegacyPage: Hashable {

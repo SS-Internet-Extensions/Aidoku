@@ -533,7 +533,7 @@ private extension Chapter {
             url: legacy.url,
             language: legacy.language,
             thumbnail: legacy.thumbnail,
-            locked: false
+            locked: legacy.locked
         )
     }
 
@@ -547,7 +547,8 @@ private extension Chapter {
             scanlators: scanlators,
             url: url,
             language: language,
-            thumbnail: thumbnail
+            thumbnail: thumbnail,
+            locked: locked
         )
     }
 }

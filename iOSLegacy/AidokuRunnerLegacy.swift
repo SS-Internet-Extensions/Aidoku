@@ -196,19 +196,26 @@ final class AidokuRunnerLegacySource {
                 case "select", "segment":
                     if let key = setting.key {
                         if let value = setting.defaultValue?.userDefaultsValue {
-                            defaults["\(sourceKey).\(key)"] = value
+                            defaults["\(sourceKey).\(key)"] = defaultValue(value, sourceKey: sourceKey, settingKey: key)
                         } else if let value = setting.values?.first {
                             defaults["\(sourceKey).\(key)"] = value
                         }
                     }
                 case "switch", "toggle", "text", "multi-select", "multi-single-select", "stepper", "editable-list":
                     if let key = setting.key, let value = setting.defaultValue?.userDefaultsValue {
-                        defaults["\(sourceKey).\(key)"] = value
+                        defaults["\(sourceKey).\(key)"] = defaultValue(value, sourceKey: sourceKey, settingKey: key)
                     }
                 default:
                     continue
             }
         }
+    }
+
+    private static func defaultValue(_ value: Any, sourceKey: String, settingKey: String) -> Any {
+        if sourceKey.lowercased().contains("mangadex"), settingKey == "lockedChapters" {
+            return false
+        }
+        return value
     }
 
     private static func appendUnique(_ value: String, to values: inout [String]) {

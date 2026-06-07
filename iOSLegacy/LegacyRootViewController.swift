@@ -16,6 +16,7 @@ enum LegacyPalette {
     static let panel = UIColor.white
     static let primaryText = UIColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1)
     static let secondaryText = UIColor(red: 0.34, green: 0.35, blue: 0.38, alpha: 1)
+    static let disabledText = UIColor(red: 0.55, green: 0.56, blue: 0.58, alpha: 1)
     static let accent = UIColor(red: 0.83, green: 0.12, blue: 0.36, alpha: 1)
 }
 
@@ -489,9 +490,7 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 
     private func historySubtitle(for entry: LegacyHistoryEntry) -> String {
-        let chapterTitle = entry.chapter.title
-            ?? entry.chapter.chapterNumber.map { "Chapter \($0)" }
-            ?? entry.chapter.key
+        let chapterTitle = entry.chapter.legacyFormattedTitle
         if entry.pageCount > 0 {
             return "\(chapterTitle) - Page \(entry.pageIndex + 1) of \(entry.pageCount)\n\(entry.sourceName)"
         }
@@ -1508,6 +1507,12 @@ final class LegacySourceHomeViewController: UITableViewController {
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
                 cell.textLabel?.text = entry.manga.title
                 cell.detailTextLabel?.text = chapterSubtitle(entry.chapter)
+                if entry.chapter.locked {
+                    cell.textLabel?.textColor = LegacyPalette.disabledText
+                    cell.detailTextLabel?.textColor = LegacyPalette.disabledText
+                    cell.accessoryType = .none
+                    cell.selectionStyle = .none
+                }
                 loadCover(for: entry.manga, into: cell, at: indexPath)
             case .filter(let item):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
@@ -1535,6 +1540,10 @@ final class LegacySourceHomeViewController: UITableViewController {
                     animated: true
                 )
             case .chapter(let entry):
+                guard !entry.chapter.locked else {
+                    showUnavailableChapterAlert(for: entry.chapter)
+                    return
+                }
                 navigationController?.pushViewController(
                     LegacyReaderViewController(source: source, manga: entry.manga, chapter: entry.chapter),
                     animated: true
@@ -1650,13 +1659,23 @@ final class LegacySourceHomeViewController: UITableViewController {
     }
 
     private func chapterSubtitle(_ chapter: AidokuRunnerLegacyChapter) -> String? {
-        if let title = chapter.title, !title.isEmpty {
-            return title
-        }
-        if let number = chapter.chapterNumber {
-            return "Chapter \(number)"
-        }
-        return chapter.scanlators?.joined(separator: ", ")
+        let subtitle = chapter.legacyFormattedSubtitle(sourceKey: source.key)
+        return [chapter.legacyFormattedTitle, subtitle]
+            .compactMap { value in
+                guard let value = value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: "\n")
+    }
+
+    private func showUnavailableChapterAlert(for chapter: AidokuRunnerLegacyChapter) {
+        let alert = UIAlertController(
+            title: "Chapter Unavailable",
+            message: "\(chapter.legacyFormattedTitle) is marked unavailable by this source.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func loadImage(for link: AidokuRunnerLegacyHomeLink, into cell: UITableViewCell, at indexPath: IndexPath) {
@@ -2467,9 +2486,17 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
         let chapter = chapters[indexPath.row]
         cell.imageView?.image = nil
-        cell.textLabel?.text = chapter.title ?? "Chapter \(chapter.chapterNumber.map { String($0) } ?? chapter.key)"
-        cell.detailTextLabel?.text = chapter.scanlators?.joined(separator: ", ")
-        cell.accessoryType = .disclosureIndicator
+        cell.textLabel?.text = chapter.legacyFormattedTitle
+        cell.detailTextLabel?.text = chapter.legacyFormattedSubtitle(sourceKey: source.key)
+        if chapter.locked {
+            cell.textLabel?.textColor = LegacyPalette.disabledText
+            cell.detailTextLabel?.textColor = LegacyPalette.disabledText
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+        } else {
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
+        }
         return cell
     }
 
@@ -2483,6 +2510,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return
         }
         let chapter = chapters[indexPath.row]
+        guard !chapter.locked else {
+            showUnavailableChapterAlert(for: chapter)
+            return
+        }
         navigationController?.pushViewController(
             LegacyReaderViewController(source: source, manga: manga, chapter: chapter),
             animated: true
@@ -2519,6 +2550,16 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private func updateBookmarkButton() {
         let inLibrary = LegacyLibraryStore.shared.contains(sourceKey: source.key, mangaKey: manga.key)
         navigationItem.rightBarButtonItems?.first?.title = inLibrary ? "Remove" : "Add"
+    }
+
+    private func showUnavailableChapterAlert(for chapter: AidokuRunnerLegacyChapter) {
+        let alert = UIAlertController(
+            title: "Chapter Unavailable",
+            message: "\(chapter.legacyFormattedTitle) is marked unavailable by this source.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 
@@ -2582,7 +2623,7 @@ final class LegacyReaderViewController: UITableViewController {
         self.chapter = chapter
         self.initialPageIndex = initialPageIndex
         super.init(style: .plain)
-        title = chapter.title ?? manga.title
+        title = chapter.legacyFormattedTitle
     }
 
     @available(*, unavailable)
@@ -2661,6 +2702,12 @@ final class LegacyReaderViewController: UITableViewController {
     }
 
     private func loadPages() {
+        guard !chapter.locked else {
+            pages = []
+            message = "\(chapter.legacyFormattedTitle) is unavailable from this source."
+            tableView.reloadData()
+            return
+        }
         source.runner.getPageList(manga: manga, chapter: chapter) { [weak self] result in
             guard let self = self else { return }
             switch result {
@@ -2668,11 +2715,19 @@ final class LegacyReaderViewController: UITableViewController {
                     self.pages = pages
                     self.message = pages.isEmpty ? "No pages." : ""
                 case .failure(let error):
-                    self.message = error.localizedDescription
+                    self.message = self.readerMessage(for: error)
             }
             self.tableView.reloadData()
             self.scrollToInitialPageIfNeeded()
         }
+    }
+
+    private func readerMessage(for error: Error) -> String {
+        let message = error.localizedDescription
+        if message.localizedCaseInsensitiveContains("missing chapter data") {
+            return "This chapter is unavailable from the source."
+        }
+        return message
     }
 
     private func scrollToInitialPageIfNeeded() {
@@ -2857,15 +2912,16 @@ final class LegacyPageImageCell: UITableViewCell {
             return
         }
         guard let data = data, !data.isEmpty else {
-            showFailure("Image failed to load.", loadID: loadID)
+            showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
             return
         }
         if let statusCode = statusCode, !(200..<300).contains(statusCode) {
-            showFailure("Image failed to load. HTTP \(statusCode).", loadID: loadID)
+            showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
             return
         }
+        let decodeFailureMessage = self.decodeFailureMessage(data: data, response: httpResponse)
         guard source.runner.features.processesPages, let httpResponse = httpResponse else {
-            setImage(from: data, loadID: loadID)
+            setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
             return
         }
         source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { [weak self] result in
@@ -2874,9 +2930,9 @@ final class LegacyPageImageCell: UITableViewCell {
                 case .success(let image?):
                     self.setImage(image, loadID: loadID)
                 case .success(nil):
-                    self.setImage(from: data, loadID: loadID)
+                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
                 case .failure:
-                    self.setImage(from: data, loadID: loadID)
+                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
             }
         }
     }
@@ -2899,7 +2955,11 @@ final class LegacyPageImageCell: UITableViewCell {
         }
     }
 
-    private func setImage(from data: Data, loadID: UUID) {
+    private func setImage(
+        from data: Data,
+        loadID: UUID,
+        failureMessage: String = "Image failed to load."
+    ) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
             let image = LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
@@ -2908,7 +2968,7 @@ final class LegacyPageImageCell: UITableViewCell {
                 if let image = image {
                     self.setImage(image, loadID: loadID)
                 } else {
-                    self.showFailure("Image failed to load.", loadID: loadID)
+                    self.showFailure(failureMessage, loadID: loadID)
                 }
             }
         }
@@ -2924,6 +2984,124 @@ final class LegacyPageImageCell: UITableViewCell {
         heightConstraint.constant = targetHeight
         onHeightChange?()
     }
+
+    private func loadFailureMessage(error: Error?, response: HTTPURLResponse?) -> String {
+        if let statusCode = response?.statusCode, !(200..<300).contains(statusCode) {
+            return httpFailureMessage(statusCode: statusCode, response: response)
+        }
+        if let error = error {
+            return "Image failed to load: \(error.localizedDescription)"
+        }
+        return "Image failed to load."
+    }
+
+    private func httpFailureMessage(statusCode: Int, response: HTTPURLResponse?) -> String {
+        if let contentType = headerValue("Content-Type", in: response), !contentType.isEmpty {
+            return "Image failed to load. HTTP \(statusCode). \(contentType)"
+        }
+        return "Image failed to load. HTTP \(statusCode)."
+    }
+
+    private func decodeFailureMessage(data: Data, response: HTTPURLResponse?) -> String {
+        let contentType = headerValue("Content-Type", in: response)?.lowercased() ?? ""
+        if contentType.contains("webp") {
+            return "Unsupported image format: WebP on iOS 12."
+        }
+        if contentType.contains("avif") {
+            return "Unsupported image format: AVIF on iOS 12."
+        }
+        if contentType.contains("html") || looksLikeHTML(data) {
+            return "Image request returned HTML instead of an image."
+        }
+        if !contentType.isEmpty && !contentType.contains("image") {
+            return "Image request returned \(contentType)."
+        }
+        return "Image failed to decode."
+    }
+
+    private func headerValue(_ name: String, in response: HTTPURLResponse?) -> String? {
+        return response?.allHeaderFields.first { header in
+            guard let key = header.key as? String else { return false }
+            return key.caseInsensitiveCompare(name) == .orderedSame
+        }?.value as? String
+    }
+
+    private func looksLikeHTML(_ data: Data) -> Bool {
+        let prefix = Data(data.prefix(128))
+        guard let text = String(data: prefix, encoding: .utf8)?.lowercased() else { return false }
+        return text.contains("<html") || text.contains("<!doctype")
+    }
+}
+
+private extension AidokuRunnerLegacyChapter {
+    var legacyFormattedTitle: String {
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var prefix: [String] = []
+        if let volumeNumber = volumeNumber {
+            prefix.append("Vol. \(Self.format(number: volumeNumber))")
+        }
+        if let chapterNumber = chapterNumber {
+            prefix.append("Ch. \(Self.format(number: chapterNumber))")
+        }
+        if prefix.isEmpty {
+            if let cleanTitle = cleanTitle, !cleanTitle.isEmpty {
+                return cleanTitle
+            }
+            return "Chapter \(key)"
+        }
+        if let cleanTitle = cleanTitle, !cleanTitle.isEmpty {
+            return "\(prefix.joined(separator: " ")) - \(cleanTitle)"
+        }
+        return prefix.joined(separator: " ")
+    }
+
+    func legacyFormattedSubtitle(sourceKey: String) -> String? {
+        var components: [String] = []
+        if locked {
+            components.append("Unavailable")
+        }
+        if let dateUploaded = dateUploaded {
+            components.append(LegacyChapterFormatters.dateFormatter.string(from: dateUploaded))
+        }
+        if let scanlators = scanlators, !scanlators.isEmpty {
+            components.append(scanlators.joined(separator: ", "))
+        }
+        if
+            let language = language?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !language.isEmpty,
+            shouldShowLanguage(sourceKey: sourceKey)
+        {
+            components.append(language.uppercased())
+        }
+        return components.isEmpty ? nil : components.joined(separator: " - ")
+    }
+
+    private func shouldShowLanguage(sourceKey: String) -> Bool {
+        let selectedLanguages = UserDefaults.standard.stringArray(forKey: "\(sourceKey).languages") ?? []
+        return selectedLanguages.count > 1
+    }
+
+    private static func format(number: Float) -> String {
+        return LegacyChapterFormatters.numberFormatter.string(from: NSNumber(value: number)) ?? String(number)
+    }
+}
+
+private enum LegacyChapterFormatters {
+    static let numberFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 3
+        return formatter
+    }()
+
+    static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
 }
 
 private extension AidokuRunnerLegacyManga {
