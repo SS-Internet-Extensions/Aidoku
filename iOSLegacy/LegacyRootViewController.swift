@@ -20,6 +20,7 @@ enum LegacyPalette {
 private extension Notification.Name {
     static let legacyInstalledSourcesDidChange = Notification.Name("AidokuLegacyInstalledSourcesDidChange")
     static let legacyLibraryDidChange = Notification.Name("AidokuLegacyLibraryDidChange")
+    static let legacyHistoryDidChange = Notification.Name("AidokuLegacyHistoryDidChange")
 }
 
 final class LegacyTabBarController: UITabBarController {
@@ -31,20 +32,24 @@ final class LegacyTabBarController: UITabBarController {
         library.tabBarItem = UITabBarItem(tabBarSystemItem: .favorites, tag: 0)
         library.tabBarItem.title = "Library"
 
+        let history = UINavigationController(rootViewController: LegacyHistoryViewController())
+        history.tabBarItem = UITabBarItem(tabBarSystemItem: .history, tag: 1)
+        history.tabBarItem.title = "History"
+
         let sources = UINavigationController(rootViewController: LegacyInstalledSourcesViewController())
-        sources.tabBarItem = UITabBarItem(tabBarSystemItem: .search, tag: 1)
+        sources.tabBarItem = UITabBarItem(tabBarSystemItem: .search, tag: 2)
         sources.tabBarItem.title = "Sources"
 
         let browse = UINavigationController(rootViewController: LegacyRootViewController())
-        browse.tabBarItem = UITabBarItem(tabBarSystemItem: .downloads, tag: 2)
+        browse.tabBarItem = UITabBarItem(tabBarSystemItem: .downloads, tag: 3)
         browse.tabBarItem.title = "Browse"
 
         let settings = UINavigationController(rootViewController: LegacySettingsViewController())
-        settings.tabBarItem = UITabBarItem(tabBarSystemItem: .more, tag: 3)
+        settings.tabBarItem = UITabBarItem(tabBarSystemItem: .more, tag: 4)
         settings.tabBarItem.title = "Settings"
 
-        viewControllers = [library, sources, browse, settings]
-        selectedIndex = LegacyLibraryStore.shared.entries.isEmpty ? 1 : 0
+        viewControllers = [library, history, sources, browse, settings]
+        selectedIndex = LegacyLibraryStore.shared.entries.isEmpty ? 2 : 0
     }
 }
 
@@ -101,6 +106,77 @@ final class LegacyLibraryStore {
         if let data = try? encoder.encode(entries) {
             UserDefaults.standard.set(data, forKey: defaultsKey)
             NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
+        }
+    }
+}
+
+struct LegacyHistoryEntry: Codable, Hashable {
+    var sourceKey: String
+    var sourceName: String
+    var manga: AidokuRunnerLegacyManga
+    var chapter: AidokuRunnerLegacyChapter
+    var pageIndex: Int
+    var pageCount: Int
+    var dateRead: Date
+
+    var key: String {
+        return "\(sourceKey)::\(manga.key)::\(chapter.key)"
+    }
+}
+
+final class LegacyHistoryStore {
+    static let shared = LegacyHistoryStore()
+
+    private let defaultsKey = "AidokuLegacy.history.entries"
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    var entries: [LegacyHistoryEntry] {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let entries = try? decoder.decode([LegacyHistoryEntry].self, from: data)
+        else {
+            return []
+        }
+        return entries.sorted { $0.dateRead > $1.dateRead }
+    }
+
+    func update(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        pageIndex: Int,
+        pageCount: Int
+    ) {
+        let key = "\(source.key)::\(manga.key)::\(chapter.key)"
+        var current = entries.filter { $0.key != key }
+        current.insert(
+            LegacyHistoryEntry(
+                sourceKey: source.key,
+                sourceName: source.name,
+                manga: manga,
+                chapter: chapter,
+                pageIndex: max(0, pageIndex),
+                pageCount: max(pageCount, 0),
+                dateRead: Date()
+            ),
+            at: 0
+        )
+        save(Array(current.prefix(250)))
+    }
+
+    func remove(key: String) {
+        save(entries.filter { $0.key != key })
+    }
+
+    func clear() {
+        save([])
+    }
+
+    private func save(_ entries: [LegacyHistoryEntry]) {
+        if let data = try? encoder.encode(entries) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+            NotificationCenter.default.post(name: .legacyHistoryDidChange, object: nil)
         }
     }
 }
@@ -298,10 +374,140 @@ final class LegacyLibraryViewController: UITableViewController {
     }
 }
 
+final class LegacyHistoryViewController: UITableViewController {
+    private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
+    private var entries: [LegacyHistoryEntry] = []
+    private var sources: [AidokuRunnerLegacySource] = []
+    private var observer: NSObjectProtocol?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "History"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+        tableView.rowHeight = 86
+        navigationController?.navigationBar.prefersLargeTitles = true
+        navigationController?.navigationBar.tintColor = LegacyPalette.accent
+        refreshControl = UIRefreshControl()
+        refreshControl?.addTarget(self, action: #selector(reloadData), for: .valueChanged)
+        observer = NotificationCenter.default.addObserver(
+            forName: .legacyHistoryDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reloadData()
+        }
+        reloadData()
+    }
+
+    deinit {
+        if let observer = observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    @objc private func reloadData() {
+        entries = LegacyHistoryStore.shared.entries
+        sources = packageInstaller.loadInstalledSources()
+        refreshControl?.endRefreshing()
+        tableView.reloadData()
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return entries.isEmpty ? 1 : entries.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "HistoryCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "HistoryCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+
+        guard !entries.isEmpty else {
+            cell.imageView?.image = nil
+            cell.textLabel?.text = "No reading history."
+            cell.detailTextLabel?.text = "Open a chapter to start tracking progress."
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let entry = entries[indexPath.row]
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        if let source = source(for: entry), let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) {
+            LegacyImageLoader.shared.load(url: coverURL, targetHeight: 130) { image in
+                guard
+                    let visibleIndexPath = tableView.indexPath(for: cell),
+                    visibleIndexPath == indexPath
+                else { return }
+                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+                cell.setNeedsLayout()
+            }
+        }
+        cell.textLabel?.text = entry.manga.title
+        cell.detailTextLabel?.text = historySubtitle(for: entry)
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard !entries.isEmpty else { return }
+        let entry = entries[indexPath.row]
+        guard let source = source(for: entry) else {
+            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to resume this chapter.")
+            return
+        }
+        navigationController?.pushViewController(
+            LegacyReaderViewController(
+                source: source,
+                manga: entry.manga,
+                chapter: entry.chapter,
+                initialPageIndex: entry.pageIndex
+            ),
+            animated: true
+        )
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
+        LegacyHistoryStore.shared.remove(key: entries[indexPath.row].key)
+    }
+
+    private func source(for entry: LegacyHistoryEntry) -> AidokuRunnerLegacySource? {
+        return sources.first { $0.key == entry.sourceKey }
+    }
+
+    private func historySubtitle(for entry: LegacyHistoryEntry) -> String {
+        let chapterTitle = entry.chapter.title
+            ?? entry.chapter.chapterNumber.map { "Chapter \($0)" }
+            ?? entry.chapter.key
+        if entry.pageCount > 0 {
+            return "\(chapterTitle) - Page \(entry.pageIndex + 1) of \(entry.pageCount)\n\(entry.sourceName)"
+        }
+        return "\(chapterTitle)\n\(entry.sourceName)"
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
 final class LegacySettingsViewController: UITableViewController {
     private enum Row: Int, CaseIterable {
         case readerMemory
         case clearImageCache
+        case clearHistory
         case clearLibrary
         case about
     }
@@ -337,6 +543,9 @@ final class LegacySettingsViewController: UITableViewController {
             case .clearImageCache:
                 cell.textLabel?.text = "Clear Image Cache"
                 cell.detailTextLabel?.text = "Remove cached covers and reader pages."
+            case .clearHistory:
+                cell.textLabel?.text = "Clear History"
+                cell.detailTextLabel?.text = "Remove local reading progress."
             case .clearLibrary:
                 cell.textLabel?.text = "Clear Library"
                 cell.detailTextLabel?.text = "Remove saved manga from Aidoku Legacy."
@@ -357,11 +566,26 @@ final class LegacySettingsViewController: UITableViewController {
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .clearImageCache:
                 LegacyImageLoader.shared.clear()
+            case .clearHistory:
+                confirmClearHistory()
             case .clearLibrary:
                 confirmClearLibrary()
             case .about:
                 break
         }
+    }
+
+    private func confirmClearHistory() {
+        let alert = UIAlertController(
+            title: "Clear History",
+            message: "Remove all reading history from Aidoku Legacy?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            LegacyHistoryStore.shared.clear()
+        })
+        present(alert, animated: true)
     }
 
     private func confirmClearLibrary() {
@@ -1947,13 +2171,21 @@ final class LegacyReaderViewController: UITableViewController {
     private let source: AidokuRunnerLegacySource
     private let manga: AidokuRunnerLegacyManga
     private let chapter: AidokuRunnerLegacyChapter
+    private let initialPageIndex: Int
     private var pages: [AidokuRunnerLegacyPage] = []
     private var message = "Loading pages..."
+    private var didScrollToInitialPage = false
 
-    init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga, chapter: AidokuRunnerLegacyChapter) {
+    init(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        initialPageIndex: Int = 0
+    ) {
         self.source = source
         self.manga = manga
         self.chapter = chapter
+        self.initialPageIndex = initialPageIndex
         super.init(style: .plain)
         title = chapter.title ?? manga.title
     }
@@ -2006,6 +2238,16 @@ final class LegacyReaderViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if !pages.isEmpty, indexPath.row < pages.count {
+            LegacyHistoryStore.shared.update(
+                source: source,
+                manga: manga,
+                chapter: chapter,
+                pageIndex: indexPath.row,
+                pageCount: pages.count
+            )
+        }
+
         let preloadCount = max(1, UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages"))
         let maxIndex = min(pages.count - 1, indexPath.row + preloadCount)
         guard maxIndex >= indexPath.row else { return }
@@ -2034,6 +2276,19 @@ final class LegacyReaderViewController: UITableViewController {
                     self.message = error.localizedDescription
             }
             self.tableView.reloadData()
+            self.scrollToInitialPageIfNeeded()
+        }
+    }
+
+    private func scrollToInitialPageIfNeeded() {
+        guard !didScrollToInitialPage, pages.indices.contains(initialPageIndex) else { return }
+        didScrollToInitialPage = true
+        DispatchQueue.main.async {
+            self.tableView.scrollToRow(
+                at: IndexPath(row: self.initialPageIndex, section: 0),
+                at: .top,
+                animated: false
+            )
         }
     }
 }
