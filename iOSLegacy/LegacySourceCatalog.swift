@@ -103,6 +103,10 @@ struct LegacySourceInfo: Decodable {
         return nil
     }
 
+    var resolvedBaseURL: URL? {
+        baseURL.flatMap { URL(string: $0) }
+    }
+
     func with(repositoryURL: URL) -> LegacySourceInfo {
         var copy = self
         copy.repositoryURL = repositoryURL
