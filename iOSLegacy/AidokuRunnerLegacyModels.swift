@@ -149,9 +149,265 @@ struct AidokuRunnerLegacyMangaPageResult {
     var hasNextPage: Bool
 }
 
-struct AidokuRunnerLegacyFilterValue {
+struct AidokuRunnerLegacySortDefault: Codable, Hashable {
+    let index: Int
+    let ascending: Bool
+}
+
+struct AidokuRunnerLegacySelectFilter: Codable, Hashable {
+    var isGenre: Bool
+    var usesTagStyle: Bool
+    var options: [String]
+    var ids: [String]?
+    var defaultValue: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isGenre
+        case usesTagStyle
+        case options
+        case ids
+        case defaultValue = "default"
+    }
+
+    init(
+        isGenre: Bool = false,
+        usesTagStyle: Bool? = nil,
+        options: [String],
+        ids: [String]? = nil,
+        defaultValue: String? = nil
+    ) {
+        self.isGenre = isGenre
+        self.usesTagStyle = usesTagStyle ?? isGenre
+        self.options = options
+        self.ids = ids
+        self.defaultValue = defaultValue
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isGenre = try container.decodeIfPresent(Bool.self, forKey: .isGenre) ?? false
+        usesTagStyle = try container.decodeIfPresent(Bool.self, forKey: .usesTagStyle) ?? isGenre
+        options = try container.decode([String].self, forKey: .options)
+        ids = try container.decodeIfPresent([String].self, forKey: .ids)
+        defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
+    }
+}
+
+struct AidokuRunnerLegacyMultiSelectFilter: Codable, Hashable {
+    var isGenre: Bool
+    var canExclude: Bool
+    var usesTagStyle: Bool
+    var options: [String]
+    var ids: [String]?
+    var defaultIncluded: [String]?
+    var defaultExcluded: [String]?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isGenre = try container.decodeIfPresent(Bool.self, forKey: .isGenre) ?? false
+        canExclude = try container.decodeIfPresent(Bool.self, forKey: .canExclude) ?? false
+        usesTagStyle = try container.decodeIfPresent(Bool.self, forKey: .usesTagStyle) ?? isGenre
+        options = try container.decode([String].self, forKey: .options)
+        ids = try container.decodeIfPresent([String].self, forKey: .ids)
+        defaultIncluded = try container.decodeIfPresent([String].self, forKey: .defaultIncluded)
+        defaultExcluded = try container.decodeIfPresent([String].self, forKey: .defaultExcluded)
+    }
+}
+
+struct AidokuRunnerLegacyFilter: Codable, Hashable {
+    enum Value: Hashable {
+        case text(placeholder: String?)
+        case sort(canAscend: Bool, options: [String], defaultValue: AidokuRunnerLegacySortDefault?)
+        case check(name: String?, canExclude: Bool, defaultValue: Bool?)
+        case select(AidokuRunnerLegacySelectFilter)
+        case multiselect(AidokuRunnerLegacyMultiSelectFilter)
+        case note(String)
+        case range(min: Float?, max: Float?, decimal: Bool)
+    }
+
     var id: String
-    var value: String
+    var title: String?
+    var hideFromHeader: Bool?
+    var value: Value
+
+    init(id: String, title: String? = nil, hideFromHeader: Bool? = nil, value: Value) {
+        self.id = id
+        self.title = title
+        self.hideFromHeader = hideFromHeader
+        self.value = value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decodeIfPresent(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        hideFromHeader = try container.decodeIfPresent(Bool.self, forKey: .hideFromHeader)
+        let type = try container.decode(String.self, forKey: .type)
+        self.id = id ?? title ?? type
+
+        switch type {
+            case "text":
+                value = .text(placeholder: try container.decodeIfPresent(String.self, forKey: .placeholder))
+            case "sort":
+                value = .sort(
+                    canAscend: try container.decodeIfPresent(Bool.self, forKey: .canAscend) ?? true,
+                    options: try container.decode([String].self, forKey: .options),
+                    defaultValue: try container.decodeIfPresent(AidokuRunnerLegacySortDefault.self, forKey: .defaultValue)
+                )
+            case "check":
+                value = .check(
+                    name: try container.decodeIfPresent(String.self, forKey: .name),
+                    canExclude: try container.decodeIfPresent(Bool.self, forKey: .canExclude) ?? false,
+                    defaultValue: try container.decodeIfPresent(Bool.self, forKey: .defaultValue)
+                )
+            case "select":
+                value = .select(try AidokuRunnerLegacySelectFilter(from: decoder))
+            case "multi-select":
+                value = .multiselect(try AidokuRunnerLegacyMultiSelectFilter(from: decoder))
+            case "note":
+                value = .note(try container.decode(String.self, forKey: .text))
+            case "range":
+                value = .range(
+                    min: try container.decodeIfPresent(Float.self, forKey: .min),
+                    max: try container.decodeIfPresent(Float.self, forKey: .max),
+                    decimal: try container.decodeIfPresent(Bool.self, forKey: .decimal) ?? false
+                )
+            default:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "Invalid filter type."
+                )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(hideFromHeader, forKey: .hideFromHeader)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case id
+        case title
+        case hideFromHeader
+        case placeholder
+        case canAscend
+        case options
+        case defaultValue = "default"
+        case canExclude
+        case text
+        case name
+        case min
+        case max
+        case decimal
+    }
+}
+
+enum AidokuRunnerLegacyFilterValue: Hashable, Codable {
+    case text(id: String, value: String)
+    case sort(id: String, index: Int, ascending: Bool)
+    case check(id: String, value: Int)
+    case select(id: String, value: String)
+    case multiselect(id: String, included: [String], excluded: [String])
+    case range(id: String, from: Float?, to: Float?)
+
+    var id: String {
+        switch self {
+            case .text(let id, _),
+                 .sort(let id, _, _),
+                 .check(let id, _),
+                 .select(let id, _),
+                 .multiselect(let id, _, _),
+                 .range(let id, _, _):
+                return id
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(UInt8.self, forKey: .type)
+        let id = try container.decode(String.self, forKey: .id)
+        switch type {
+            case 0:
+                self = .text(id: id, value: try container.decode(String.self, forKey: .value))
+            case 1:
+                self = .sort(
+                    id: id,
+                    index: Int(try container.decode(Int32.self, forKey: .index)),
+                    ascending: try container.decode(Bool.self, forKey: .ascending)
+                )
+            case 2:
+                self = .check(id: id, value: try container.decode(Int.self, forKey: .value))
+            case 3:
+                self = .select(id: id, value: try container.decode(String.self, forKey: .value))
+            case 4:
+                self = .multiselect(
+                    id: id,
+                    included: try container.decode([String].self, forKey: .included),
+                    excluded: try container.decode([String].self, forKey: .excluded)
+                )
+            case 5:
+                self = .range(
+                    id: id,
+                    from: try container.decodeIfPresent(Float.self, forKey: .from),
+                    to: try container.decodeIfPresent(Float.self, forKey: .to)
+                )
+            default:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "Invalid filter value type."
+                )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+            case .text(let id, let value):
+                try container.encode(UInt8(0), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(value, forKey: .value)
+            case .sort(let id, let index, let ascending):
+                try container.encode(UInt8(1), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(Int32(index), forKey: .index)
+                try container.encode(ascending, forKey: .ascending)
+            case .check(let id, let value):
+                try container.encode(UInt8(2), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(value, forKey: .value)
+            case .select(let id, let value):
+                try container.encode(UInt8(3), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(value, forKey: .value)
+            case .multiselect(let id, let included, let excluded):
+                try container.encode(UInt8(4), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encode(included, forKey: .included)
+                try container.encode(excluded, forKey: .excluded)
+            case .range(let id, let from, let to):
+                try container.encode(UInt8(5), forKey: .type)
+                try container.encode(id, forKey: .id)
+                try container.encodeIfPresent(from, forKey: .from)
+                try container.encodeIfPresent(to, forKey: .to)
+        }
+    }
+
+    enum CodingKeys: CodingKey {
+        case id
+        case type
+        case index
+        case value
+        case ascending
+        case included
+        case excluded
+        case from
+        case to
+    }
 }
 
 struct AidokuRunnerLegacySourceFeatures {
@@ -188,6 +444,10 @@ protocol AidokuRunnerLegacyRunner {
 
     func getListings(
         completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    )
+
+    func getFilters(
+        completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
     )
 
     func getMangaUpdate(
@@ -239,6 +499,12 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
 
     func getListings(
         completion: @escaping (Result<[AidokuRunnerLegacyListing], Error>) -> Void
+    ) {
+        completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func getFilters(
+        completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
     }

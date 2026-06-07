@@ -60,8 +60,7 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             let function = try self.module.findFunction(name: "get_search_manga_list")
             let queryPointer = self.store.store(query ?? "")
             defer { self.store.remove(at: queryPointer) }
-            let encodedFilters = filters.map { FilterValue.text(id: $0.id, value: $0.value) }
-            let filterPointer = try self.store.storeEncoded(encodedFilters)
+            let filterPointer = try self.store.storeEncoded(filters)
             defer { self.store.remove(at: filterPointer) }
 
             let result: Int32 = try function.call(queryPointer, Int32(page), filterPointer)
@@ -110,6 +109,20 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
                         kind: AidokuRunnerLegacyListingKind(rawValue: $0.kind.rawValue) ?? .default
                     )
                 }
+        }
+    }
+
+    func getFilters(
+        completion: @escaping (Result<[AidokuRunnerLegacyFilter], Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.dynamicFilters else {
+                return []
+            }
+            let function = try self.module.findFunction(name: "get_filters")
+            let result: Int32 = try function.call()
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode([AidokuRunnerLegacyFilter].self, from: data)
         }
     }
 

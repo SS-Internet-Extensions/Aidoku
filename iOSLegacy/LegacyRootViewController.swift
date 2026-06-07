@@ -842,6 +842,8 @@ final class LegacyMangaListViewController: UITableViewController {
     private var searchDebounceTimer: Timer?
 
     private var entries: [AidokuRunnerLegacyManga] = []
+    private var availableFilters: [AidokuRunnerLegacyFilter] = []
+    private var enabledFilters: [AidokuRunnerLegacyFilterValue] = []
     private var page = 1
     private var hasNextPage = false
     private var isLoading = false
@@ -876,6 +878,15 @@ final class LegacyMangaListViewController: UITableViewController {
             searchController.obscuresBackgroundDuringPresentation = false
             navigationItem.searchController = searchController
             definesPresentationContext = true
+            navigationItem.rightBarButtonItem = UIBarButtonItem(
+                title: "Filters",
+                style: .plain,
+                target: self,
+                action: #selector(openFilters)
+            )
+            navigationItem.rightBarButtonItem?.isEnabled = false
+            loadSavedFilters()
+            loadFilters()
         }
 
         if listing != nil {
@@ -997,8 +1008,65 @@ final class LegacyMangaListViewController: UITableViewController {
                 tableView.reloadData()
                 return
             }
-            source.runner.getSearchMangaList(query: query, page: page, filters: [], completion: completion)
+            source.runner.getSearchMangaList(query: query, page: page, filters: enabledFilters, completion: completion)
         }
+    }
+
+    private func loadFilters() {
+        availableFilters = source.staticFilters
+        updateFilterButton()
+        guard source.runner.features.dynamicFilters else { return }
+        source.runner.getFilters { [weak self] result in
+            guard let self = self else { return }
+            if case .success(let filters) = result {
+                var seen = Set(self.availableFilters.map { $0.id })
+                self.availableFilters.append(contentsOf: filters.filter { seen.insert($0.id).inserted })
+            }
+            self.updateFilterButton()
+        }
+    }
+
+    private func loadSavedFilters() {
+        guard
+            let data = UserDefaults.standard.data(forKey: filterStorageKey),
+            let values = try? JSONDecoder().decode([AidokuRunnerLegacyFilterValue].self, from: data)
+        else {
+            return
+        }
+        enabledFilters = values
+    }
+
+    private func saveFilters() {
+        if enabledFilters.isEmpty {
+            UserDefaults.standard.removeObject(forKey: filterStorageKey)
+        } else if let data = try? JSONEncoder().encode(enabledFilters) {
+            UserDefaults.standard.set(data, forKey: filterStorageKey)
+        }
+    }
+
+    private var filterStorageKey: String {
+        return "AidokuLegacy.\(source.key).filters"
+    }
+
+    private func updateFilterButton() {
+        navigationItem.rightBarButtonItem?.isEnabled = !availableFilters.isEmpty
+        let suffix = enabledFilters.isEmpty ? "" : " (\(enabledFilters.count))"
+        navigationItem.rightBarButtonItem?.title = "Filters\(suffix)"
+    }
+
+    @objc private func openFilters() {
+        let filterController = LegacyFilterViewController(
+            filters: availableFilters,
+            selectedFilters: enabledFilters
+        ) { [weak self] values in
+            guard let self = self else { return }
+            self.enabledFilters = values
+            self.saveFilters()
+            self.updateFilterButton()
+            self.load(reset: true)
+        }
+        let navigationController = UINavigationController(rootViewController: filterController)
+        present(navigationController, animated: true)
     }
 }
 
@@ -1024,6 +1092,405 @@ extension LegacyMangaListViewController: UISearchResultsUpdating {
         searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
             self?.load(reset: true)
         }
+    }
+}
+
+final class LegacyFilterViewController: UITableViewController {
+    private let filters: [AidokuRunnerLegacyFilter]
+    private var selectedFilters: [AidokuRunnerLegacyFilterValue]
+    private let onApply: ([AidokuRunnerLegacyFilterValue]) -> Void
+
+    init(
+        filters: [AidokuRunnerLegacyFilter],
+        selectedFilters: [AidokuRunnerLegacyFilterValue],
+        onApply: @escaping ([AidokuRunnerLegacyFilterValue]) -> Void
+    ) {
+        self.filters = filters
+        self.selectedFilters = selectedFilters
+        self.onApply = onApply
+        super.init(style: .grouped)
+        title = "Filters"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.backgroundColor = LegacyPalette.background
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Reset",
+            style: .plain,
+            target: self,
+            action: #selector(resetFilters)
+        )
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Apply",
+            style: .done,
+            target: self,
+            action: #selector(applyFilters)
+        )
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return filters.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "FilterCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "FilterCell")
+        let filter = filters[indexPath.row]
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.textLabel?.text = filter.title ?? filter.id
+        cell.detailTextLabel?.text = detailText(for: filter)
+        cell.selectionStyle = .default
+        cell.accessoryType = .disclosureIndicator
+
+        if case .note = filter.value {
+            cell.selectionStyle = .none
+            cell.accessoryType = .none
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let filter = filters[indexPath.row]
+        switch filter.value {
+            case .text(let placeholder):
+                editText(filter: filter, placeholder: placeholder)
+            case .sort(let canAscend, let options, let defaultValue):
+                let picker = LegacyFilterOptionPickerViewController(
+                    title: filter.title ?? "Sort",
+                    options: options.enumerated().map { (label: $0.element, value: String($0.offset)) },
+                    selectedValues: Set([String(sortValue(for: filter)?.index ?? defaultValue?.index ?? 0)]),
+                    allowsMultiple: false,
+                    allowsExclusion: false
+                ) { [weak self] included, _ in
+                    guard let self = self, let selected = included.first, let index = Int(selected) else { return }
+                    let ascending = canAscend ? (self.sortValue(for: filter)?.ascending ?? defaultValue?.ascending ?? false) : false
+                    self.replace(.sort(id: filter.id, index: index, ascending: ascending))
+                    self.tableView.reloadData()
+                }
+                navigationController?.pushViewController(picker, animated: true)
+            case .check:
+                cycleCheck(filter: filter)
+            case .select(let select):
+                let picker = LegacyFilterOptionPickerViewController(
+                    title: filter.title ?? "Select",
+                    options: select.options.enumerated().map {
+                        let value = select.ids?.indices.contains($0.offset) == true ? select.ids![$0.offset] : $0.element
+                        return (label: $0.element, value: value)
+                    },
+                    selectedValues: Set([selectValue(for: filter) ?? select.defaultValue ?? ""]),
+                    allowsMultiple: false,
+                    allowsExclusion: false
+                ) { [weak self] included, _ in
+                    guard let self = self, let value = included.first else { return }
+                    self.replace(.select(id: filter.id, value: value))
+                    self.tableView.reloadData()
+                }
+                navigationController?.pushViewController(picker, animated: true)
+            case .multiselect(let multiSelect):
+                let current = multiselectValue(for: filter)
+                let picker = LegacyFilterOptionPickerViewController(
+                    title: filter.title ?? "Select",
+                    options: multiSelect.options.enumerated().map {
+                        let value = multiSelect.ids?.indices.contains($0.offset) == true ? multiSelect.ids![$0.offset] : $0.element
+                        return (label: $0.element, value: value)
+                    },
+                    selectedValues: Set(current?.included ?? multiSelect.defaultIncluded ?? []),
+                    excludedValues: Set(current?.excluded ?? multiSelect.defaultExcluded ?? []),
+                    allowsMultiple: true,
+                    allowsExclusion: multiSelect.canExclude
+                ) { [weak self] included, excluded in
+                    guard let self = self else { return }
+                    self.replace(.multiselect(id: filter.id, included: included, excluded: excluded))
+                    self.tableView.reloadData()
+                }
+                navigationController?.pushViewController(picker, animated: true)
+            case .note:
+                break
+            case .range:
+                editRange(filter: filter)
+        }
+    }
+
+    private func detailText(for filter: AidokuRunnerLegacyFilter) -> String? {
+        switch filter.value {
+            case .text:
+                if case .text(_, let value)? = value(for: filter.id), !value.isEmpty {
+                    return value
+                }
+                return "Any"
+            case .sort(_, let options, let defaultValue):
+                let value = sortValue(for: filter)
+                let index = value?.index ?? defaultValue?.index ?? 0
+                let label = options.indices.contains(index) ? options[index] : "Default"
+                let ascending = value?.ascending ?? defaultValue?.ascending ?? false
+                return ascending ? "\(label), ascending" : label
+            case .check:
+                if case .check(_, let value)? = value(for: filter.id) {
+                    return value < 0 ? "Excluded" : value > 0 ? "Included" : "Any"
+                }
+                return "Any"
+            case .select(let select):
+                let value = selectValue(for: filter) ?? select.defaultValue
+                guard let selected = value else { return "Default" }
+                if let index = select.ids?.firstIndex(of: selected), select.options.indices.contains(index) {
+                    return select.options[index]
+                }
+                return selected
+            case .multiselect:
+                let current = multiselectValue(for: filter)
+                let included = current?.included.count ?? 0
+                let excluded = current?.excluded.count ?? 0
+                if included == 0 && excluded == 0 { return "Any" }
+                return excluded == 0 ? "\(included) selected" : "\(included) selected, \(excluded) excluded"
+            case .note(let note):
+                return note
+            case .range:
+                if case .range(_, let from, let to)? = value(for: filter.id) {
+                    return "\(from.map { String($0) } ?? "-") - \(to.map { String($0) } ?? "-")"
+                }
+                return "Any"
+        }
+    }
+
+    private func editText(filter: AidokuRunnerLegacyFilter, placeholder: String?) {
+        let alert = UIAlertController(title: filter.title ?? filter.id, message: nil, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = placeholder
+            if case .text(_, let value)? = self.value(for: filter.id) {
+                textField.text = value
+            }
+        }
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            self.remove(id: filter.id)
+            self.tableView.reloadData()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+            let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if text.isEmpty {
+                self.remove(id: filter.id)
+            } else {
+                self.replace(.text(id: filter.id, value: text))
+            }
+            self.tableView.reloadData()
+        })
+        present(alert, animated: true)
+    }
+
+    private func editRange(filter: AidokuRunnerLegacyFilter) {
+        let alert = UIAlertController(title: filter.title ?? filter.id, message: nil, preferredStyle: .alert)
+        let current = rangeValue(for: filter)
+        alert.addTextField { textField in
+            textField.placeholder = "From"
+            textField.keyboardType = .decimalPad
+            textField.text = current?.from.map { String($0) }
+        }
+        alert.addTextField { textField in
+            textField.placeholder = "To"
+            textField.keyboardType = .decimalPad
+            textField.text = current?.to.map { String($0) }
+        }
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            self.remove(id: filter.id)
+            self.tableView.reloadData()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+            let from = alert.textFields?[0].text.flatMap(Float.init)
+            let to = alert.textFields?[1].text.flatMap(Float.init)
+            if from == nil && to == nil {
+                self.remove(id: filter.id)
+            } else {
+                self.replace(.range(id: filter.id, from: from, to: to))
+            }
+            self.tableView.reloadData()
+        })
+        present(alert, animated: true)
+    }
+
+    private func cycleCheck(filter: AidokuRunnerLegacyFilter) {
+        guard case .check(_, let canExclude, _) = filter.value else { return }
+        let current: Int
+        if case .check(_, let value)? = value(for: filter.id) {
+            current = value
+        } else {
+            current = 0
+        }
+        let next: Int
+        if current == 0 {
+            next = 1
+        } else if current == 1 && canExclude {
+            next = -1
+        } else {
+            next = 0
+        }
+        if next == 0 {
+            remove(id: filter.id)
+        } else {
+            replace(.check(id: filter.id, value: next))
+        }
+        tableView.reloadData()
+    }
+
+    private func value(for id: String) -> AidokuRunnerLegacyFilterValue? {
+        return selectedFilters.first { $0.id == id }
+    }
+
+    private func sortValue(for filter: AidokuRunnerLegacyFilter) -> (index: Int, ascending: Bool)? {
+        if case .sort(_, let index, let ascending)? = value(for: filter.id) {
+            return (index, ascending)
+        }
+        return nil
+    }
+
+    private func selectValue(for filter: AidokuRunnerLegacyFilter) -> String? {
+        if case .select(_, let value)? = value(for: filter.id) {
+            return value
+        }
+        return nil
+    }
+
+    private func multiselectValue(for filter: AidokuRunnerLegacyFilter) -> (included: [String], excluded: [String])? {
+        if case .multiselect(_, let included, let excluded)? = value(for: filter.id) {
+            return (included, excluded)
+        }
+        return nil
+    }
+
+    private func rangeValue(for filter: AidokuRunnerLegacyFilter) -> (from: Float?, to: Float?)? {
+        if case .range(_, let from, let to)? = value(for: filter.id) {
+            return (from, to)
+        }
+        return nil
+    }
+
+    private func replace(_ value: AidokuRunnerLegacyFilterValue) {
+        remove(id: value.id)
+        selectedFilters.append(value)
+    }
+
+    private func remove(id: String) {
+        selectedFilters.removeAll { $0.id == id }
+    }
+
+    @objc private func resetFilters() {
+        selectedFilters = []
+        tableView.reloadData()
+    }
+
+    @objc private func applyFilters() {
+        onApply(selectedFilters)
+        dismiss(animated: true)
+    }
+}
+
+final class LegacyFilterOptionPickerViewController: UITableViewController {
+    private let options: [(label: String, value: String)]
+    private var selectedValues: Set<String>
+    private var excludedValues: Set<String>
+    private let allowsMultiple: Bool
+    private let allowsExclusion: Bool
+    private let onApply: ([String], [String]) -> Void
+
+    init(
+        title: String,
+        options: [(label: String, value: String)],
+        selectedValues: Set<String>,
+        excludedValues: Set<String> = [],
+        allowsMultiple: Bool,
+        allowsExclusion: Bool,
+        onApply: @escaping ([String], [String]) -> Void
+    ) {
+        self.options = options
+        self.selectedValues = Set(selectedValues.filter { !$0.isEmpty })
+        self.excludedValues = excludedValues
+        self.allowsMultiple = allowsMultiple
+        self.allowsExclusion = allowsExclusion
+        self.onApply = onApply
+        super.init(style: .plain)
+        self.title = title
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.backgroundColor = LegacyPalette.background
+        if allowsMultiple {
+            navigationItem.rightBarButtonItem = UIBarButtonItem(
+                title: "Done",
+                style: .done,
+                target: self,
+                action: #selector(done)
+            )
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return options.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "OptionCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "OptionCell")
+        let option = options[indexPath.row]
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.textLabel?.text = option.label
+        if selectedValues.contains(option.value) {
+            cell.accessoryType = .checkmark
+            cell.detailTextLabel?.text = "Included"
+        } else if excludedValues.contains(option.value) {
+            cell.accessoryType = .detailButton
+            cell.detailTextLabel?.text = "Excluded"
+        } else {
+            cell.accessoryType = .none
+            cell.detailTextLabel?.text = nil
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let value = options[indexPath.row].value
+        if allowsMultiple {
+            cycle(value: value)
+            tableView.reloadRows(at: [indexPath], with: .automatic)
+        } else {
+            onApply([value], [])
+            navigationController?.popViewController(animated: true)
+        }
+    }
+
+    private func cycle(value: String) {
+        if selectedValues.contains(value) {
+            selectedValues.remove(value)
+            if allowsExclusion {
+                excludedValues.insert(value)
+            }
+        } else if excludedValues.contains(value) {
+            excludedValues.remove(value)
+        } else {
+            selectedValues.insert(value)
+        }
+    }
+
+    @objc private func done() {
+        onApply(Array(selectedValues), Array(excludedValues))
+        navigationController?.popViewController(animated: true)
     }
 }
 

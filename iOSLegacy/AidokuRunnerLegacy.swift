@@ -18,6 +18,7 @@ final class AidokuRunnerLegacySource {
     let imageUrl: URL?
     let config: AidokuRunnerLegacySourceInfo.Configuration?
     let staticListings: [AidokuRunnerLegacyListing]
+    let staticFilters: [AidokuRunnerLegacyFilter]
     let runner: AidokuRunnerLegacyRunner
 
     init(
@@ -34,6 +35,7 @@ final class AidokuRunnerLegacySource {
         self.contentRating = sourceInfo.contentRating ?? .safe
         self.config = info.config
         self.staticListings = info.listings ?? []
+        self.staticFilters = Self.filters(in: url)
         self.imageUrl = Self.iconURL(in: url)
 
         var baseUrls = [URL]()
@@ -85,6 +87,18 @@ final class AidokuRunnerLegacySource {
         }
 
         return nil
+    }
+
+    private static func filters(in sourceURL: URL) -> [AidokuRunnerLegacyFilter] {
+        let filtersURL = sourceURL.appendingPathComponent("filters.json")
+        guard
+            FileManager.default.fileExists(atPath: filtersURL.path),
+            let data = try? Data(contentsOf: filtersURL),
+            let filters = try? JSONDecoder().decode([AidokuRunnerLegacyFilter].self, from: data)
+        else {
+            return []
+        }
+        return filters
     }
 }
 
