@@ -35,11 +35,14 @@ jobs:
         id: commitinfo
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build unsigned release IPA
+      - name: Build fakesigned release IPA
         run: |
           set -euo pipefail
           DERIVED_DATA="$RUNNER_TEMP/AidokuLegacyDerivedData"
-          IPA_NAME="AidokuLegacy-iOS12-${{ steps.commitinfo.outputs.sha_short }}-unsigned.ipa"
+          ENTITLEMENTS="$RUNNER_TEMP/AidokuLegacy.entitlements"
+          FAKE_TEAM_ID="AIDOKU1234"
+          BUNDLE_ID="app.aidoku.AidokuLegacy"
+          IPA_NAME="AidokuLegacy-iOS12-${{ steps.commitinfo.outputs.sha_short }}-fakesigned.ipa"
 
           xcodebuild \
             -project iOSLegacy/AidokuLegacy.xcodeproj \
@@ -55,15 +58,43 @@ jobs:
           APP_PATH="$DERIVED_DATA/Build/Products/Release-iphoneos/AidokuLegacy.app"
           test -d "$APP_PATH"
 
+          cat > "$ENTITLEMENTS" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>application-identifier</key>
+            <string>${FAKE_TEAM_ID}.${BUNDLE_ID}</string>
+            <key>com.apple.developer.team-identifier</key>
+            <string>${FAKE_TEAM_ID}</string>
+            <key>get-task-allow</key>
+            <true/>
+            <key>keychain-access-groups</key>
+            <array>
+              <string>${FAKE_TEAM_ID}.${BUNDLE_ID}</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -type f -name "*.dylib" -print0 | while IFS= read -r -d '' dylib; do
+              codesign --force --sign - "$dylib"
+            done
+          fi
+          codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+          codesign -d --entitlements :- "$APP_PATH"
+
           rm -rf Payload artifacts
           mkdir -p Payload artifacts
           cp -R "$APP_PATH" Payload/
           zip -qry "artifacts/$IPA_NAME" Payload
           ls -lh "artifacts/$IPA_NAME"
 
-      - name: Upload unsigned IPA
+      - name: Upload fakesigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AidokuLegacy-iOS12-unsigned-ipa
+          name: AidokuLegacy-iOS12-fakesigned-ipa
           path: artifacts/*.ipa
           if-no-files-found: error
