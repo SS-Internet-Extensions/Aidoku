@@ -68,6 +68,38 @@ final class GlobalStore {
     }
 }
 
+final class LegacyPartialResultHandler {
+    typealias Callback = (Any?, Data) -> Any?
+
+    private var callbacks: [UUID: Callback] = [:]
+    private var storage: [UUID: Any] = [:]
+
+    func register(_ callback: @escaping Callback) -> UUID {
+        let id = UUID()
+        callbacks[id] = callback
+        return id
+    }
+
+    func remove(id: UUID) {
+        callbacks.removeValue(forKey: id)
+        storage.removeValue(forKey: id)
+    }
+
+    func data(for id: UUID) -> Any? {
+        return storage[id]
+    }
+
+    func trigger(with data: Data) {
+        for (id, callback) in callbacks {
+            if let result = callback(storage[id], data) {
+                storage[id] = result
+            } else {
+                storage.removeValue(forKey: id)
+            }
+        }
+    }
+}
+
 struct NetRequest {
     enum Method: Int {
         case get = 0

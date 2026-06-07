@@ -207,6 +207,46 @@ struct Home: Hashable, Codable {
     }
 }
 
+enum HomePartialResult {
+    case layout(Home)
+    case component(HomeComponent)
+}
+
+extension HomePartialResult: Codable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(UInt8.self, forKey: .key)
+        switch type {
+            case 0:
+                self = .layout(try container.decode(Home.self, forKey: .key))
+            case 1:
+                self = .component(try container.decode(HomeComponent.self, forKey: .key))
+            default:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .key,
+                    in: container,
+                    debugDescription: "Invalid partial home type."
+                )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+            case .layout(let home):
+                try container.encode(UInt8(0), forKey: .key)
+                try container.encode(home, forKey: .key)
+            case .component(let component):
+                try container.encode(UInt8(1), forKey: .key)
+                try container.encode(component, forKey: .key)
+        }
+    }
+
+    enum CodingKeys: CodingKey {
+        case key
+    }
+}
+
 struct HomeComponent: Hashable, Codable {
     var title: String?
     var subtitle: String?

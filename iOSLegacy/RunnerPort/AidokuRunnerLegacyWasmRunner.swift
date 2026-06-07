@@ -15,9 +15,15 @@ struct AidokuRunnerLegacyWasmBackendFactory: AidokuRunnerLegacyBackendFactory {
     }
 }
 
+private struct PartialHomeResultValue {
+    var currentHome: Home?
+    var decodingError: Error?
+}
+
 final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
     private let sourceKey: String
     private let store = GlobalStore()
+    private let partialResultHandler = LegacyPartialResultHandler()
     private let module: Module
     private let queue = DispatchQueue(label: "app.aidoku.legacy.wasm-runner")
 
@@ -30,7 +36,11 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         let runtime = try env.createRuntime(stackSize: 1024 * 512)
         module = try runtime.parseAndLoadModule(bytes: [UInt8](bytes))
 
-        try Env(module: module, printHandler: { print("[AidokuLegacy WASM] \($0)") }).link()
+        try Env(
+            module: module,
+            partialResultHandler: partialResultHandler,
+            printHandler: { print("[AidokuLegacy WASM] \($0)") }
+        ).link()
         try Std(module: module, store: store).link()
         try Defaults(module: module, store: store, defaultNamespace: info.info.id).link()
         try Net(module: module, store: store).link()
@@ -119,11 +129,48 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             guard self.features.providesHome else {
                 throw SourceError.unimplemented
             }
+            let callbackID = self.partialResultHandler.register { partial, data in
+                var partial = (partial as? PartialHomeResultValue) ?? PartialHomeResultValue()
+                do {
+                    let result = try PostcardDecoder().decode(HomePartialResult.self, from: data)
+                    switch result {
+                        case .layout(var home):
+                            home.setSourceKey(self.sourceKey)
+                            partial.currentHome = home
+                        case .component(var component):
+                            component.setSourceKey(self.sourceKey)
+                            if let currentHome = partial.currentHome {
+                                var components = currentHome.components
+                                if let index = components.firstIndex(where: { $0.title == component.title }) {
+                                    components[index] = component
+                                } else {
+                                    components.append(component)
+                                }
+                                partial.currentHome = Home(components: components)
+                            } else {
+                                partial.currentHome = Home(components: [component])
+                            }
+                    }
+                } catch {
+                    partial.decodingError = error
+                }
+                return partial
+            }
+            defer { self.partialResultHandler.remove(id: callbackID) }
+
             let function = try self.module.findFunction(name: "get_home")
             let result: Int32 = try function.call()
             let data = try self.handleResult(result: result)
             var home = try PostcardDecoder().decode(Home.self, from: data)
             home.setSourceKey(self.sourceKey)
+            if let partial = self.partialResultHandler.data(for: callbackID) as? PartialHomeResultValue {
+                if let error = partial.decodingError {
+                    throw error
+                }
+                if home.components.isEmpty, let partialHome = partial.currentHome {
+                    home = partialHome
+                }
+            }
             return home.legacy(sourceKey: self.sourceKey)
         }
     }
@@ -149,13 +196,21 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         completion: @escaping (Result<AidokuRunnerLegacyManga, Error>) -> Void
     ) {
         run(completion: completion) {
+            let callbackID = self.partialResultHandler.register { _, data in
+                return try? PostcardDecoder().decode(Manga.self, from: data)
+            }
+            defer { self.partialResultHandler.remove(id: callbackID) }
+
             let function = try self.module.findFunction(name: "get_manga_update")
             let mangaPointer = try self.store.storeEncoded(Manga(legacy: manga, sourceKey: self.sourceKey))
             defer { self.store.remove(at: mangaPointer) }
 
             let result: Int32 = try function.call(mangaPointer, needsDetails ? Int32(1) : Int32(0), needsChapters ? Int32(1) : Int32(0))
             let data = try self.handleResult(result: result)
-            let updated = try PostcardDecoder().decode(Manga.self, from: data)
+            var updated = try PostcardDecoder().decode(Manga.self, from: data)
+            if let partial = self.partialResultHandler.data(for: callbackID) as? Manga {
+                updated = partial.copy(from: updated)
+            }
             return updated.copy(from: Manga(legacy: manga, sourceKey: self.sourceKey)).legacy(sourceKey: self.sourceKey)
         }
     }

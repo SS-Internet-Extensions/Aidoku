@@ -14,6 +14,7 @@ struct Env: SourceLibrary {
     static let namespace = "env"
 
     let module: Module
+    let partialResultHandler: LegacyPartialResultHandler?
     let printHandler: (String) -> Void
 
     func link() throws {
@@ -37,8 +38,16 @@ struct Env: SourceLibrary {
         Thread.sleep(forTimeInterval: TimeInterval(max(0, seconds)))
     }
 
-    func sendPartialResult(memory _: Memory, valuePointer _: Int32) {
-        // Partial streaming updates are optional for the legacy UI.
+    func sendPartialResult(memory: Memory, valuePointer: Int32) {
+        guard
+            valuePointer >= 0,
+            case let pointer = UInt32(valuePointer),
+            let length: UInt32 = try? memory.readValues(offset: pointer, length: 1)[0],
+            let data = try? memory.readData(offset: pointer + 8, length: length + 8)
+        else {
+            return
+        }
+        partialResultHandler?.trigger(with: data)
     }
 }
 
