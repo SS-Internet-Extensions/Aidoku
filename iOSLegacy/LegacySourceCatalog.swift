@@ -214,8 +214,8 @@ final class LegacySourceCatalogClient {
         guard let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw LegacySourceCatalogError.missingApplicationSupportDirectory
         }
-        let dot = UnicodeScalar(".")!
-        let dash = UnicodeScalar("-")!
+        let dot = UnicodeScalar(".")
+        let dash = UnicodeScalar("-")
         let safeId = source.id.unicodeScalars.reduce(into: "") { result, scalar in
             if CharacterSet.alphanumerics.contains(scalar) || scalar == dot || scalar == dash {
                 result.unicodeScalars.append(scalar)

@@ -94,8 +94,8 @@ final class AidokuRunnerLegacyPackageInstaller {
     }
 
     private func sanitized(_ value: String) -> String {
-        let dot = UnicodeScalar(".")!
-        let dash = UnicodeScalar("-")!
+        let dot = UnicodeScalar(".")
+        let dash = UnicodeScalar("-")
         return value.unicodeScalars.reduce(into: "") { result, scalar in
             if CharacterSet.alphanumerics.contains(scalar) || scalar == dot || scalar == dash {
                 result.unicodeScalars.append(scalar)
