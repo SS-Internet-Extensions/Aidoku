@@ -188,7 +188,7 @@
 				1000000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */,
 				1000000000000000000000B1 /* XCRemoteSwiftPackageReference "SDWebImage" */,
 				1000000000000000000000B3 /* XCRemoteSwiftPackageReference "SDWebImageWebPCoder" */,
-				1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */,
+				1000000000000000000000B5 /* XCLocalSwiftPackageReference "AVIFLegacy" */,
 			);
 			productRefGroup = 100000000000000000000041 /* Products */;
 			projectDirPath = "";
@@ -353,6 +353,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Wasm3Legacy;
 		};
+		1000000000000000000000B5 /* XCLocalSwiftPackageReference "AVIFLegacy" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/AVIFLegacy;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -388,14 +392,6 @@
 				version = 0.15.0;
 			};
 		};
-		1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/awxkee/avif.swift.git";
-			requirement = {
-				kind = exactVersion;
-				version = 1.1.7;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -426,7 +422,7 @@
 		};
 		1000000000000000000000B4 /* avif */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */;
+			package = 1000000000000000000000B5 /* XCLocalSwiftPackageReference "AVIFLegacy" */;
 			productName = avif;
 		};
 /* End XCSwiftPackageProductDependency section */
