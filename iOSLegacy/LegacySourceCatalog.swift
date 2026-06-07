@@ -16,6 +16,57 @@ struct LegacySourceCatalog {
     let sources: [LegacySourceInfo]
 }
 
+final class LegacySourceRepositoryStore {
+    static let shared = LegacySourceRepositoryStore()
+
+    private let defaultsKey = "AidokuLegacy.sourceRepositories"
+
+    var repositoryURLs: [URL] {
+        let stored = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        let urls = stored.compactMap(URL.init(string:))
+        if urls.isEmpty {
+            return [LegacySourceCatalog.communityIndexURL]
+        }
+        return urls
+    }
+
+    func add(_ url: URL) {
+        var urls = repositoryURLs
+        guard !urls.contains(url) else { return }
+        urls.append(url)
+        save(urls)
+    }
+
+    func resetToDefault() {
+        save([LegacySourceCatalog.communityIndexURL])
+    }
+
+    func normalizedURL(from rawValue: String) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let value = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
+            ? trimmed
+            : "https://\(trimmed)"
+        guard let url = URL(string: value), let host = url.host?.lowercased() else {
+            return nil
+        }
+        if url.path.lowercased().hasSuffix(".json") {
+            return url
+        }
+        if host == "github.com" {
+            let parts = url.path.split(separator: "/")
+            if parts.count >= 2 {
+                return URL(string: "https://raw.githubusercontent.com/\(parts[0])/\(parts[1])/main/index.min.json")
+            }
+        }
+        return url.appendingPathComponent("index.min.json")
+    }
+
+    private func save(_ urls: [URL]) {
+        UserDefaults.standard.set(urls.map { $0.absoluteString }, forKey: defaultsKey)
+    }
+}
+
 struct LegacySourceInfo: Decodable {
     let id: String
     let name: String
@@ -163,6 +214,45 @@ final class LegacySourceCatalogClient {
         return task
     }
 
+    func fetchCatalogs(
+        from urls: [URL],
+        completion: @escaping (Result<LegacySourceCatalog, Error>) -> Void
+    ) {
+        let uniqueURLs = Array(Set(urls)).sorted { $0.absoluteString < $1.absoluteString }
+        guard !uniqueURLs.isEmpty else {
+            completion(.failure(LegacySourceCatalogError.emptyResponse))
+            return
+        }
+
+        var catalogs: [LegacySourceCatalog] = []
+        var errors: [Error] = []
+        var remaining = uniqueURLs.count
+
+        func finishOne() {
+            remaining -= 1
+            guard remaining == 0 else { return }
+            if !catalogs.isEmpty {
+                completion(.success(Self.combine(catalogs)))
+            } else {
+                completion(.failure(errors.first ?? LegacySourceCatalogError.emptyResponse))
+            }
+        }
+
+        for url in uniqueURLs {
+            fetchCatalog(from: url) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                        case .success(let catalog):
+                            catalogs.append(catalog)
+                        case .failure(let error):
+                            errors.append(error)
+                    }
+                    finishOne()
+                }
+            }
+        }
+    }
+
     @discardableResult
     func downloadPackage(
         for source: LegacySourceInfo,
@@ -211,6 +301,27 @@ final class LegacySourceCatalogClient {
             name: "Legacy Source List",
             feedbackURL: nil,
             sources: legacySources.map { $0.with(repositoryURL: url) }
+        )
+    }
+
+    private static func combine(_ catalogs: [LegacySourceCatalog]) -> LegacySourceCatalog {
+        var sourcesByID: [String: LegacySourceInfo] = [:]
+        for catalog in catalogs {
+            for source in catalog.sources {
+                if let existing = sourcesByID[source.id], existing.version >= source.version {
+                    continue
+                }
+                sourcesByID[source.id] = source
+            }
+        }
+        let sources = sourcesByID.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        return LegacySourceCatalog(
+            url: catalogs.first?.url ?? LegacySourceCatalog.communityIndexURL,
+            name: catalogs.count == 1 ? catalogs[0].name : "Source Repositories",
+            feedbackURL: catalogs.first?.feedbackURL,
+            sources: sources
         )
     }
 

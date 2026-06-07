@@ -14,6 +14,17 @@ import avif
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
+private let aidokuLegacyReaderImageSession: URLSession = {
+    let configuration = URLSessionConfiguration.default
+    configuration.requestCachePolicy = .returnCacheDataElseLoad
+    configuration.timeoutIntervalForRequest = 30
+    configuration.httpMaximumConnectionsPerHost = 4
+    configuration.httpAdditionalHeaders = [
+        "Accept": aidokuLegacyImageAcceptHeader,
+        "User-Agent": aidokuLegacyImageUserAgent
+    ]
+    return URLSession(configuration: configuration)
+}()
 
 enum LegacyPalette {
     static var isDarkTheme: Bool {
@@ -239,6 +250,20 @@ final class LegacyLibraryStore {
         save(current)
     }
 
+    func update(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
+        var current = entries
+        guard let index = current.firstIndex(where: { $0.sourceKey == source.key && $0.manga.key == manga.key }) else {
+            return
+        }
+        current[index] = LegacyLibraryEntry(
+            sourceKey: source.key,
+            sourceName: source.name,
+            manga: manga,
+            dateAdded: current[index].dateAdded
+        )
+        save(current)
+    }
+
     func remove(sourceKey: String, mangaKey: String) {
         save(entries.filter { !($0.sourceKey == sourceKey && $0.manga.key == mangaKey) })
     }
@@ -344,6 +369,7 @@ final class LegacyImageLoader {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 25
+        configuration.httpMaximumConnectionsPerHost = 4
         configuration.httpAdditionalHeaders = [
             "Accept": aidokuLegacyImageAcceptHeader,
             "User-Agent": aidokuLegacyImageUserAgent
@@ -360,6 +386,7 @@ final class LegacyImageLoader {
     @discardableResult
     func load(
         url: URL,
+        source: AidokuRunnerLegacySource? = nil,
         targetHeight: CGFloat = 220,
         completion: @escaping (UIImage?) -> Void
     ) -> URLSessionDataTask? {
@@ -369,10 +396,56 @@ final class LegacyImageLoader {
             return nil
         }
 
-        let task = session.dataTask(with: URLRequest(url: url)) { [weak self] data, _, _ in
-            let image = data.flatMap { self?.makeImage(from: $0, maxPixelHeight: targetHeight * UIScreen.main.scale) }
+        if let source = source {
+            source.runner.getImageRequest(url: url, context: nil) { [weak self] result in
+                let request: URLRequest
+                switch result {
+                    case .success(let imageRequest):
+                        request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                    case .failure:
+                        request = legacyFallbackImageRequest(url: url, source: source)
+                }
+                self?.load(
+                    request: request,
+                    cacheKey: key,
+                    targetHeight: targetHeight,
+                    forceDownsample: true,
+                    completion: completion
+                )
+            }
+            return nil
+        }
+
+        return load(
+            request: legacyFallbackImageRequest(url: url),
+            cacheKey: key,
+            targetHeight: targetHeight,
+            forceDownsample: true,
+            completion: completion
+        )
+    }
+
+    @discardableResult
+    private func load(
+        request: URLRequest,
+        cacheKey key: NSURL,
+        targetHeight: CGFloat,
+        forceDownsample: Bool,
+        completion: @escaping (UIImage?) -> Void
+    ) -> URLSessionDataTask {
+        let task = session.dataTask(with: request) { [weak self] data, _, _ in
+            let image = data.flatMap { data -> UIImage? in
+                return autoreleasepool {
+                    self?.makeImage(
+                        from: data,
+                        maxPixelHeight: targetHeight * UIScreen.main.scale,
+                        forceDownsample: forceDownsample
+                    )
+                }
+            }
             if let image = image {
-                self?.cache.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * image.scale * image.scale))
+                let pixels = image.size.width * image.size.height * image.scale * image.scale
+                self?.cache.setObject(image, forKey: key, cost: max(1, Int(min(pixels, CGFloat(16 * 1024 * 1024)))))
             }
             DispatchQueue.main.async {
                 completion(image)
@@ -382,15 +455,15 @@ final class LegacyImageLoader {
         return task
     }
 
-    func makeImage(from data: Data, maxPixelHeight: CGFloat) -> UIImage? {
+    func makeImage(from data: Data, maxPixelHeight: CGFloat, forceDownsample: Bool = false) -> UIImage? {
         if isAVIF(data) {
-            return makeAVIFImage(from: data, maxPixelHeight: maxPixelHeight)
+            return makeAVIFImage(from: data, maxPixelHeight: maxPixelHeight, forceDownsample: forceDownsample)
         }
         if isWebP(data) {
-            return makeWebPImage(from: data, maxPixelHeight: maxPixelHeight)
+            return makeWebPImage(from: data, maxPixelHeight: maxPixelHeight, forceDownsample: forceDownsample)
         }
 
-        guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
+        guard forceDownsample || UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
             return UIImage(data: data)
         }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
@@ -408,8 +481,24 @@ final class LegacyImageLoader {
         return UIImage(cgImage: cgImage)
     }
 
-    private func makeWebPImage(from data: Data, maxPixelHeight: CGFloat) -> UIImage? {
-        guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
+    func preparedImage(_ image: UIImage, maxPixelHeight: CGFloat) -> UIImage {
+        let limit = max(800, maxPixelHeight)
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        guard pixelHeight > limit, pixelWidth > 0 else {
+            return image
+        }
+        let scale = limit / pixelHeight
+        let targetSize = CGSize(width: max(1, pixelWidth * scale), height: limit)
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, 1)
+        image.draw(in: CGRect(origin: .zero, size: targetSize))
+        let scaledImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return scaledImage ?? image
+    }
+
+    private func makeWebPImage(from data: Data, maxPixelHeight: CGFloat, forceDownsample: Bool) -> UIImage? {
+        guard forceDownsample || UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
             return SDImageWebPCoder.shared.decodedImage(with: data, options: nil)
         }
         let maxPixelSize = max(800, Int(maxPixelHeight))
@@ -419,8 +508,8 @@ final class LegacyImageLoader {
         )
     }
 
-    private func makeAVIFImage(from data: Data, maxPixelHeight: CGFloat) -> UIImage? {
-        guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
+    private func makeAVIFImage(from data: Data, maxPixelHeight: CGFloat, forceDownsample: Bool) -> UIImage? {
+        guard forceDownsample || UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") else {
             return AVIFDecoder.decode(data)
         }
         let maxPixelSize = max(800, Int(maxPixelHeight))
@@ -485,9 +574,12 @@ final class LegacyImageLoader {
 
 final class LegacyLibraryViewController: UITableViewController {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
+    private let automaticUpdateDefaultsKey = "AidokuLegacy.library.automaticUpdates"
+    private let lastAutomaticUpdateDefaultsKey = "AidokuLegacy.library.lastAutomaticUpdate"
     private var entries: [LegacyLibraryEntry] = []
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
+    private var isUpdatingLibrary = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -508,6 +600,11 @@ final class LegacyLibraryViewController: UITableViewController {
             self?.reloadData()
         }
         reloadData()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        updateLibraryIfNeeded()
     }
 
     deinit {
@@ -546,7 +643,7 @@ final class LegacyLibraryViewController: UITableViewController {
         let entry = entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
         if let source = source(for: entry), let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, targetHeight: 130) { image in
+            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
                 guard
                     let visibleIndexPath = tableView.indexPath(for: cell),
                     visibleIndexPath == indexPath
@@ -588,6 +685,46 @@ final class LegacyLibraryViewController: UITableViewController {
 
     private func source(for entry: LegacyLibraryEntry) -> AidokuRunnerLegacySource? {
         return sources.first { $0.key == entry.sourceKey }
+    }
+
+    private func updateLibraryIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: automaticUpdateDefaultsKey), !isUpdatingLibrary else { return }
+        guard !entries.isEmpty else { return }
+        let now = Date()
+        if
+            let lastUpdate = UserDefaults.standard.object(forKey: lastAutomaticUpdateDefaultsKey) as? Date,
+            now.timeIntervalSince(lastUpdate) < 15 * 60
+        {
+            return
+        }
+        UserDefaults.standard.set(now, forKey: lastAutomaticUpdateDefaultsKey)
+        let updateItems = entries.compactMap { entry -> (LegacyLibraryEntry, AidokuRunnerLegacySource)? in
+            guard let source = source(for: entry) else { return nil }
+            return (entry, source)
+        }
+        guard !updateItems.isEmpty else { return }
+        isUpdatingLibrary = true
+        navigationItem.prompt = "Updating library..."
+        updateLibraryItems(updateItems, index: 0)
+    }
+
+    private func updateLibraryItems(_ items: [(LegacyLibraryEntry, AidokuRunnerLegacySource)], index: Int) {
+        guard index < items.count else {
+            isUpdatingLibrary = false
+            navigationItem.prompt = nil
+            reloadData()
+            return
+        }
+        let item = items[index]
+        item.1.runner.getMangaUpdate(manga: item.0.manga, needsDetails: true, needsChapters: true) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if case .success(let manga) = result {
+                    LegacyLibraryStore.shared.update(manga: manga, source: item.1)
+                }
+                self.updateLibraryItems(items, index: index + 1)
+            }
+        }
     }
 
     private func showAlert(title: String, message: String) {
@@ -661,7 +798,7 @@ final class LegacyHistoryViewController: UITableViewController {
         let entry = entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
         if let source = source(for: entry), let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, targetHeight: 130) { image in
+            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
                 guard
                     let visibleIndexPath = tableView.indexPath(for: cell),
                     visibleIndexPath == indexPath
@@ -744,6 +881,7 @@ final class LegacySettingsViewController: UITableViewController {
         case readerMode
         case readerMemory
         case darkTheme
+        case automaticLibraryUpdates
         case clearImageCache
         case clearHistory
         case clearLibrary
@@ -787,6 +925,11 @@ final class LegacySettingsViewController: UITableViewController {
                 cell.textLabel?.text = "Dark Theme"
                 cell.detailTextLabel?.text = enabled ? "Use dark lists and navigation bars" : "Use the light legacy theme"
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .automaticLibraryUpdates:
+                let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.library.automaticUpdates")
+                cell.textLabel?.text = "Automatic Library Updates"
+                cell.detailTextLabel?.text = enabled ? "Fetch manga details and chapters when Library opens" : "Update saved manga manually"
+                cell.accessoryType = enabled ? .checkmark : .none
             case .clearImageCache:
                 cell.textLabel?.text = "Clear Image Cache"
                 cell.detailTextLabel?.text = "Remove cached covers and reader pages."
@@ -820,6 +963,10 @@ final class LegacySettingsViewController: UITableViewController {
                 tableView.backgroundColor = LegacyPalette.background
                 tableView.reloadData()
                 NotificationCenter.default.post(name: .legacyAppearanceDidChange, object: nil)
+            case .automaticLibraryUpdates:
+                let key = "AidokuLegacy.library.automaticUpdates"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
             case .clearImageCache:
                 LegacyImageLoader.shared.clear()
             case .clearHistory:
@@ -887,6 +1034,7 @@ final class LegacySettingsViewController: UITableViewController {
 
 final class LegacyRootViewController: UITableViewController {
     private let catalogClient = LegacySourceCatalogClient()
+    private let repositoryStore = LegacySourceRepositoryStore.shared
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private let searchController = UISearchController(searchResultsController: nil)
 
@@ -922,6 +1070,12 @@ final class LegacyRootViewController: UITableViewController {
             target: self,
             action: #selector(showInstalledSources)
         )
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Repos",
+            style: .plain,
+            target: self,
+            action: #selector(showRepositoryOptions)
+        )
 
         reloadInstalledSources()
         reloadCatalog()
@@ -931,7 +1085,7 @@ final class LegacyRootViewController: UITableViewController {
         loadingText = "Loading Aidoku Community Sources..."
         tableView.reloadData()
 
-        catalogClient.fetchCatalog { [weak self] result in
+        catalogClient.fetchCatalogs(from: repositoryStore.repositoryURLs) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.refreshControl?.endRefreshing()
@@ -971,6 +1125,54 @@ final class LegacyRootViewController: UITableViewController {
 
         let viewController = LegacyInstalledSourcesViewController(sources: installedSources)
         navigationController?.pushViewController(viewController, animated: true)
+    }
+
+    @objc private func showRepositoryOptions() {
+        let repos = repositoryStore.repositoryURLs.map { $0.absoluteString }.joined(separator: "\n")
+        let alert = UIAlertController(title: "Source Repositories", message: repos, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Add Source Repo", style: .default) { [weak self] _ in
+            self?.promptForRepository()
+        })
+        alert.addAction(UIAlertAction(title: "Refresh Repos", style: .default) { [weak self] _ in
+            self?.reloadCatalog()
+        })
+        alert.addAction(UIAlertAction(title: "Reset to Community Repo", style: .destructive) { [weak self] _ in
+            self?.repositoryStore.resetToDefault()
+            self?.reloadCatalog()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.leftBarButtonItem
+        }
+        present(alert, animated: true)
+    }
+
+    private func promptForRepository() {
+        let alert = UIAlertController(
+            title: "Add Source Repo",
+            message: "Paste an index.min.json URL or a GitHub owner/repo URL.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "https://example.com/sources/index.min.json"
+            textField.keyboardType = .URL
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+            guard
+                let self = self,
+                let value = alert?.textFields?.first?.text,
+                let url = self.repositoryStore.normalizedURL(from: value)
+            else {
+                self?.showAlert(title: "Invalid Repo", message: "Enter a valid source repository URL.")
+                return
+            }
+            self.repositoryStore.add(url)
+            self.reloadCatalog()
+        })
+        present(alert, animated: true)
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
@@ -1145,6 +1347,8 @@ extension LegacyRootViewController: UISearchResultsUpdating {
 }
 
 final class LegacyInstalledSourcesViewController: UITableViewController {
+    private let catalogClient = LegacySourceCatalogClient()
+    private let repositoryStore = LegacySourceRepositoryStore.shared
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private var sources: [AidokuRunnerLegacySource]
     private var observer: NSObjectProtocol?
@@ -1170,12 +1374,10 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
         navigationController?.navigationBar.prefersLargeTitles = true
         refreshControl = UIRefreshControl()
         refreshControl?.addTarget(self, action: #selector(reloadSources), for: .valueChanged)
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Batch Search",
-            style: .plain,
-            target: self,
-            action: #selector(openBatchSearch)
-        )
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: "Batch Search", style: .plain, target: self, action: #selector(openBatchSearch)),
+            UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateInstalledSources))
+        ]
         observer = NotificationCenter.default.addObserver(
             forName: .legacyInstalledSourcesDidChange,
             object: nil,
@@ -1245,6 +1447,74 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
             LegacyBatchMangaSearchViewController(sources: loadedSources),
             animated: true
         )
+    }
+
+    @objc private func updateInstalledSources() {
+        let installed = sources.isEmpty ? packageInstaller.loadInstalledSources() : sources
+        guard !installed.isEmpty else {
+            showAlert(title: "No Sources", message: "Install sources before checking for updates.")
+            return
+        }
+        navigationItem.prompt = "Checking source updates..."
+        catalogClient.fetchCatalogs(from: repositoryStore.repositoryURLs) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                    case .success(let catalog):
+                        let installedByKey = Dictionary(uniqueKeysWithValues: installed.map { ($0.key, $0) })
+                        let updates = catalog.sources.filter { info in
+                            guard let current = installedByKey[info.id] else { return false }
+                            return info.version > current.version && info.resolvedDownloadURL != nil
+                        }
+                        guard !updates.isEmpty else {
+                            self.navigationItem.prompt = nil
+                            self.showAlert(title: "Sources Current", message: "Installed sources are already up to date.")
+                            return
+                        }
+                        self.installSourceUpdates(updates, updatedCount: 0)
+                    case .failure(let error):
+                        self.navigationItem.prompt = nil
+                        self.showAlert(title: "Update Failed", message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func installSourceUpdates(_ updates: [LegacySourceInfo], updatedCount: Int) {
+        guard let next = updates.first else {
+            navigationItem.prompt = nil
+            reloadSources()
+            NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
+            showAlert(title: "Sources Updated", message: "Updated \(updatedCount) source package(s).")
+            return
+        }
+        navigationItem.prompt = "Updating \(next.name)..."
+        catalogClient.downloadPackage(for: next) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                    case .success(let packageURL):
+                        self.installDownloadedUpdate(packageURL, remaining: Array(updates.dropFirst()), updatedCount: updatedCount)
+                    case .failure:
+                        self.installSourceUpdates(Array(updates.dropFirst()), updatedCount: updatedCount)
+                }
+            }
+        }
+    }
+
+    private func installDownloadedUpdate(_ packageURL: URL, remaining: [LegacySourceInfo], updatedCount: Int) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let didInstall = (try? self.packageInstaller.installPackage(at: packageURL)) != nil
+            DispatchQueue.main.async {
+                self.installSourceUpdates(remaining, updatedCount: updatedCount + (didInstall ? 1 : 0))
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 
@@ -1336,7 +1606,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         let manga = section.entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
         if let coverURL = manga.coverURL(relativeTo: section.source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, targetHeight: 130) { image in
+            LegacyImageLoader.shared.load(url: coverURL, source: section.source, targetHeight: 130) { image in
                 guard
                     let visibleIndexPath = tableView.indexPath(for: cell),
                     visibleIndexPath == indexPath
@@ -1550,30 +1820,32 @@ final class LegacySourceMenuViewController: UITableViewController {
 
     private func loadDynamicListings() {
         source.runner.getListings { [weak self] result in
-            guard let self = self else { return }
-            self.rows.removeAll {
-                if case .message(let title, _) = $0 {
-                    return title == "Loading Listings..." || title == "Listings Unavailable"
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.rows.removeAll {
+                    if case .message(let title, _) = $0 {
+                        return title == "Loading Listings..." || title == "Listings Unavailable"
+                    }
+                    return false
                 }
-                return false
+                switch result {
+                    case .success(let listings):
+                        let existing = Set(self.source.staticListings.map { $0.id })
+                        let dynamicRows = listings
+                            .filter { !existing.contains($0.id) }
+                            .map { Row.listing($0) }
+                        let prefixCount = self.fixedPrefixCount
+                        let insertIndex = min(prefixCount + self.source.staticListings.count, self.rows.count)
+                        self.rows.insert(contentsOf: dynamicRows, at: insertIndex)
+                    case .failure(let error):
+                        let prefixCount = self.fixedPrefixCount
+                        self.rows.insert(
+                            .message(title: "Listings Unavailable", subtitle: error.localizedDescription),
+                            at: min(prefixCount + self.source.staticListings.count, self.rows.count)
+                        )
+                }
+                self.tableView.reloadData()
             }
-            switch result {
-                case .success(let listings):
-                    let existing = Set(self.source.staticListings.map { $0.id })
-                    let dynamicRows = listings
-                        .filter { !existing.contains($0.id) }
-                        .map { Row.listing($0) }
-                    let prefixCount = self.fixedPrefixCount
-                    let insertIndex = min(prefixCount + self.source.staticListings.count, self.rows.count)
-                    self.rows.insert(contentsOf: dynamicRows, at: insertIndex)
-                case .failure(let error):
-                    let prefixCount = self.fixedPrefixCount
-                    self.rows.insert(
-                        .message(title: "Listings Unavailable", subtitle: error.localizedDescription),
-                        at: min(prefixCount + self.source.staticListings.count, self.rows.count)
-                    )
-            }
-            self.tableView.reloadData()
         }
     }
 
@@ -1716,14 +1988,16 @@ final class LegacySourceSettingsViewController: UITableViewController {
     private func loadSettings() {
         guard source.runner.features.dynamicSettings else { return }
         source.getSettings { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-                case .success(let settings):
-                    self.settings = settings
-                    self.buildSections()
-                    self.tableView.reloadData()
-                case .failure(let error):
-                    self.showMessage(title: "Settings Failed", message: error.localizedDescription)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                    case .success(let settings):
+                        self.settings = settings
+                        self.buildSections()
+                        self.tableView.reloadData()
+                    case .failure(let error):
+                        self.showMessage(title: "Settings Failed", message: error.localizedDescription)
+                }
             }
         }
     }
@@ -2421,7 +2695,7 @@ final class LegacySourceHomeViewController: UITableViewController {
     private func loadImage(for link: AidokuRunnerLegacyHomeLink, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
         guard let url = imageURL(for: link) else { return }
-        LegacyImageLoader.shared.load(url: url, targetHeight: 130) { image in
+        LegacyImageLoader.shared.load(url: url, source: source, targetHeight: 130) { image in
             guard
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
                 visibleIndexPath == indexPath
@@ -2434,7 +2708,7 @@ final class LegacySourceHomeViewController: UITableViewController {
     private func loadCover(for manga: AidokuRunnerLegacyManga, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
         guard let url = manga.coverURL(relativeTo: source.urls.first) else { return }
-        LegacyImageLoader.shared.load(url: url, targetHeight: 130) { image in
+        LegacyImageLoader.shared.load(url: url, source: source, targetHeight: 130) { image in
             guard
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
                 visibleIndexPath == indexPath
@@ -2572,7 +2846,7 @@ final class LegacyMangaListViewController: UITableViewController {
         let manga = entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
         if let coverURL = manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, targetHeight: 130) { image in
+            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
                 guard
                     let visibleIndexPath = tableView.indexPath(for: cell),
                     visibleIndexPath == indexPath
@@ -3145,15 +3419,14 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
 }
 
 final class LegacyMangaDetailViewController: UITableViewController {
-    private enum Section: Int {
-        case details
-        case reading
-        case chapters
-    }
-
     private enum ReadingAction {
         case resume(LegacyHistoryEntry)
         case start(AidokuRunnerLegacyChapter)
+    }
+
+    private struct ChapterGroup {
+        let title: String
+        let chapters: [AidokuRunnerLegacyChapter]
     }
 
     private let source: AidokuRunnerLegacySource
@@ -3187,35 +3460,33 @@ final class LegacyMangaDetailViewController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        return 3
+        return 2 + max(1, chapterGroups.count)
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        switch Section(rawValue: section) {
-            case .details:
-                return "Details"
-            case .reading:
-                return readingActions.isEmpty ? nil : "Reading"
-            case .chapters:
-                return "Chapters"
-            case .none:
-                return nil
+        if section == 0 {
+            return "Details"
         }
+        if section == 1 {
+            return readingActions.isEmpty ? nil : "Reading"
+        }
+        let groups = chapterGroups
+        if groups.isEmpty {
+            return "Chapters"
+        }
+        return groups[section - 2].title
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        switch Section(rawValue: section) {
-            case .details:
-                return 1
-            case .reading:
-                return readingActions.count
-            case .chapters:
-                break
-            case .none:
-                return 0
+        if section == 0 {
+            return 1
         }
-        let count = manga.chapters?.count ?? 0
-        return count == 0 ? 1 : count
+        if section == 1 {
+            return readingActions.count
+        }
+        let groups = chapterGroups
+        guard !groups.isEmpty else { return 1 }
+        return groups[section - 2].chapters.count
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -3227,10 +3498,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
         cell.detailTextLabel?.numberOfLines = 3
         cell.imageView?.image = nil
 
-        if Section(rawValue: indexPath.section) == .details {
+        if indexPath.section == 0 {
             cell.imageView?.image = LegacyImageLoader.placeholder()
             if let coverURL = manga.coverURL(relativeTo: source.urls.first) {
-                LegacyImageLoader.shared.load(url: coverURL, targetHeight: 180) { image in
+                LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 180) { image in
                     guard
                         let visibleIndexPath = tableView.indexPath(for: cell),
                         visibleIndexPath == indexPath
@@ -3245,7 +3516,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return cell
         }
 
-        if Section(rawValue: indexPath.section) == .reading {
+        if indexPath.section == 1 {
             let actions = readingActions
             guard actions.indices.contains(indexPath.row) else { return cell }
             switch actions[indexPath.row] {
@@ -3262,7 +3533,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return cell
         }
 
-        guard let chapters = manga.chapters, !chapters.isEmpty else {
+        let groups = chapterGroups
+        guard groups.indices.contains(indexPath.section - 2), !groups[indexPath.section - 2].chapters.isEmpty else {
             cell.imageView?.image = nil
             cell.textLabel?.text = isLoading ? "Loading chapters..." : "No chapters."
             cell.detailTextLabel?.text = nil
@@ -3270,7 +3542,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return cell
         }
 
-        let chapter = chapters[indexPath.row]
+        let chapter = groups[indexPath.section - 2].chapters[indexPath.row]
         cell.imageView?.image = nil
         cell.textLabel?.text = chapter.legacyFormattedTitle
         cell.detailTextLabel?.text = chapter.legacyFormattedSubtitle(sourceKey: source.key)
@@ -3288,7 +3560,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if Section(rawValue: indexPath.section) == .reading {
+        if indexPath.section == 1 {
             let actions = readingActions
             guard actions.indices.contains(indexPath.row) else { return }
             switch actions[indexPath.row] {
@@ -3300,13 +3572,13 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return
         }
         guard
-            Section(rawValue: indexPath.section) == .chapters,
-            let chapters = manga.chapters,
-            chapters.indices.contains(indexPath.row)
+            indexPath.section >= 2,
+            chapterGroups.indices.contains(indexPath.section - 2),
+            chapterGroups[indexPath.section - 2].chapters.indices.contains(indexPath.row)
         else {
             return
         }
-        let chapter = chapters[indexPath.row]
+        let chapter = chapterGroups[indexPath.section - 2].chapters[indexPath.row]
         guard !chapter.locked else {
             showUnavailableChapterAlert(for: chapter)
             return
@@ -3318,17 +3590,19 @@ final class LegacyMangaDetailViewController: UITableViewController {
         isLoading = true
         tableView.reloadData()
         source.runner.getMangaUpdate(manga: manga, needsDetails: true, needsChapters: true) { [weak self] result in
-            guard let self = self else { return }
-            self.isLoading = false
-            switch result {
-                case .success(let updatedManga):
-                    self.manga = updatedManga
-                    self.errorMessage = nil
-                case .failure(let error):
-                    self.errorMessage = error.localizedDescription
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoading = false
+                switch result {
+                    case .success(let updatedManga):
+                        self.manga = self.filteredManga(updatedManga)
+                        self.errorMessage = nil
+                    case .failure(let error):
+                        self.errorMessage = error.localizedDescription
+                }
+                self.updateBookmarkButton()
+                self.tableView.reloadData()
             }
-            self.updateBookmarkButton()
-            self.tableView.reloadData()
         }
     }
 
@@ -3357,9 +3631,76 @@ final class LegacyMangaDetailViewController: UITableViewController {
         return actions
     }
 
+    private var displayChapters: [AidokuRunnerLegacyChapter] {
+        let chapters = manga.chapters ?? []
+        let selectedLanguages = selectedChapterLanguages()
+        guard selectedLanguages.count == 1, let selectedLanguage = selectedLanguages.first else {
+            return chapters
+        }
+        let filtered = chapters.filter { chapter in
+            chapter.normalizedLanguage == selectedLanguage || chapter.normalizedLanguage == nil
+        }
+        return filtered.isEmpty ? chapters : filtered
+    }
+
+    private var chapterGroups: [ChapterGroup] {
+        let chapters = displayChapters
+        guard !chapters.isEmpty else { return [] }
+        let grouped = Dictionary(grouping: chapters) { chapter -> String in
+            return chapter.normalizedLanguage ?? "unknown"
+        }
+        guard grouped.keys.count > 1 else {
+            return [ChapterGroup(title: "Chapters", chapters: chapters)]
+        }
+        let selectedLanguages = selectedChapterLanguages()
+        let orderedKeys = grouped.keys.sorted { lhs, rhs in
+            let lhsIndex = selectedLanguages.firstIndex(of: lhs) ?? Int.max
+            let rhsIndex = selectedLanguages.firstIndex(of: rhs) ?? Int.max
+            if lhsIndex != rhsIndex {
+                return lhsIndex < rhsIndex
+            }
+            return languageTitle(lhs).localizedCaseInsensitiveCompare(languageTitle(rhs)) == .orderedAscending
+        }
+        return orderedKeys.map { key in
+            ChapterGroup(title: "Chapters - \(languageTitle(key))", chapters: grouped[key] ?? [])
+        }
+    }
+
     private var firstReadableChapter: AidokuRunnerLegacyChapter? {
-        let chapters = (manga.chapters ?? []).filter { !$0.locked }
+        let chapters = displayChapters.filter { !$0.locked }
         return chapters.sorted(by: legacyChapterAscending).first
+    }
+
+    private func filteredManga(_ manga: AidokuRunnerLegacyManga) -> AidokuRunnerLegacyManga {
+        let selectedLanguages = selectedChapterLanguages()
+        guard selectedLanguages.count == 1, let selectedLanguage = selectedLanguages.first else {
+            return manga
+        }
+        guard let chapters = manga.chapters else {
+            return manga
+        }
+        let filtered = chapters.filter { chapter in
+            chapter.normalizedLanguage == selectedLanguage || chapter.normalizedLanguage == nil
+        }
+        guard !filtered.isEmpty else {
+            return manga
+        }
+        var copy = manga
+        copy.chapters = filtered
+        return copy
+    }
+
+    private func selectedChapterLanguages() -> [String] {
+        return (UserDefaults.standard.stringArray(forKey: "\(source.key).languages") ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    private func languageTitle(_ language: String) -> String {
+        if language == "unknown" {
+            return "Unknown Language"
+        }
+        return Locale.current.localizedString(forIdentifier: language) ?? language.uppercased()
     }
 
     private func legacyChapterAscending(_ lhs: AidokuRunnerLegacyChapter, _ rhs: AidokuRunnerLegacyChapter) -> Bool {
@@ -3416,7 +3757,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
 }
 
 private extension AidokuRunnerLegacyImageRequest {
-    func urlRequest() -> URLRequest {
+    func urlRequest(source: AidokuRunnerLegacySource? = nil, fallbackURL: URL? = nil) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
@@ -3424,6 +3765,7 @@ private extension AidokuRunnerLegacyImageRequest {
             request.setValue(header.value, forHTTPHeaderField: header.key)
         }
         request.applyLegacyImageDefaults(for: url)
+        request.applyLegacyRefererIfNeeded(source: source, imageURL: fallbackURL ?? url)
         return request
     }
 }
@@ -3446,11 +3788,24 @@ private extension URLRequest {
         }
         timeoutInterval = 30
     }
+
+    mutating func applyLegacyRefererIfNeeded(source: AidokuRunnerLegacySource?, imageURL: URL) {
+        guard value(forHTTPHeaderField: "Referer") == nil else { return }
+        let refererURL = source?.urls.first ?? imageURL
+        guard let scheme = refererURL.scheme, let host = refererURL.host else { return }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.port = refererURL.port
+        guard let origin = components.url?.absoluteString else { return }
+        setValue(origin.hasSuffix("/") ? origin : origin + "/", forHTTPHeaderField: "Referer")
+    }
 }
 
-private func legacyFallbackImageRequest(url: URL) -> URLRequest {
+private func legacyFallbackImageRequest(url: URL, source: AidokuRunnerLegacySource? = nil) -> URLRequest {
     var request = URLRequest(url: url)
     request.applyLegacyImageDefaults(for: url)
+    request.applyLegacyRefererIfNeeded(source: source, imageURL: url)
     return request
 }
 
@@ -3480,7 +3835,7 @@ private enum LegacyReaderFactory {
     }
 }
 
-private final class LegacyReaderViewController: UITableViewController {
+private final class LegacyReaderViewController: UITableViewController, UIGestureRecognizerDelegate {
     private let source: AidokuRunnerLegacySource
     private let manga: AidokuRunnerLegacyManga
     private let chapter: AidokuRunnerLegacyChapter
@@ -3492,7 +3847,9 @@ private final class LegacyReaderViewController: UITableViewController {
     private var lastSavedHistoryPageIndex: Int?
     private var lastHistorySaveDate = Date.distantPast
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
+    private let overlayView = LegacyReaderOverlayView()
     private var barsHidden = false
+    private var didShowTapOverlay = false
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
     }
@@ -3531,8 +3888,9 @@ private final class LegacyReaderViewController: UITableViewController {
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
-        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(toggleBars))
+        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleReaderTap(_:)))
         tapRecognizer.cancelsTouchesInView = false
+        tapRecognizer.delegate = self
         tableView.addGestureRecognizer(tapRecognizer)
         updateReaderMode()
         loadPages()
@@ -3543,6 +3901,13 @@ private final class LegacyReaderViewController: UITableViewController {
         enforceReaderContainer()
         navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
         updateReaderMode()
+        installOverlayIfNeeded()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        installOverlayIfNeeded()
+        showTapOverlayIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
@@ -3559,6 +3924,7 @@ private final class LegacyReaderViewController: UITableViewController {
         }
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
+        overlayView.removeFromSuperview()
     }
 
     override var prefersStatusBarHidden: Bool {
@@ -3628,16 +3994,18 @@ private final class LegacyReaderViewController: UITableViewController {
         if !pages.isEmpty, indexPath.row < pages.count {
             currentPageIndex = indexPath.row
             recordHistory(pageIndex: indexPath.row, force: false)
+            updatePageHUD()
         }
 
         let preloadCount = max(1, UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages"))
         let maxIndex = min(pages.count - 1, indexPath.row + preloadCount)
         guard maxIndex >= indexPath.row else { return }
+        let source = self.source
         for pageIndex in (indexPath.row...maxIndex) {
             guard case .url(let url, let context) = pages[pageIndex].content else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
                 if case .success(let request) = result {
-                    URLSession.shared.dataTask(with: request.urlRequest()).resume()
+                    aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
                 }
             }
         }
@@ -3651,16 +4019,19 @@ private final class LegacyReaderViewController: UITableViewController {
             return
         }
         source.runner.getPageList(manga: manga, chapter: chapter) { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-                case .success(let pages):
-                    self.pages = pages
-                    self.message = pages.isEmpty ? "No pages." : ""
-                case .failure(let error):
-                    self.message = self.readerMessage(for: error)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                    case .success(let pages):
+                        self.pages = pages
+                        self.message = pages.isEmpty ? "No pages." : ""
+                    case .failure(let error):
+                        self.message = self.readerMessage(for: error)
+                }
+                self.tableView.reloadData()
+                self.scrollToInitialPageIfNeeded()
+                self.updatePageHUD()
             }
-            self.tableView.reloadData()
-            self.scrollToInitialPageIfNeeded()
         }
     }
 
@@ -3681,6 +4052,70 @@ private final class LegacyReaderViewController: UITableViewController {
                 self.tableView.reloadData()
             }
         })
+    }
+
+    @objc private func handleReaderTap(_ recognizer: UITapGestureRecognizer) {
+        let location = recognizer.location(in: view)
+        if location.x < view.bounds.width * 0.33 {
+            movePage(delta: -1)
+        } else if location.x > view.bounds.width * 0.67 {
+            movePage(delta: 1)
+        } else {
+            toggleBars()
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        return shouldHandleReaderTap(from: touch)
+    }
+
+    private func shouldHandleReaderTap(from touch: UITouch) -> Bool {
+        var view = touch.view
+        while let currentView = view {
+            if let zoomableView = currentView as? LegacyZoomableImageView {
+                return !zoomableView.isZoomed
+            }
+            view = currentView.superview
+        }
+        return true
+    }
+
+    private func movePage(delta: Int) {
+        guard !pages.isEmpty else { return }
+        let current = currentPageIndex ?? tableView.indexPathsForVisibleRows?.first?.row ?? 0
+        let next = min(max(current + delta, 0), pages.count - 1)
+        guard next != current else {
+            overlayView.showGuide(modeTitle: LegacyReaderMode.current.title)
+            return
+        }
+        tableView.scrollToRow(at: IndexPath(row: next, section: 0), at: .top, animated: true)
+        currentPageIndex = next
+        recordHistory(pageIndex: next, force: false)
+        updatePageHUD()
+    }
+
+    private func installOverlayIfNeeded() {
+        guard overlayView.superview == nil else { return }
+        guard let hostView = navigationController?.view ?? view else { return }
+        overlayView.translatesAutoresizingMaskIntoConstraints = false
+        hostView.addSubview(overlayView)
+        NSLayoutConstraint.activate([
+            overlayView.topAnchor.constraint(equalTo: hostView.topAnchor),
+            overlayView.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
+            overlayView.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
+            overlayView.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
+        ])
+        updatePageHUD()
+    }
+
+    private func showTapOverlayIfNeeded() {
+        guard !didShowTapOverlay else { return }
+        didShowTapOverlay = true
+        overlayView.showGuide(modeTitle: LegacyReaderMode.current.title)
+    }
+
+    private func updatePageHUD() {
+        overlayView.updatePage(index: currentPageIndex, count: pages.count)
     }
 
     private func enforceReaderContainer(relayout: Bool = true) {
@@ -3717,6 +4152,8 @@ private final class LegacyReaderViewController: UITableViewController {
                 at: .top,
                 animated: false
             )
+            self.currentPageIndex = self.initialPageIndex
+            self.updatePageHUD()
         }
     }
 
@@ -3756,7 +4193,7 @@ private final class LegacyReaderViewController: UITableViewController {
     }
 }
 
-private final class LegacyPagedReaderViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+private final class LegacyPagedReaderViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
     private let source: AidokuRunnerLegacySource
     private let manga: AidokuRunnerLegacyManga
     private let chapter: AidokuRunnerLegacyChapter
@@ -3770,7 +4207,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var lastSavedHistoryPageIndex: Int?
     private var lastHistorySaveDate = Date.distantPast
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
+    private let overlayView = LegacyReaderOverlayView()
     private var barsHidden = false
+    private var didShowTapOverlay = false
 
     init(
         source: AidokuRunnerLegacySource,
@@ -3827,8 +4266,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
-        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(toggleBars))
+        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleReaderTap(_:)))
         tapRecognizer.cancelsTouchesInView = false
+        tapRecognizer.delegate = self
         collectionView.addGestureRecognizer(tapRecognizer)
 
         loadPages()
@@ -3838,6 +4278,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         super.viewWillAppear(animated)
         enforceReaderContainer()
         navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
+        installOverlayIfNeeded()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        installOverlayIfNeeded()
+        showTapOverlayIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
@@ -3854,6 +4301,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
+        overlayView.removeFromSuperview()
     }
 
     override var prefersStatusBarHidden: Bool {
@@ -3920,6 +4368,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let pageIndex = pageIndex(forVisualIndex: indexPath.item)
         currentPageIndex = pageIndex
         recordHistory(pageIndex: pageIndex, force: false)
+        updatePageHUD()
         preloadPages(around: pageIndex)
     }
 
@@ -3931,16 +4380,19 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             return
         }
         source.runner.getPageList(manga: manga, chapter: chapter) { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-                case .success(let pages):
-                    self.pages = pages
-                    self.message = pages.isEmpty ? "No pages." : ""
-                case .failure(let error):
-                    self.message = self.readerMessage(for: error)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                    case .success(let pages):
+                        self.pages = pages
+                        self.message = pages.isEmpty ? "No pages." : ""
+                    case .failure(let error):
+                        self.message = self.readerMessage(for: error)
+                }
+                self.collectionView.reloadData()
+                self.scrollToInitialPageIfNeeded()
+                self.updatePageHUD()
             }
-            self.collectionView.reloadData()
-            self.scrollToInitialPageIfNeeded()
         }
     }
 
@@ -3952,6 +4404,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             self.scrollTo(pageIndex: self.initialPageIndex, animated: false)
             self.currentPageIndex = self.initialPageIndex
             self.recordHistory(pageIndex: self.initialPageIndex, force: true)
+            self.updatePageHUD()
         }
     }
 
@@ -3984,11 +4437,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             if offset == 0 { return [pageIndex] }
             return [pageIndex + offset, pageIndex - offset]
         }
+        let source = self.source
         for candidateIndex in candidateIndexes where pages.indices.contains(candidateIndex) {
             guard case .url(let url, let context) = pages[candidateIndex].content else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
                 if case .success(let request) = result {
-                    URLSession.shared.dataTask(with: request.urlRequest()).resume()
+                    aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
                 }
             }
         }
@@ -4011,6 +4465,70 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }, completion: { _ in
             self.collectionView.collectionViewLayout.invalidateLayout()
         })
+    }
+
+    @objc private func handleReaderTap(_ recognizer: UITapGestureRecognizer) {
+        let location = recognizer.location(in: view)
+        if location.x < view.bounds.width * 0.33 {
+            movePage(delta: -1)
+        } else if location.x > view.bounds.width * 0.67 {
+            movePage(delta: 1)
+        } else {
+            toggleBars()
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        return shouldHandleReaderTap(from: touch)
+    }
+
+    private func shouldHandleReaderTap(from touch: UITouch) -> Bool {
+        var view = touch.view
+        while let currentView = view {
+            if let zoomableView = currentView as? LegacyZoomableImageView {
+                return !zoomableView.isZoomed
+            }
+            view = currentView.superview
+        }
+        return true
+    }
+
+    private func movePage(delta: Int) {
+        guard !pages.isEmpty else { return }
+        let current = currentPageIndex ?? initialPageIndex
+        let next = min(max(current + delta, 0), pages.count - 1)
+        guard next != current else {
+            overlayView.showGuide(modeTitle: mode.title)
+            return
+        }
+        scrollTo(pageIndex: next, animated: true)
+        currentPageIndex = next
+        recordHistory(pageIndex: next, force: false)
+        updatePageHUD()
+    }
+
+    private func installOverlayIfNeeded() {
+        guard overlayView.superview == nil else { return }
+        guard let hostView = navigationController?.view ?? view else { return }
+        overlayView.translatesAutoresizingMaskIntoConstraints = false
+        hostView.addSubview(overlayView)
+        NSLayoutConstraint.activate([
+            overlayView.topAnchor.constraint(equalTo: hostView.topAnchor),
+            overlayView.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
+            overlayView.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
+            overlayView.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
+        ])
+        updatePageHUD()
+    }
+
+    private func showTapOverlayIfNeeded() {
+        guard !didShowTapOverlay else { return }
+        didShowTapOverlay = true
+        overlayView.showGuide(modeTitle: mode.title)
+    }
+
+    private func updatePageHUD() {
+        overlayView.updatePage(index: currentPageIndex, count: pages.count)
     }
 
     private func enforceReaderContainer(relayout: Bool = true) {
@@ -4084,8 +4602,199 @@ private final class LegacyPagedMessageCell: UICollectionViewCell {
     }
 }
 
+private final class LegacyReaderOverlayView: UIView {
+    private let leftZone = UILabel()
+    private let rightZone = UILabel()
+    private let modeLabel = UILabel()
+    private let pageLabel = UILabel()
+    private var hideWorkItem: DispatchWorkItem?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+
+        configureZone(leftZone, text: "Prev", color: UIColor.orange.withAlphaComponent(0.55))
+        configureZone(rightZone, text: "Next", color: UIColor.green.withAlphaComponent(0.50))
+        configurePill(modeLabel, fontSize: 22)
+        configurePill(pageLabel, fontSize: 15)
+        pageLabel.alpha = 0.95
+
+        addSubview(leftZone)
+        addSubview(rightZone)
+        addSubview(modeLabel)
+        addSubview(pageLabel)
+
+        NSLayoutConstraint.activate([
+            leftZone.topAnchor.constraint(equalTo: topAnchor),
+            leftZone.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leftZone.bottomAnchor.constraint(equalTo: bottomAnchor),
+            leftZone.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.33),
+
+            rightZone.topAnchor.constraint(equalTo: topAnchor),
+            rightZone.leadingAnchor.constraint(equalTo: leftZone.trailingAnchor),
+            rightZone.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rightZone.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            modeLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            modeLabel.bottomAnchor.constraint(equalTo: pageLabel.topAnchor, constant: -84),
+            modeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+            modeLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+
+            pageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            pageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -28),
+            pageLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 82)
+        ])
+        hideGuide(animated: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func updatePage(index: Int?, count: Int) {
+        guard count > 0, let index = index else {
+            pageLabel.text = nil
+            pageLabel.alpha = 0
+            return
+        }
+        pageLabel.text = "\(min(max(index + 1, 1), count)) / \(count)"
+        pageLabel.alpha = 0.95
+    }
+
+    func showGuide(modeTitle: String) {
+        hideWorkItem?.cancel()
+        modeLabel.text = modeTitle
+        UIView.animate(withDuration: 0.18) {
+            self.leftZone.alpha = 1
+            self.rightZone.alpha = 1
+            self.modeLabel.alpha = 1
+            self.pageLabel.alpha = self.pageLabel.text == nil ? 0 : 0.95
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.hideGuide(animated: true)
+        }
+        hideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
+    }
+
+    private func hideGuide(animated: Bool) {
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
+        let changes = {
+            self.leftZone.alpha = 0
+            self.rightZone.alpha = 0
+            self.modeLabel.alpha = 0
+        }
+        if animated {
+            UIView.animate(withDuration: 0.25, animations: changes)
+        } else {
+            changes()
+        }
+    }
+
+    private func configureZone(_ label: UILabel, text: String, color: UIColor) {
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.backgroundColor = color
+        label.text = text
+        label.textAlignment = .center
+        label.textColor = .white
+        label.font = UIFont.boldSystemFont(ofSize: 28)
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.layer.shadowOffset = CGSize(width: 0, height: 1)
+    }
+
+    private func configurePill(_ label: UILabel, fontSize: CGFloat) {
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.68)
+        label.textAlignment = .center
+        label.textColor = .white
+        label.font = UIFont.boldSystemFont(ofSize: fontSize)
+        label.layer.cornerRadius = 18
+        label.layer.masksToBounds = true
+        label.numberOfLines = 1
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.layoutMargins = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+    }
+}
+
+private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private let imageView = UIImageView()
+
+    var isZoomed: Bool {
+        return zoomScale > minimumZoomScale + 0.01
+    }
+
+    var image: UIImage? {
+        get { imageView.image }
+        set {
+            imageView.image = newValue
+            setZoomScale(1, animated: false)
+            setNeedsLayout()
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        delegate = self
+        minimumZoomScale = 1
+        maximumZoomScale = 4
+        bouncesZoom = true
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        delaysContentTouches = false
+        canCancelContentTouches = true
+        panGestureRecognizer.delegate = self
+
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .black
+        addSubview(imageView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if zoomScale == minimumZoomScale {
+            imageView.frame = bounds
+            contentSize = bounds.size
+        }
+        centerImageIfNeeded()
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerImageIfNeeded()
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer == panGestureRecognizer {
+            return zoomScale > minimumZoomScale
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    private func centerImageIfNeeded() {
+        let boundsSize = bounds.size
+        var frame = imageView.frame
+        frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) / 2 : 0
+        frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) / 2 : 0
+        imageView.frame = frame
+    }
+}
+
 private final class LegacyPageImageCell: UITableViewCell {
-    private let pageImageView = UIImageView()
+    private let pageImageView = LegacyZoomableImageView()
     private let pageLabel = UILabel()
     private var heightConstraint: NSLayoutConstraint!
     private var task: URLSessionDataTask?
@@ -4155,15 +4864,17 @@ private final class LegacyPageImageCell: UITableViewCell {
             case .url(let url, let context):
                 pageLabel.text = "Loading..."
                 source.runner.getImageRequest(url: url, context: context) { [weak self] result in
-                    guard let self = self, self.representedLoadID == loadID else { return }
-                    let request: URLRequest
-                    switch result {
-                        case .success(let imageRequest):
-                            request = imageRequest.urlRequest()
-                        case .failure:
-                            request = legacyFallbackImageRequest(url: url)
+                    DispatchQueue.main.async {
+                        guard let self = self, self.representedLoadID == loadID else { return }
+                        let request: URLRequest
+                        switch result {
+                            case .success(let imageRequest):
+                                request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                            case .failure:
+                                request = legacyFallbackImageRequest(url: url, source: source)
+                        }
+                        self.load(request: request, context: context, source: source, loadID: loadID)
                     }
-                    self.load(request: request, context: context, source: source, loadID: loadID)
                 }
             case .image(let data):
                 setImage(from: data, loadID: loadID)
@@ -4186,7 +4897,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         retriesRemaining: Int = 1
     ) {
         task?.cancel()
-        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        task = aidokuLegacyReaderImageSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 self?.handleLoadResult(
                     data: data,
@@ -4243,14 +4954,16 @@ private final class LegacyPageImageCell: UITableViewCell {
             return
         }
         source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { [weak self] result in
-            guard let self = self, self.representedLoadID == loadID else { return }
-            switch result {
-                case .success(let image?):
-                    self.setImage(image, loadID: loadID)
-                case .success(nil):
-                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
-                case .failure:
-                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                switch result {
+                    case .success(let image?):
+                        self.setProcessedImage(image, loadID: loadID)
+                    case .success(nil):
+                        self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+                    case .failure:
+                        self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+                }
             }
         }
     }
@@ -4273,6 +4986,19 @@ private final class LegacyPageImageCell: UITableViewCell {
         }
     }
 
+    private func setProcessedImage(_ image: UIImage, loadID: UUID) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let preparedImage = autoreleasepool {
+                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                self.setImage(preparedImage, loadID: loadID)
+            }
+        }
+    }
+
     private func setImage(
         from data: Data,
         loadID: UUID,
@@ -4280,7 +5006,9 @@ private final class LegacyPageImageCell: UITableViewCell {
     ) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
-            let image = LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            let image = autoreleasepool {
+                LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
                 if let image = image {
@@ -4357,7 +5085,7 @@ private final class LegacyPageImageCell: UITableViewCell {
 }
 
 private final class LegacyPagedImageCell: UICollectionViewCell {
-    private let pageImageView = UIImageView()
+    private let pageImageView = LegacyZoomableImageView()
     private let pageLabel = UILabel()
     private var task: URLSessionDataTask?
     private var representedLoadID = UUID()
@@ -4410,15 +5138,17 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             case .url(let url, let context):
                 pageLabel.text = "Loading..."
                 source.runner.getImageRequest(url: url, context: context) { [weak self] result in
-                    guard let self = self, self.representedLoadID == loadID else { return }
-                    let request: URLRequest
-                    switch result {
-                        case .success(let imageRequest):
-                            request = imageRequest.urlRequest()
-                        case .failure:
-                            request = legacyFallbackImageRequest(url: url)
+                    DispatchQueue.main.async {
+                        guard let self = self, self.representedLoadID == loadID else { return }
+                        let request: URLRequest
+                        switch result {
+                            case .success(let imageRequest):
+                                request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                            case .failure:
+                                request = legacyFallbackImageRequest(url: url, source: source)
+                        }
+                        self.load(request: request, context: context, source: source, loadID: loadID)
                     }
-                    self.load(request: request, context: context, source: source, loadID: loadID)
                 }
             case .image(let data):
                 setImage(from: data, loadID: loadID)
@@ -4439,7 +5169,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         retriesRemaining: Int = 1
     ) {
         task?.cancel()
-        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        task = aidokuLegacyReaderImageSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 self?.handleLoadResult(
                     data: data,
@@ -4496,14 +5226,16 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             return
         }
         source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { [weak self] result in
-            guard let self = self, self.representedLoadID == loadID else { return }
-            switch result {
-                case .success(let image?):
-                    self.setImage(image, loadID: loadID)
-                case .success(nil):
-                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
-                case .failure:
-                    self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                switch result {
+                    case .success(let image?):
+                        self.setProcessedImage(image, loadID: loadID)
+                    case .success(nil):
+                        self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+                    case .failure:
+                        self.setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage)
+                }
             }
         }
     }
@@ -4524,6 +5256,19 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         }
     }
 
+    private func setProcessedImage(_ image: UIImage, loadID: UUID) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let preparedImage = autoreleasepool {
+                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                self.setImage(preparedImage, loadID: loadID)
+            }
+        }
+    }
+
     private func setImage(
         from data: Data,
         loadID: UUID,
@@ -4531,7 +5276,9 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     ) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
-            let image = LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            let image = autoreleasepool {
+                LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
                 if let image = image {
@@ -4599,6 +5346,13 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 }
 
 private extension AidokuRunnerLegacyChapter {
+    var normalizedLanguage: String? {
+        guard let language = language?.trimmingCharacters(in: .whitespacesAndNewlines), !language.isEmpty else {
+            return nil
+        }
+        return language.lowercased()
+    }
+
     var legacyFormattedTitle: String {
         let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         var prefix: [String] = []
@@ -4674,13 +5428,39 @@ private extension AidokuRunnerLegacyManga {
         guard let cover = cover?.trimmingCharacters(in: .whitespacesAndNewlines), !cover.isEmpty else {
             return nil
         }
-        if let url = URL(string: cover), url.scheme != nil {
-            return url
+        for candidate in Self.urlCandidates(from: cover) {
+            if let url = URL(string: candidate), url.scheme != nil {
+                return url
+            }
         }
         if let baseURL = baseURL {
-            return URL(string: cover, relativeTo: baseURL)?.absoluteURL
+            for candidate in Self.urlCandidates(from: cover) {
+                if let url = URL(string: candidate, relativeTo: baseURL)?.absoluteURL {
+                    return url
+                }
+            }
         }
-        return URL(string: cover)
+        for candidate in Self.urlCandidates(from: cover) {
+            if let url = URL(string: candidate) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func urlCandidates(from value: String) -> [String] {
+        var candidates: [String] = []
+        appendUnique(value, to: &candidates)
+        appendUnique(value.replacingOccurrences(of: " ", with: "%20"), to: &candidates)
+        if let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            appendUnique(encoded, to: &candidates)
+        }
+        return candidates
+    }
+
+    private static func appendUnique(_ value: String, to values: inout [String]) {
+        guard !values.contains(value) else { return }
+        values.append(value)
     }
 }
 
