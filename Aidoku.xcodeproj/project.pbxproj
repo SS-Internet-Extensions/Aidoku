@@ -596,6 +596,19 @@
 		A12B34C56D78E90F12345682 /* AidokuRunnerLegacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */; };
 		A12B34C56D78E90F12345683 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */; };
 		A12B34C56D78E90F12345691 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A12B34C56D78E90F12345690 /* ZIPFoundation */; };
+		B10000000000000000000090 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = FB2C83982E43F074003CA85F /* SwiftSoup */; };
+		B10000000000000000000091 /* Wasm3Legacy in Frameworks */ = {isa = PBXBuildFile; productRef = B100000000000000000000A4 /* Wasm3Legacy */; };
+		B10000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */; };
+		B10000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000101 /* LegacyAidokuRunnerModels.swift */; };
+		B10000000000000000000112 /* LegacyCoreImports.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000102 /* LegacyCoreImports.swift */; };
+		B10000000000000000000113 /* LegacyEpochDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000103 /* LegacyEpochDate.swift */; };
+		B10000000000000000000114 /* LegacyExcludedFromCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000104 /* LegacyExcludedFromCoding.swift */; };
+		B10000000000000000000115 /* LegacyHtml.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000105 /* LegacyHtml.swift */; };
+		B10000000000000000000116 /* LegacyURLAsString.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000106 /* LegacyURLAsString.swift */; };
+		B10000000000000000000117 /* LegacyWasmSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000107 /* LegacyWasmSupport.swift */; };
+		B10000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000108 /* LegacyPostcardDecoder.swift */; };
+		B10000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000109 /* LegacyPostcardEncoder.swift */; };
+		B1000000000000000000011A /* LegacyVarInt.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000010A /* LegacyVarInt.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1086,6 +1099,17 @@
 		A12B34C56D78E90F12345671 /* AidokuRunnerLegacyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyModels.swift; sourceTree = "<group>"; };
 		A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacy.swift; sourceTree = "<group>"; };
 		A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyPackageInstaller.swift; sourceTree = "<group>"; };
+		B10000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyWasmRunner.swift; sourceTree = "<group>"; };
+		B10000000000000000000101 /* LegacyAidokuRunnerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAidokuRunnerModels.swift; sourceTree = "<group>"; };
+		B10000000000000000000102 /* LegacyCoreImports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyCoreImports.swift; sourceTree = "<group>"; };
+		B10000000000000000000103 /* LegacyEpochDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyEpochDate.swift; sourceTree = "<group>"; };
+		B10000000000000000000104 /* LegacyExcludedFromCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyExcludedFromCoding.swift; sourceTree = "<group>"; };
+		B10000000000000000000105 /* LegacyHtml.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyHtml.swift; sourceTree = "<group>"; };
+		B10000000000000000000106 /* LegacyURLAsString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyURLAsString.swift; sourceTree = "<group>"; };
+		B10000000000000000000107 /* LegacyWasmSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyWasmSupport.swift; sourceTree = "<group>"; };
+		B10000000000000000000108 /* LegacyPostcardDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardDecoder.swift; sourceTree = "<group>"; };
+		B10000000000000000000109 /* LegacyPostcardEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardEncoder.swift; sourceTree = "<group>"; };
+		B1000000000000000000010A /* LegacyVarInt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyVarInt.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1132,6 +1156,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A12B34C56D78E90F12345691 /* ZIPFoundation in Frameworks */,
+				B10000000000000000000090 /* SwiftSoup in Frameworks */,
+				B10000000000000000000091 /* Wasm3Legacy in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1459,9 +1485,36 @@
 				A12B34C56D78E90F12345671 /* AidokuRunnerLegacyModels.swift */,
 				A12B34C56D78E90F12345672 /* AidokuRunnerLegacy.swift */,
 				A12B34C56D78E90F12345673 /* AidokuRunnerLegacyPackageInstaller.swift */,
+				B10000000000000000000042 /* RunnerPort */,
 				CD5A3EED2B9E36E61B24E5BF /* LaunchScreen.storyboard */,
 			);
 			path = iOSLegacy;
+			sourceTree = "<group>";
+		};
+		B10000000000000000000042 /* RunnerPort */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */,
+				B10000000000000000000101 /* LegacyAidokuRunnerModels.swift */,
+				B10000000000000000000102 /* LegacyCoreImports.swift */,
+				B10000000000000000000103 /* LegacyEpochDate.swift */,
+				B10000000000000000000104 /* LegacyExcludedFromCoding.swift */,
+				B10000000000000000000105 /* LegacyHtml.swift */,
+				B10000000000000000000106 /* LegacyURLAsString.swift */,
+				B10000000000000000000107 /* LegacyWasmSupport.swift */,
+				B10000000000000000000043 /* Postcard */,
+			);
+			path = RunnerPort;
+			sourceTree = "<group>";
+		};
+		B10000000000000000000043 /* Postcard */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000108 /* LegacyPostcardDecoder.swift */,
+				B10000000000000000000109 /* LegacyPostcardEncoder.swift */,
+				B1000000000000000000010A /* LegacyVarInt.swift */,
+			);
+			path = Postcard;
 			sourceTree = "<group>";
 		};
 		FB1B4862277CE7370056D02C /* Old Models */ = {
@@ -2465,6 +2518,8 @@
 			name = "AidokuLegacy (iOS 12)";
 			packageProductDependencies = (
 				A12B34C56D78E90F12345690 /* ZIPFoundation */,
+				FB2C83982E43F074003CA85F /* SwiftSoup */,
+				B100000000000000000000A4 /* Wasm3Legacy */,
 			);
 			productName = AidokuLegacy;
 			productReference = BD7261EF7E2790F0E49F3410 /* AidokuLegacy.app */;
@@ -2556,6 +2611,7 @@
 				FBBCB31B2E08D6AF00ED5CAB /* XCRemoteSwiftPackageReference "Gifu" */,
 				FBAED40A2E3A762800B81E74 /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
 				FB2C83972E43F074003CA85F /* XCRemoteSwiftPackageReference "SwiftSoup" */,
+				B100000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */,
 			);
 			productRefGroup = FB1B4836277CE1920056D02C /* Products */;
 			projectDirPath = "";
@@ -3222,6 +3278,17 @@
 				A12B34C56D78E90F12345681 /* AidokuRunnerLegacyModels.swift in Sources */,
 				A12B34C56D78E90F12345682 /* AidokuRunnerLegacy.swift in Sources */,
 				A12B34C56D78E90F12345683 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */,
+				B10000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */,
+				B10000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */,
+				B10000000000000000000112 /* LegacyCoreImports.swift in Sources */,
+				B10000000000000000000113 /* LegacyEpochDate.swift in Sources */,
+				B10000000000000000000114 /* LegacyExcludedFromCoding.swift in Sources */,
+				B10000000000000000000115 /* LegacyHtml.swift in Sources */,
+				B10000000000000000000116 /* LegacyURLAsString.swift in Sources */,
+				B10000000000000000000117 /* LegacyWasmSupport.swift in Sources */,
+				B10000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */,
+				B10000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */,
+				B1000000000000000000011A /* LegacyVarInt.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3747,6 +3814,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		B100000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = iOSLegacy/Packages/Wasm3Legacy;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		FB171149296770CC00AD523D /* XCRemoteSwiftPackageReference "Nuke" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -3853,6 +3927,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FB7B7ED6278CE949001E6EAF /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		B100000000000000000000A4 /* Wasm3Legacy */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B100000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */;
+			productName = Wasm3Legacy;
 		};
 		FBAED40B2E3A762800B81E74 /* SwiftUIIntrospect */ = {
 			isa = XCSwiftPackageProductDependency;

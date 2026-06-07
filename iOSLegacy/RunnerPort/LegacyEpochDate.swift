@@ -1,0 +1,41 @@
+//
+//  EpochDate.swift
+//  AidokuRunner
+//
+//  Created by Skitty on 5/11/25.
+//
+
+import Foundation
+
+@propertyWrapper
+public struct EpochDate: Codable, Hashable {
+    public var wrappedValue: Date?
+
+    public init(wrappedValue: Date?) {
+        self.wrappedValue = wrappedValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let intValue = try container.decode(Int64?.self)
+        if let intValue = intValue {
+            self.wrappedValue = Date(timeIntervalSince1970: TimeInterval(intValue))
+        } else {
+            self.wrappedValue = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if encoder is PostcardEncoding {
+            if let wrappedValue = wrappedValue {
+                try container.encode(UInt8(1))
+                try container.encode(Int64(wrappedValue.timeIntervalSince1970))
+            } else {
+                try container.encode(UInt8(0))
+            }
+        } else {
+            try container.encode(wrappedValue.flatMap { Int64($0.timeIntervalSince1970) })
+        }
+    }
+}

@@ -15,6 +15,19 @@
 		100000000000000000000015 /* AidokuRunnerLegacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* AidokuRunnerLegacy.swift */; };
 		100000000000000000000016 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* AidokuRunnerLegacyPackageInstaller.swift */; };
 		100000000000000000000017 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000A0 /* ZIPFoundation */; };
+		100000000000000000000018 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000A2 /* SwiftSoup */; };
+		100000000000000000000019 /* Wasm3Legacy in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000A4 /* Wasm3Legacy */; };
+		100000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */; };
+		100000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* LegacyAidokuRunnerModels.swift */; };
+		100000000000000000000112 /* LegacyCoreImports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* LegacyCoreImports.swift */; };
+		100000000000000000000113 /* LegacyEpochDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000103 /* LegacyEpochDate.swift */; };
+		100000000000000000000114 /* LegacyExcludedFromCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000104 /* LegacyExcludedFromCoding.swift */; };
+		100000000000000000000115 /* LegacyHtml.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000105 /* LegacyHtml.swift */; };
+		100000000000000000000116 /* LegacyURLAsString.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000106 /* LegacyURLAsString.swift */; };
+		100000000000000000000117 /* LegacyWasmSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000107 /* LegacyWasmSupport.swift */; };
+		100000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000108 /* LegacyPostcardDecoder.swift */; };
+		100000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000109 /* LegacyPostcardEncoder.swift */; };
+		10000000000000000000011A /* LegacyVarInt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010A /* LegacyVarInt.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +39,17 @@
 		100000000000000000000006 /* AidokuRunnerLegacyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyModels.swift; sourceTree = "<group>"; };
 		100000000000000000000007 /* AidokuRunnerLegacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacy.swift; sourceTree = "<group>"; };
 		100000000000000000000008 /* AidokuRunnerLegacyPackageInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyPackageInstaller.swift; sourceTree = "<group>"; };
+		100000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyWasmRunner.swift; sourceTree = "<group>"; };
+		100000000000000000000101 /* LegacyAidokuRunnerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAidokuRunnerModels.swift; sourceTree = "<group>"; };
+		100000000000000000000102 /* LegacyCoreImports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyCoreImports.swift; sourceTree = "<group>"; };
+		100000000000000000000103 /* LegacyEpochDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyEpochDate.swift; sourceTree = "<group>"; };
+		100000000000000000000104 /* LegacyExcludedFromCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyExcludedFromCoding.swift; sourceTree = "<group>"; };
+		100000000000000000000105 /* LegacyHtml.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyHtml.swift; sourceTree = "<group>"; };
+		100000000000000000000106 /* LegacyURLAsString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyURLAsString.swift; sourceTree = "<group>"; };
+		100000000000000000000107 /* LegacyWasmSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyWasmSupport.swift; sourceTree = "<group>"; };
+		100000000000000000000108 /* LegacyPostcardDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardDecoder.swift; sourceTree = "<group>"; };
+		100000000000000000000109 /* LegacyPostcardEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardEncoder.swift; sourceTree = "<group>"; };
+		10000000000000000000010A /* LegacyVarInt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyVarInt.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -34,6 +58,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000017 /* ZIPFoundation in Frameworks */,
+				100000000000000000000018 /* SwiftSoup in Frameworks */,
+				100000000000000000000019 /* Wasm3Legacy in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,9 +83,36 @@
 				100000000000000000000006 /* AidokuRunnerLegacyModels.swift */,
 				100000000000000000000007 /* AidokuRunnerLegacy.swift */,
 				100000000000000000000008 /* AidokuRunnerLegacyPackageInstaller.swift */,
+				100000000000000000000042 /* RunnerPort */,
 				100000000000000000000003 /* LaunchScreen.storyboard */,
 			);
 			name = AidokuLegacy;
+			sourceTree = "<group>";
+		};
+		100000000000000000000042 /* RunnerPort */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */,
+				100000000000000000000101 /* LegacyAidokuRunnerModels.swift */,
+				100000000000000000000102 /* LegacyCoreImports.swift */,
+				100000000000000000000103 /* LegacyEpochDate.swift */,
+				100000000000000000000104 /* LegacyExcludedFromCoding.swift */,
+				100000000000000000000105 /* LegacyHtml.swift */,
+				100000000000000000000106 /* LegacyURLAsString.swift */,
+				100000000000000000000107 /* LegacyWasmSupport.swift */,
+				100000000000000000000043 /* Postcard */,
+			);
+			path = RunnerPort;
+			sourceTree = "<group>";
+		};
+		100000000000000000000043 /* Postcard */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000108 /* LegacyPostcardDecoder.swift */,
+				100000000000000000000109 /* LegacyPostcardEncoder.swift */,
+				10000000000000000000010A /* LegacyVarInt.swift */,
+			);
+			path = Postcard;
 			sourceTree = "<group>";
 		};
 		100000000000000000000041 /* Products */ = {
@@ -88,6 +141,8 @@
 			name = "AidokuLegacy (iOS 12)";
 			packageProductDependencies = (
 				1000000000000000000000A0 /* ZIPFoundation */,
+				1000000000000000000000A2 /* SwiftSoup */,
+				1000000000000000000000A4 /* Wasm3Legacy */,
 			);
 			productName = AidokuLegacy;
 			productReference = 100000000000000000000004 /* AidokuLegacy.app */;
@@ -120,6 +175,8 @@
 			mainGroup = 100000000000000000000030;
 			packageReferences = (
 				1000000000000000000000A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				1000000000000000000000A3 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
+				1000000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */,
 			);
 			productRefGroup = 100000000000000000000041 /* Products */;
 			projectDirPath = "";
@@ -152,6 +209,17 @@
 				100000000000000000000014 /* AidokuRunnerLegacyModels.swift in Sources */,
 				100000000000000000000015 /* AidokuRunnerLegacy.swift in Sources */,
 				100000000000000000000016 /* AidokuRunnerLegacyPackageInstaller.swift in Sources */,
+				100000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */,
+				100000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */,
+				100000000000000000000112 /* LegacyCoreImports.swift in Sources */,
+				100000000000000000000113 /* LegacyEpochDate.swift in Sources */,
+				100000000000000000000114 /* LegacyExcludedFromCoding.swift in Sources */,
+				100000000000000000000115 /* LegacyHtml.swift in Sources */,
+				100000000000000000000116 /* LegacyURLAsString.swift in Sources */,
+				100000000000000000000117 /* LegacyWasmSupport.swift in Sources */,
+				100000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */,
+				100000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */,
+				10000000000000000000011A /* LegacyVarInt.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -268,6 +336,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		1000000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Wasm3Legacy;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		1000000000000000000000A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -277,6 +352,14 @@
 				version = 0.9.19;
 			};
 		};
+		1000000000000000000000A3 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/scinfu/SwiftSoup";
+			requirement = {
+				kind = exactVersion;
+				version = 2.11.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -284,6 +367,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1000000000000000000000A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		1000000000000000000000A2 /* SwiftSoup */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1000000000000000000000A3 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
+			productName = SwiftSoup;
+		};
+		1000000000000000000000A4 /* Wasm3Legacy */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1000000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */;
+			productName = Wasm3Legacy;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

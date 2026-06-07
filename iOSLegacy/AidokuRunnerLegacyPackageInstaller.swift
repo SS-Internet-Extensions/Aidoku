@@ -14,7 +14,7 @@ final class AidokuRunnerLegacyPackageInstaller {
 
     init(
         fileManager: FileManager = .default,
-        backendFactory: AidokuRunnerLegacyBackendFactory = UnavailableAidokuRunnerLegacyBackendFactory()
+        backendFactory: AidokuRunnerLegacyBackendFactory = AidokuRunnerLegacyWasmBackendFactory()
     ) {
         self.fileManager = fileManager
         self.backendFactory = backendFactory

@@ -236,6 +236,9 @@ final class LegacyRootViewController: UITableViewController {
                 self?.openWebsite(url, title: source.name)
             })
         }
+        alert.addAction(UIAlertAction(title: "Open Source", style: .default) { [weak self] _ in
+            self?.navigationController?.pushViewController(LegacySourceMenuViewController(source: source), animated: true)
+        })
         alert.addAction(UIAlertAction(title: "OK", style: .cancel))
         present(alert, animated: true)
     }
@@ -294,25 +297,495 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
         cell.textLabel?.text = source.name
         cell.detailTextLabel?.text = "\(source.key)  v\(source.version)  \(source.languages.joined(separator: ", "))"
-        cell.accessoryType = source.urls.isEmpty ? .none : .disclosureIndicator
+        cell.accessoryType = .disclosureIndicator
         return cell
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let source = sources[indexPath.row]
-        guard let url = source.urls.first else {
-            let alert = UIAlertController(
-                title: source.name,
-                message: "This source does not include a website URL.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
+        navigationController?.pushViewController(LegacySourceMenuViewController(source: source), animated: true)
+    }
+}
+
+final class LegacySourceMenuViewController: UITableViewController {
+    private enum Row {
+        case search
+        case listing(AidokuRunnerLegacyListing)
+        case website(URL)
+    }
+
+    private let source: AidokuRunnerLegacySource
+    private var rows: [Row] = []
+
+    init(source: AidokuRunnerLegacySource) {
+        self.source = source
+        super.init(style: .grouped)
+        title = source.name
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = LegacyPalette.background
+        rows = [.search]
+        rows.append(contentsOf: source.staticListings.map { .listing($0) })
+        if let url = source.urls.first {
+            rows.append(.website(url))
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return rows.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "SourceMenuCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "SourceMenuCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.accessoryType = .disclosureIndicator
+        switch rows[indexPath.row] {
+            case .search:
+                cell.textLabel?.text = "Search Manga"
+                cell.detailTextLabel?.text = "Run get_search_manga_list"
+            case .listing(let listing):
+                cell.textLabel?.text = listing.name
+                cell.detailTextLabel?.text = "Run get_manga_list"
+            case .website(let url):
+                cell.textLabel?.text = "Browse Website"
+                cell.detailTextLabel?.text = url.absoluteString
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        switch rows[indexPath.row] {
+            case .search:
+                navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: nil), animated: true)
+            case .listing(let listing):
+                navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: listing), animated: true)
+            case .website(let url):
+                navigationController?.pushViewController(LegacySourceWebViewController(url: url, title: source.name), animated: true)
+        }
+    }
+}
+
+final class LegacyMangaListViewController: UITableViewController {
+    private let source: AidokuRunnerLegacySource
+    private let listing: AidokuRunnerLegacyListing?
+    private let searchController = UISearchController(searchResultsController: nil)
+
+    private var entries: [AidokuRunnerLegacyManga] = []
+    private var page = 1
+    private var hasNextPage = false
+    private var isLoading = false
+    private var message = "Enter a search term."
+
+    init(source: AidokuRunnerLegacySource, listing: AidokuRunnerLegacyListing?) {
+        self.source = source
+        self.listing = listing
+        super.init(style: .plain)
+        title = listing?.name ?? "Search"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+
+        searchController.searchBar.placeholder = "Search manga"
+        searchController.searchBar.delegate = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        navigationItem.searchController = searchController
+        definesPresentationContext = true
+
+        if listing != nil {
+            load(reset: true)
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if entries.isEmpty { return 1 }
+        return entries.count + (hasNextPage ? 1 : 0)
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "MangaCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "MangaCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+
+        if entries.isEmpty {
+            cell.textLabel?.text = isLoading ? "Loading..." : message
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        if indexPath.row == entries.count {
+            cell.textLabel?.text = isLoading ? "Loading..." : "Load Next Page"
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            cell.selectionStyle = .default
+            return cell
+        }
+
+        let manga = entries[indexPath.row]
+        cell.textLabel?.text = manga.title
+        cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        if entries.isEmpty { return }
+        if indexPath.row == entries.count {
+            load(reset: false)
             return
         }
-        let viewController = LegacySourceWebViewController(url: url, title: source.name)
-        navigationController?.pushViewController(viewController, animated: true)
+        navigationController?.pushViewController(
+            LegacyMangaDetailViewController(source: source, manga: entries[indexPath.row]),
+            animated: true
+        )
+    }
+
+    private func load(reset: Bool) {
+        guard !isLoading else { return }
+        if reset {
+            page = 1
+            entries = []
+            hasNextPage = false
+        }
+        isLoading = true
+        message = "Loading..."
+        tableView.reloadData()
+
+        let completion: (Result<AidokuRunnerLegacyMangaPageResult, Error>) -> Void = { [weak self] result in
+            guard let self = self else { return }
+            self.isLoading = false
+            switch result {
+                case .success(let pageResult):
+                    self.entries.append(contentsOf: pageResult.entries)
+                    self.hasNextPage = pageResult.hasNextPage
+                    self.page += 1
+                    self.message = self.entries.isEmpty ? "No manga found." : ""
+                case .failure(let error):
+                    self.message = error.localizedDescription
+            }
+            self.tableView.reloadData()
+        }
+
+        if let listing = listing {
+            source.runner.getMangaList(listing: listing, page: page, completion: completion)
+        } else {
+            let query = searchController.searchBar.text ?? ""
+            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                isLoading = false
+                message = "Enter a search term."
+                tableView.reloadData()
+                return
+            }
+            source.runner.getSearchMangaList(query: query, page: page, filters: [], completion: completion)
+        }
+    }
+}
+
+extension LegacyMangaListViewController: UISearchBarDelegate {
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+        load(reset: true)
+    }
+}
+
+final class LegacyMangaDetailViewController: UITableViewController {
+    private let source: AidokuRunnerLegacySource
+    private var manga: AidokuRunnerLegacyManga
+    private var isLoading = false
+    private var errorMessage: String?
+
+    init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
+        self.source = source
+        self.manga = manga
+        super.init(style: .grouped)
+        title = manga.title
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = LegacyPalette.background
+        loadDetails()
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 2
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return section == 0 ? "Details" : "Chapters"
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if section == 0 { return 1 }
+        let count = manga.chapters?.count ?? 0
+        return count == 0 ? 1 : count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "DetailCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "DetailCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 3
+
+        if indexPath.section == 0 {
+            cell.textLabel?.text = manga.title
+            cell.detailTextLabel?.text = errorMessage ?? manga.description ?? manga.authors?.joined(separator: ", ") ?? "No description."
+            cell.accessoryType = .none
+            return cell
+        }
+
+        guard let chapters = manga.chapters, !chapters.isEmpty else {
+            cell.textLabel?.text = isLoading ? "Loading chapters..." : "No chapters."
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            return cell
+        }
+
+        let chapter = chapters[indexPath.row]
+        cell.textLabel?.text = chapter.title ?? "Chapter \(chapter.chapterNumber.map { String($0) } ?? chapter.key)"
+        cell.detailTextLabel?.text = chapter.scanlators?.joined(separator: ", ")
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard
+            indexPath.section == 1,
+            let chapters = manga.chapters,
+            chapters.indices.contains(indexPath.row)
+        else {
+            return
+        }
+        let chapter = chapters[indexPath.row]
+        navigationController?.pushViewController(
+            LegacyReaderViewController(source: source, manga: manga, chapter: chapter),
+            animated: true
+        )
+    }
+
+    private func loadDetails() {
+        isLoading = true
+        tableView.reloadData()
+        source.runner.getMangaUpdate(manga: manga, needsDetails: true, needsChapters: true) { [weak self] result in
+            guard let self = self else { return }
+            self.isLoading = false
+            switch result {
+                case .success(let updatedManga):
+                    self.manga = updatedManga
+                    self.errorMessage = nil
+                case .failure(let error):
+                    self.errorMessage = error.localizedDescription
+            }
+            self.tableView.reloadData()
+        }
+    }
+}
+
+final class LegacyReaderViewController: UITableViewController {
+    private let source: AidokuRunnerLegacySource
+    private let manga: AidokuRunnerLegacyManga
+    private let chapter: AidokuRunnerLegacyChapter
+    private var pages: [AidokuRunnerLegacyPage] = []
+    private var message = "Loading pages..."
+
+    init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga, chapter: AidokuRunnerLegacyChapter) {
+        self.source = source
+        self.manga = manga
+        self.chapter = chapter
+        super.init(style: .plain)
+        title = chapter.title ?? manga.title
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = UIColor.black
+        tableView.separatorStyle = .none
+        tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
+        loadPages()
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return pages.isEmpty ? 1 : pages.count
+    }
+
+    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return pages.isEmpty ? 80 : UITableView.automaticDimension
+    }
+
+    override func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        return pages.isEmpty ? 80 : 900
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        if pages.isEmpty {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "ReaderMessage")
+                ?? UITableViewCell(style: .default, reuseIdentifier: "ReaderMessage")
+            cell.backgroundColor = UIColor.black
+            cell.textLabel?.textColor = UIColor.white
+            cell.textLabel?.textAlignment = .center
+            cell.textLabel?.text = message
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let cell = tableView.dequeueReusableCell(withIdentifier: "PageImageCell", for: indexPath) as! LegacyPageImageCell
+        cell.configure(page: pages[indexPath.row], source: source)
+        return cell
+    }
+
+    private func loadPages() {
+        source.runner.getPageList(manga: manga, chapter: chapter) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let pages):
+                    self.pages = pages
+                    self.message = pages.isEmpty ? "No pages." : ""
+                case .failure(let error):
+                    self.message = error.localizedDescription
+            }
+            self.tableView.reloadData()
+        }
+    }
+}
+
+final class LegacyPageImageCell: UITableViewCell {
+    private let pageImageView = UIImageView()
+    private let pageLabel = UILabel()
+    private var task: URLSessionDataTask?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = UIColor.black
+        selectionStyle = .none
+        pageImageView.translatesAutoresizingMaskIntoConstraints = false
+        pageImageView.contentMode = .scaleAspectFit
+        pageImageView.backgroundColor = UIColor.black
+        pageLabel.translatesAutoresizingMaskIntoConstraints = false
+        pageLabel.textColor = UIColor.white
+        pageLabel.textAlignment = .center
+        pageLabel.numberOfLines = 0
+        contentView.addSubview(pageImageView)
+        contentView.addSubview(pageLabel)
+        NSLayoutConstraint.activate([
+            pageImageView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            pageImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pageImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pageImageView.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            pageImageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            pageLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            pageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            pageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            pageLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        task?.cancel()
+        task = nil
+        pageImageView.image = nil
+        pageLabel.text = nil
+        pageImageView.isHidden = false
+    }
+
+    func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
+        switch page.content {
+            case .url(let url):
+                pageLabel.text = "Loading..."
+                source.runner.getImageRequest(url: url) { [weak self] result in
+                    guard let self = self else { return }
+                    let request: URLRequest
+                    switch result {
+                        case .success(let imageRequest):
+                            var urlRequest = URLRequest(url: imageRequest.url)
+                            urlRequest.httpMethod = imageRequest.method
+                            urlRequest.httpBody = imageRequest.body
+                            for header in imageRequest.headers {
+                                urlRequest.setValue(header.value, forHTTPHeaderField: header.key)
+                            }
+                            request = urlRequest
+                        case .failure:
+                            request = URLRequest(url: url)
+                    }
+                    self.load(request: request)
+                }
+            case .text(let text):
+                pageImageView.isHidden = true
+                pageLabel.text = text
+            case .zipFile:
+                pageImageView.isHidden = true
+                pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
+        }
+    }
+
+    private func load(request: URLRequest) {
+        task?.cancel()
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            guard let self = self else { return }
+            let image = data.flatMap { UIImage(data: $0) }
+            DispatchQueue.main.async {
+                if let image = image {
+                    self.pageLabel.text = nil
+                    self.pageImageView.image = image
+                    let ratio = image.size.height / max(image.size.width, 1)
+                    let targetHeight = min(max(UIScreen.main.bounds.width * ratio, 300), 2400)
+                    if let heightConstraint = self.pageImageView.constraints.first(where: { $0.firstAttribute == .height }) {
+                        heightConstraint.constant = targetHeight
+                    }
+                } else {
+                    self.pageImageView.isHidden = true
+                    self.pageLabel.text = "Image failed to load."
+                }
+            }
+        }
+        task?.resume()
     }
 }
 

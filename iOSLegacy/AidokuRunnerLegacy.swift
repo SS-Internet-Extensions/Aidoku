@@ -49,7 +49,7 @@ final class AidokuRunnerLegacySource {
 
     convenience init(
         installedSourceURL: URL,
-        backendFactory: AidokuRunnerLegacyBackendFactory = UnavailableAidokuRunnerLegacyBackendFactory()
+        backendFactory: AidokuRunnerLegacyBackendFactory = AidokuRunnerLegacyWasmBackendFactory()
     ) throws {
         let infoURL = installedSourceURL.appendingPathComponent("source.json")
         guard FileManager.default.fileExists(atPath: infoURL.path) else {
