@@ -19,6 +19,7 @@
 		100000000000000000000019 /* Wasm3Legacy in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000A4 /* Wasm3Legacy */; };
 		10000000000000000000001B /* SDWebImage in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B0 /* SDWebImage */; };
 		10000000000000000000001C /* SDWebImageWebPCoder in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B2 /* SDWebImageWebPCoder */; };
+		10000000000000000000001D /* avif in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B4 /* avif */; };
 		100000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */; };
 		100000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* LegacyAidokuRunnerModels.swift */; };
 		100000000000000000000112 /* LegacyCoreImports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* LegacyCoreImports.swift */; };
@@ -64,6 +65,7 @@
 				100000000000000000000019 /* Wasm3Legacy in Frameworks */,
 				10000000000000000000001B /* SDWebImage in Frameworks */,
 				10000000000000000000001C /* SDWebImageWebPCoder in Frameworks */,
+				10000000000000000000001D /* avif in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -149,6 +151,7 @@
 				1000000000000000000000A4 /* Wasm3Legacy */,
 				1000000000000000000000B0 /* SDWebImage */,
 				1000000000000000000000B2 /* SDWebImageWebPCoder */,
+				1000000000000000000000B4 /* avif */,
 			);
 			productName = AidokuLegacy;
 			productReference = 100000000000000000000004 /* AidokuLegacy.app */;
@@ -185,6 +188,7 @@
 				1000000000000000000000A5 /* XCLocalSwiftPackageReference "Wasm3Legacy" */,
 				1000000000000000000000B1 /* XCRemoteSwiftPackageReference "SDWebImage" */,
 				1000000000000000000000B3 /* XCRemoteSwiftPackageReference "SDWebImageWebPCoder" */,
+				1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */,
 			);
 			productRefGroup = 100000000000000000000041 /* Products */;
 			projectDirPath = "";
@@ -384,6 +388,14 @@
 				version = 0.15.0;
 			};
 		};
+		1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awxkee/avif.swift.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.2.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -411,6 +423,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1000000000000000000000B3 /* XCRemoteSwiftPackageReference "SDWebImageWebPCoder" */;
 			productName = SDWebImageWebPCoder;
+		};
+		1000000000000000000000B4 /* avif */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1000000000000000000000B5 /* XCRemoteSwiftPackageReference "avif.swift" */;
+			productName = avif;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

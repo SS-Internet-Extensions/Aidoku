@@ -34,9 +34,11 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
             defaults: [
                 "AidokuLegacy.reader.downsampleImages": isLegacyIPadAir,
                 "AidokuLegacy.reader.fitToScreen": true,
+                "AidokuLegacy.reader.mode": "pagedLTR",
                 "AidokuLegacy.reader.maxImageHeight": isLegacyIPadAir ? 1400 : 2200,
                 "AidokuLegacy.reader.prefetchPages": isLegacyIPadAir ? 1 : 2,
-                "AidokuLegacy.reader.backgroundColor": "black"
+                "AidokuLegacy.reader.backgroundColor": "black",
+                "AidokuLegacy.appearance.darkTheme": false
             ]
         )
     }

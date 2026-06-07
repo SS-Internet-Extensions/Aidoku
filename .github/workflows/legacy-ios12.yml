@@ -17,6 +17,9 @@ on:
       - "docs/SOURCES_IOS12.md"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
@@ -36,6 +39,7 @@ jobs:
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build fakesigned release IPA
+        id: buildipa
         run: |
           set -euo pipefail
           DERIVED_DATA="$RUNNER_TEMP/AidokuLegacyDerivedData"
@@ -43,6 +47,7 @@ jobs:
           FAKE_TEAM_ID="AIDOKU1234"
           BUNDLE_ID="app.aidoku.AidokuLegacy"
           IPA_NAME="AidokuLegacy-iOS12-${{ steps.commitinfo.outputs.sha_short }}-fakesigned.ipa"
+          LATEST_IPA_NAME="AidokuLegacy-iOS12-latest-fakesigned.ipa"
 
           xcodebuild \
             -project iOSLegacy/AidokuLegacy.xcodeproj \
@@ -90,7 +95,10 @@ jobs:
           mkdir -p Payload artifacts
           cp -R "$APP_PATH" Payload/
           zip -qry "artifacts/$IPA_NAME" Payload
+          cp "artifacts/$IPA_NAME" "artifacts/$LATEST_IPA_NAME"
           ls -lh "artifacts/$IPA_NAME"
+          echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "latest_ipa_name=$LATEST_IPA_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload fakesigned IPA
         uses: actions/upload-artifact@v4
@@ -98,3 +106,22 @@ jobs:
           name: AidokuLegacy-iOS12-fakesigned-ipa
           path: artifacts/*.ipa
           if-no-files-found: error
+
+      - name: Publish direct IPA release asset
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA_PATH: artifacts/${{ steps.buildipa.outputs.latest_ipa_name }}
+        run: |
+          set -euo pipefail
+          TAG="legacy-ios12-latest"
+          TITLE="Aidoku Legacy iOS 12 Latest"
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA_PATH" --clobber
+          else
+            gh release create "$TAG" "$IPA_PATH" \
+              --title "$TITLE" \
+              --notes "Direct-download fakesigned Aidoku Legacy IPA for iOS 12."
+          fi
