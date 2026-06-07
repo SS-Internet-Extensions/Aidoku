@@ -6,10 +6,7 @@
 //
 
 import Foundation
-
-#if canImport(ZIPFoundation)
 import ZIPFoundation
-#endif
 
 final class AidokuRunnerLegacyPackageInstaller {
     private let fileManager: FileManager
@@ -29,11 +26,7 @@ final class AidokuRunnerLegacyPackageInstaller {
             try? fileManager.removeItem(at: stagingDirectory)
         }
 
-#if canImport(ZIPFoundation)
         try fileManager.unzipItem(at: packageURL, to: stagingDirectory)
-#else
-        throw AidokuRunnerLegacyError.backendUnavailable
-#endif
 
         let payloadURL = stagingDirectory.appendingPathComponent("Payload")
         let sourceRoot = fileManager.fileExists(atPath: payloadURL.path) ? payloadURL : stagingDirectory

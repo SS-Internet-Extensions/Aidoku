@@ -41,7 +41,7 @@ final class AidokuRunnerLegacySource {
             baseUrls.append(url)
         }
         if let sourceUrls = sourceInfo.urls {
-            baseUrls.append(contentsOf: sourceUrls.compactMap(URL.init))
+            baseUrls.append(contentsOf: sourceUrls.compactMap { URL(string: $0) })
         }
         self.urls = baseUrls
         self.runner = runner
