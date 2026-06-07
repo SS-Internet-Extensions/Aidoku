@@ -393,7 +393,7 @@
 			repositoryURL = "https://github.com/awxkee/avif.swift.git";
 			requirement = {
 				kind = exactVersion;
-				version = 1.7.0;
+				version = 1.1.7;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
