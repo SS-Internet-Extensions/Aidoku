@@ -196,8 +196,14 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         completion: @escaping (Result<AidokuRunnerLegacyManga, Error>) -> Void
     ) {
         run(completion: completion) {
-            let callbackID = self.partialResultHandler.register { _, data in
-                return try? PostcardDecoder().decode(Manga.self, from: data)
+            let callbackID = self.partialResultHandler.register { current, data in
+                guard let partial = try? PostcardDecoder().decode(Manga.self, from: data) else {
+                    return current
+                }
+                if let current = current as? Manga {
+                    return current.copy(from: partial)
+                }
+                return partial
             }
             defer { self.partialResultHandler.remove(id: callbackID) }
 
@@ -207,11 +213,14 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
 
             let result: Int32 = try function.call(mangaPointer, needsDetails ? Int32(1) : Int32(0), needsChapters ? Int32(1) : Int32(0))
             let data = try self.handleResult(result: result)
-            var updated = try PostcardDecoder().decode(Manga.self, from: data)
+            let original = Manga(legacy: manga, sourceKey: self.sourceKey)
+            let updated = try PostcardDecoder().decode(Manga.self, from: data)
+            var merged = original
             if let partial = self.partialResultHandler.data(for: callbackID) as? Manga {
-                updated = partial.copy(from: updated)
+                merged = merged.copy(from: partial)
             }
-            return updated.copy(from: Manga(legacy: manga, sourceKey: self.sourceKey)).legacy(sourceKey: self.sourceKey)
+            merged = merged.copy(from: updated)
+            return merged.legacy(sourceKey: self.sourceKey)
         }
     }
 

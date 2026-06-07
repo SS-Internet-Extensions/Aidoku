@@ -1143,6 +1143,8 @@ final class LegacySourceHomeViewController: UITableViewController {
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
                 cell.textLabel?.text = link.title
                 cell.detailTextLabel?.text = link.subtitle ?? detailText(for: link.value)
+                cell.accessoryType = link.value == nil ? .none : .disclosureIndicator
+                cell.selectionStyle = link.value == nil ? .none : .default
                 loadImage(for: link, into: cell, at: indexPath)
             case .manga(let manga):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
@@ -2175,6 +2177,10 @@ final class LegacyReaderViewController: UITableViewController {
     private var pages: [AidokuRunnerLegacyPage] = []
     private var message = "Loading pages..."
     private var didScrollToInitialPage = false
+    private var currentPageIndex: Int?
+    private var lastSavedHistoryPageIndex: Int?
+    private var lastHistorySaveDate = Date.distantPast
+    private var pendingHistorySaveWorkItem: DispatchWorkItem?
 
     init(
         source: AidokuRunnerLegacySource,
@@ -2202,6 +2208,15 @@ final class LegacyReaderViewController: UITableViewController {
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
         loadPages()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        pendingHistorySaveWorkItem?.cancel()
+        pendingHistorySaveWorkItem = nil
+        if let currentPageIndex = currentPageIndex {
+            recordHistory(pageIndex: currentPageIndex, force: true)
+        }
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -2239,13 +2254,8 @@ final class LegacyReaderViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         if !pages.isEmpty, indexPath.row < pages.count {
-            LegacyHistoryStore.shared.update(
-                source: source,
-                manga: manga,
-                chapter: chapter,
-                pageIndex: indexPath.row,
-                pageCount: pages.count
-            )
+            currentPageIndex = indexPath.row
+            recordHistory(pageIndex: indexPath.row, force: false)
         }
 
         let preloadCount = max(1, UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages"))
@@ -2290,6 +2300,41 @@ final class LegacyReaderViewController: UITableViewController {
                 animated: false
             )
         }
+    }
+
+    private func recordHistory(pageIndex: Int, force: Bool) {
+        guard pages.indices.contains(pageIndex) else { return }
+        let now = Date()
+        if force {
+            pendingHistorySaveWorkItem?.cancel()
+            pendingHistorySaveWorkItem = nil
+        } else {
+            if lastSavedHistoryPageIndex == pageIndex {
+                return
+            }
+            let saveDelay = 2 - now.timeIntervalSince(lastHistorySaveDate)
+            if saveDelay > 0 {
+                pendingHistorySaveWorkItem?.cancel()
+                let workItem = DispatchWorkItem { [weak self] in
+                    guard self?.currentPageIndex == pageIndex else { return }
+                    self?.recordHistory(pageIndex: pageIndex, force: true)
+                }
+                pendingHistorySaveWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + saveDelay, execute: workItem)
+                return
+            }
+        }
+        pendingHistorySaveWorkItem?.cancel()
+        pendingHistorySaveWorkItem = nil
+        LegacyHistoryStore.shared.update(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            pageIndex: pageIndex,
+            pageCount: pages.count
+        )
+        lastSavedHistoryPageIndex = pageIndex
+        lastHistorySaveDate = now
     }
 }
 
