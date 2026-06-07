@@ -220,10 +220,10 @@ extension Html {
         guard let element = store.fetch(from: descriptor) as? Node
         else { return Result.invalidDescriptor.rawValue }
 
-        guard let key = readString(memory: memory, offset: attrOffset, length: attrLength)?.utf8Array
+        guard let key = readString(memory: memory, offset: attrOffset, length: attrLength)
         else { return Result.invalidString.rawValue }
 
-        guard let value = readString(memory: memory, offset: valueOffset, length: valueLength)?.utf8Array
+        guard let value = readString(memory: memory, offset: valueOffset, length: valueLength)
         else { return Result.invalidString.rawValue }
 
         do {
@@ -243,7 +243,7 @@ extension Html {
         guard let element = store.fetch(from: descriptor) as? Node
         else { return Result.invalidDescriptor.rawValue }
 
-        guard let key = readString(memory: memory, offset: attrOffset, length: attrLength)?.utf8Array
+        guard let key = readString(memory: memory, offset: attrOffset, length: attrLength)
         else { return Result.invalidString.rawValue }
 
         do {

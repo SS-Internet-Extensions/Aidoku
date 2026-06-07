@@ -461,7 +461,10 @@ struct Net: SourceLibrary {
             key >= 0,
             keyLength > 0,
             let keyString = try? memory.readString(offset: UInt32(key), length: UInt32(keyLength)),
-            let value = response.value(forHTTPHeaderField: keyString)
+            let value = response.allHeaderFields.first(where: { header in
+                guard let field = header.key as? String else { return false }
+                return field.caseInsensitiveCompare(keyString) == .orderedSame
+            })?.value as? String
         else {
             return Result.missingData.rawValue
         }

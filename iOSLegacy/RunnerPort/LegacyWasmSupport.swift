@@ -128,9 +128,3 @@ struct NetRequest {
         return request
     }
 }
-
-extension String {
-    var utf8Array: [UInt8] {
-        return Array(utf8)
-    }
-}
