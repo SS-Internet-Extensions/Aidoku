@@ -9,6 +9,8 @@ import UIKit
 import WebKit
 import ImageIO
 
+private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+
 enum LegacyPalette {
     static let background = UIColor(red: 0.97, green: 0.96, blue: 0.94, alpha: 1)
     static let panel = UIColor.white
@@ -192,7 +194,7 @@ final class LegacyImageLoader {
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 25
         configuration.httpAdditionalHeaders = [
-            "User-Agent": "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+            "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
         cache.countLimit = 160
@@ -2169,6 +2171,42 @@ final class LegacyMangaDetailViewController: UITableViewController {
     }
 }
 
+private extension AidokuRunnerLegacyImageRequest {
+    func urlRequest() -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        for header in headers {
+            request.setValue(header.value, forHTTPHeaderField: header.key)
+        }
+        request.applyLegacyImageDefaults(for: url)
+        return request
+    }
+}
+
+private extension URLRequest {
+    mutating func applyLegacyImageDefaults(for url: URL) {
+        if value(forHTTPHeaderField: "User-Agent") == nil {
+            setValue(aidokuLegacyImageUserAgent, forHTTPHeaderField: "User-Agent")
+        }
+        let cookieHeaders = HTTPCookie.requestHeaderFields(with: HTTPCookieStorage.shared.cookies(for: url) ?? [])
+        for (key, value) in cookieHeaders {
+            if key == "Cookie", let existing = self.value(forHTTPHeaderField: "Cookie"), !existing.isEmpty {
+                setValue(value + "; " + existing, forHTTPHeaderField: key)
+            } else {
+                setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        timeoutInterval = 30
+    }
+}
+
+private func legacyFallbackImageRequest(url: URL) -> URLRequest {
+    var request = URLRequest(url: url)
+    request.applyLegacyImageDefaults(for: url)
+    return request
+}
+
 final class LegacyReaderViewController: UITableViewController {
     private let source: AidokuRunnerLegacySource
     private let manga: AidokuRunnerLegacyManga
@@ -2265,11 +2303,7 @@ final class LegacyReaderViewController: UITableViewController {
             guard case .url(let url, let context) = pages[pageIndex].content else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
                 if case .success(let request) = result {
-                    var urlRequest = URLRequest(url: request.url)
-                    urlRequest.httpMethod = request.method
-                    urlRequest.httpBody = request.body
-                    request.headers.forEach { urlRequest.setValue($0.value, forHTTPHeaderField: $0.key) }
-                    URLSession.shared.dataTask(with: urlRequest).resume()
+                    URLSession.shared.dataTask(with: request.urlRequest()).resume()
                 }
             }
         }
@@ -2343,6 +2377,7 @@ final class LegacyPageImageCell: UITableViewCell {
     private let pageLabel = UILabel()
     private var heightConstraint: NSLayoutConstraint!
     private var task: URLSessionDataTask?
+    private var representedLoadID = UUID()
     var onHeightChange: (() -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -2381,6 +2416,7 @@ final class LegacyPageImageCell: UITableViewCell {
         super.prepareForReuse()
         task?.cancel()
         task = nil
+        representedLoadID = UUID()
         pageImageView.image = nil
         pageLabel.text = nil
         pageImageView.isHidden = false
@@ -2389,35 +2425,24 @@ final class LegacyPageImageCell: UITableViewCell {
     }
 
     func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
+        let loadID = UUID()
+        representedLoadID = loadID
         switch page.content {
             case .url(let url, let context):
                 pageLabel.text = "Loading..."
                 source.runner.getImageRequest(url: url, context: context) { [weak self] result in
-                    guard let self = self else { return }
-                    var request: URLRequest
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    let request: URLRequest
                     switch result {
                         case .success(let imageRequest):
-                            var urlRequest = URLRequest(url: imageRequest.url)
-                            urlRequest.httpMethod = imageRequest.method
-                            urlRequest.httpBody = imageRequest.body
-                            for header in imageRequest.headers {
-                                urlRequest.setValue(header.value, forHTTPHeaderField: header.key)
-                            }
-                            request = urlRequest
+                            request = imageRequest.urlRequest()
                         case .failure:
-                            request = URLRequest(url: url)
+                            request = legacyFallbackImageRequest(url: url)
                     }
-                    if request.value(forHTTPHeaderField: "User-Agent") == nil {
-                        request.setValue(
-                            "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-                            forHTTPHeaderField: "User-Agent"
-                        )
-                    }
-                    request.timeoutInterval = 30
-                    self.load(request: request)
+                    self.load(request: request, context: context, source: source, loadID: loadID)
                 }
             case .image(let data):
-                setImage(from: data)
+                setImage(from: data, loadID: loadID)
             case .text(let text):
                 pageImageView.isHidden = true
                 heightConstraint.constant = 180
@@ -2429,46 +2454,124 @@ final class LegacyPageImageCell: UITableViewCell {
         }
     }
 
-    private func load(request: URLRequest) {
+    private func load(
+        request: URLRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID,
+        retriesRemaining: Int = 1
+    ) {
         task?.cancel()
-        task = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            guard let self = self else { return }
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    self.pageImageView.isHidden = true
-                    self.heightConstraint.constant = 180
-                    self.pageLabel.text = "Image failed to load."
-                    self.onHeightChange?()
-                }
-                return
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.handleLoadResult(
+                    data: data,
+                    response: response,
+                    error: error,
+                    request: request,
+                    context: context,
+                    source: source,
+                    loadID: loadID,
+                    retriesRemaining: retriesRemaining
+                )
             }
-            self.setImage(from: data)
         }
         task?.resume()
     }
 
-    private func setImage(from data: Data) {
+    private func handleLoadResult(
+        data: Data?,
+        response: URLResponse?,
+        error: Error?,
+        request: URLRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID,
+        retriesRemaining: Int
+    ) {
+        guard representedLoadID == loadID else { return }
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode
+        if shouldRetry(error: error, statusCode: statusCode, data: data), retriesRemaining > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self = self, self.representedLoadID == loadID else { return }
+                self.load(
+                    request: request,
+                    context: context,
+                    source: source,
+                    loadID: loadID,
+                    retriesRemaining: retriesRemaining - 1
+                )
+            }
+            return
+        }
+        guard let data = data, !data.isEmpty else {
+            showFailure("Image failed to load.", loadID: loadID)
+            return
+        }
+        if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            showFailure("Image failed to load. HTTP \(statusCode).", loadID: loadID)
+            return
+        }
+        guard source.runner.features.processesPages, let httpResponse = httpResponse else {
+            setImage(from: data, loadID: loadID)
+            return
+        }
+        source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { [weak self] result in
+            guard let self = self, self.representedLoadID == loadID else { return }
+            switch result {
+                case .success(let image?):
+                    self.setImage(image, loadID: loadID)
+                case .success(nil):
+                    self.setImage(from: data, loadID: loadID)
+                case .failure:
+                    self.setImage(from: data, loadID: loadID)
+            }
+        }
+    }
+
+    private func shouldRetry(error: Error?, statusCode: Int?, data: Data?) -> Bool {
+        if error != nil || data == nil || data?.isEmpty == true {
+            return true
+        }
+        guard let statusCode = statusCode else { return false }
+        return statusCode == 408 || statusCode == 429 || (500..<600).contains(statusCode)
+    }
+
+    private func showFailure(_ message: String, loadID: UUID) {
+        DispatchQueue.main.async {
+            guard self.representedLoadID == loadID else { return }
+            self.pageImageView.isHidden = true
+            self.heightConstraint.constant = 180
+            self.pageLabel.text = message
+            self.onHeightChange?()
+        }
+    }
+
+    private func setImage(from data: Data, loadID: UUID) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
             let image = LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, self.representedLoadID == loadID else { return }
                 if let image = image {
-                    self.pageLabel.text = nil
-                    self.pageImageView.isHidden = false
-                    self.pageImageView.image = image
-                    let ratio = image.size.height / max(image.size.width, 1)
-                    let targetHeight = min(max(UIScreen.main.bounds.width * ratio, 320), 2600)
-                    self.heightConstraint.constant = targetHeight
-                    self.onHeightChange?()
+                    self.setImage(image, loadID: loadID)
                 } else {
-                    self.pageImageView.isHidden = true
-                    self.heightConstraint.constant = 180
-                    self.pageLabel.text = "Image failed to load."
-                    self.onHeightChange?()
+                    self.showFailure("Image failed to load.", loadID: loadID)
                 }
             }
         }
+    }
+
+    private func setImage(_ image: UIImage, loadID: UUID) {
+        guard representedLoadID == loadID else { return }
+        pageLabel.text = nil
+        pageImageView.isHidden = false
+        pageImageView.image = image
+        let ratio = image.size.height / max(image.size.width, 1)
+        let targetHeight = min(max(UIScreen.main.bounds.width * ratio, 320), 2600)
+        heightConstraint.constant = targetHeight
+        onHeightChange?()
     }
 }
 

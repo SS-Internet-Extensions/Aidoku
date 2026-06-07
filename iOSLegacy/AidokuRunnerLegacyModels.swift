@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 
 enum AidokuRunnerLegacyError: LocalizedError {
     case invalidPackage
@@ -473,6 +474,7 @@ struct AidokuRunnerLegacySourceFeatures {
     var dynamicFilters: Bool
     var dynamicSettings: Bool
     var dynamicListings: Bool
+    var processesPages: Bool
     var providesImageRequests: Bool
 }
 
@@ -481,6 +483,25 @@ struct AidokuRunnerLegacyImageRequest {
     var method: String
     var headers: [String: String]
     var body: Data?
+}
+
+struct AidokuRunnerLegacyRequest: Codable {
+    @URLAsString var url: URL?
+    let headers: [String: String]
+}
+
+struct AidokuRunnerLegacyResponse: Codable {
+    let code: UInt16
+    let headers: [String: String]
+    let request: AidokuRunnerLegacyRequest
+    let image: ImageRef
+
+    init(code: Int, headers: [String: String], request: AidokuRunnerLegacyRequest, image: ImageRef) {
+        self.code = UInt16(code)
+        self.headers = headers
+        self.request = request
+        self.image = image
+    }
 }
 
 protocol AidokuRunnerLegacyRunner {
@@ -529,6 +550,14 @@ protocol AidokuRunnerLegacyRunner {
         context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
     )
+
+    func processPageImage(
+        data: Data,
+        response: HTTPURLResponse,
+        request: URLRequest,
+        context: [String: String]?,
+        completion: @escaping (Result<UIImage?, Error>) -> Void
+    )
 }
 
 final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
@@ -538,6 +567,7 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         dynamicFilters: false,
         dynamicSettings: false,
         dynamicListings: false,
+        processesPages: false,
         providesImageRequests: false
     )
 
@@ -597,6 +627,16 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         url: URL,
         context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
+    ) {
+        completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func processPageImage(
+        data: Data,
+        response: HTTPURLResponse,
+        request: URLRequest,
+        context: [String: String]?,
+        completion: @escaping (Result<UIImage?, Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
     }

@@ -52,6 +52,7 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             dynamicFilters: (try? module.findFunction(name: "get_filters")) != nil,
             dynamicSettings: (try? module.findFunction(name: "get_settings")) != nil,
             dynamicListings: (try? module.findFunction(name: "get_listings")) != nil,
+            processesPages: (try? module.findFunction(name: "process_page_image")) != nil,
             providesImageRequests: (try? module.findFunction(name: "get_image_request")) != nil
         )
 
@@ -281,6 +282,54 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
                 headers: urlRequest.allHTTPHeaderFields ?? [:],
                 body: urlRequest.httpBody
             )
+        }
+    }
+
+    func processPageImage(
+        data: Data,
+        response: HTTPURLResponse,
+        request: URLRequest,
+        context: [String: String]?,
+        completion: @escaping (Result<UIImage?, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.processesPages else {
+                return nil
+            }
+            let requestHeaders = request.allHTTPHeaderFields ?? [:]
+            let responseHeaders = response.allHeaderFields.reduce(into: [String: String]()) { result, header in
+                guard let key = header.key as? String else { return }
+                result[key] = String(describing: header.value)
+            }
+            let imageRef = self.store.store(data)
+            defer { self.store.remove(at: imageRef) }
+            let response = AidokuRunnerLegacyResponse(
+                code: response.statusCode,
+                headers: responseHeaders,
+                request: AidokuRunnerLegacyRequest(url: request.url, headers: requestHeaders),
+                image: imageRef
+            )
+            let responsePointer = try self.store.storeEncoded(response)
+            defer { self.store.remove(at: responsePointer) }
+            let contextPointer = try self.store.storeOptionalEncoded(context)
+            defer {
+                if contextPointer >= 0 {
+                    self.store.remove(at: contextPointer)
+                }
+            }
+
+            let function = try self.module.findFunction(name: "process_page_image")
+            let result: Int32 = try function.call(responsePointer, contextPointer)
+            let resultData = try self.handleResult(result: result)
+            let finalImageRef = try PostcardDecoder().decode(ImageRef.self, from: resultData)
+            defer { self.store.remove(at: finalImageRef) }
+            if let image = self.store.fetch(from: finalImageRef) as? UIImage {
+                return image
+            }
+            if let data = self.store.fetch(from: finalImageRef) as? Data {
+                return UIImage(data: data)
+            }
+            return nil
         }
     }
 
