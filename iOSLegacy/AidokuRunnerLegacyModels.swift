@@ -107,6 +107,134 @@ struct AidokuRunnerLegacySourceInfo: Codable {
     }
 }
 
+enum AidokuRunnerLegacyJSONValueType {
+    case null
+    case bool
+    case int
+    case double
+    case string
+    case stringArray
+    case intArray
+    case object
+}
+
+struct AidokuRunnerLegacyJSONValue: Codable {
+    let type: AidokuRunnerLegacyJSONValueType
+
+    var boolValue: Bool?
+    var intValue: Int?
+    var doubleValue: Double?
+    var stringValue: String?
+    var stringArrayValue: [String]?
+    var intArrayValue: [Int]?
+    var objectValue: [String: AidokuRunnerLegacyJSONValue]?
+
+    var userDefaultsValue: Any? {
+        switch type {
+            case .null:
+                return nil
+            case .bool:
+                return boolValue
+            case .int:
+                return intValue
+            case .double:
+                return doubleValue
+            case .string:
+                return stringValue
+            case .stringArray:
+                return stringArrayValue
+            case .intArray:
+                return intArrayValue
+            case .object:
+                var result: [String: Any] = [:]
+                for (key, value) in objectValue ?? [:] {
+                    if let rawValue = value.userDefaultsValue {
+                        result[key] = rawValue
+                    }
+                }
+                return result
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) {
+            type = .bool
+            boolValue = value
+        } else if let value = try? container.decode(Int.self) {
+            type = .int
+            intValue = value
+            doubleValue = Double(value)
+        } else if let value = try? container.decode(Double.self) {
+            type = .double
+            intValue = Int(value)
+            doubleValue = value
+        } else if let value = try? container.decode(String.self) {
+            type = .string
+            stringValue = value
+        } else if let value = try? container.decode([Int].self) {
+            type = .intArray
+            intArrayValue = value
+        } else if let value = try? container.decode([String].self) {
+            type = .stringArray
+            stringArrayValue = value
+        } else if let value = try? container.decode([String: AidokuRunnerLegacyJSONValue].self) {
+            type = .object
+            objectValue = value
+        } else {
+            type = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch type {
+            case .null:
+                try container.encodeNil()
+            case .bool:
+                try container.encode(boolValue)
+            case .int:
+                try container.encode(intValue)
+            case .double:
+                try container.encode(doubleValue)
+            case .string:
+                try container.encode(stringValue)
+            case .stringArray:
+                try container.encode(stringArrayValue)
+            case .intArray:
+                try container.encode(intArrayValue)
+            case .object:
+                try container.encode(objectValue)
+        }
+    }
+}
+
+struct AidokuRunnerLegacySettingItem: Codable {
+    var type: String
+    var key: String?
+    var urlKey: String?
+    var title: String?
+    var subtitle: String?
+    var footer: String?
+    var defaultValue: AidokuRunnerLegacyJSONValue?
+    var values: [String]?
+    var titles: [String]?
+    var items: [AidokuRunnerLegacySettingItem]?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case key
+        case urlKey
+        case title
+        case subtitle
+        case footer
+        case defaultValue = "default"
+        case values
+        case titles
+        case items
+    }
+}
+
 struct AidokuRunnerLegacyManga: Hashable, Codable {
     var sourceKey: String
     let key: String

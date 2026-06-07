@@ -936,7 +936,9 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
         cell.backgroundColor = LegacyPalette.panel
         cell.textLabel?.textColor = LegacyPalette.primaryText
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
-        cell.imageView?.image = source.imageUrl.flatMap { UIImage(contentsOfFile: $0.path) } ?? LegacyImageLoader.placeholder(size: CGSize(width: 36, height: 36))
+        cell.imageView?.image = source.imageUrl.flatMap {
+            UIImage(contentsOfFile: $0.path)
+        } ?? LegacyImageLoader.placeholder(size: CGSize(width: 36, height: 36))
         cell.textLabel?.text = source.name
         cell.detailTextLabel?.text = "\(source.key)  v\(source.version)  \(source.languages.joined(separator: ", "))"
         cell.accessoryType = .disclosureIndicator
@@ -955,6 +957,7 @@ final class LegacySourceMenuViewController: UITableViewController {
     private enum Row {
         case home
         case search
+        case settings
         case listing(AidokuRunnerLegacyListing)
         case website(URL)
         case message(title: String, subtitle: String?)
@@ -983,6 +986,9 @@ final class LegacySourceMenuViewController: UITableViewController {
             rows.append(.home)
         }
         rows.append(.search)
+        if source.hasConfigurableSettings {
+            rows.append(.settings)
+        }
         rows.append(contentsOf: source.staticListings.map { .listing($0) })
         if source.runner.features.dynamicListings {
             rows.append(.message(title: "Loading Listings...", subtitle: nil))
@@ -1012,6 +1018,9 @@ final class LegacySourceMenuViewController: UITableViewController {
             case .search:
                 cell.textLabel?.text = "Search Manga"
                 cell.detailTextLabel?.text = "Run get_search_manga_list"
+            case .settings:
+                cell.textLabel?.text = "Source Settings"
+                cell.detailTextLabel?.text = "Languages, content ratings, and source options"
             case .listing(let listing):
                 cell.textLabel?.text = listing.name
                 cell.detailTextLabel?.text = "Run get_manga_list"
@@ -1034,6 +1043,8 @@ final class LegacySourceMenuViewController: UITableViewController {
                 navigationController?.pushViewController(LegacySourceHomeViewController(source: source), animated: true)
             case .search:
                 navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: nil), animated: true)
+            case .settings:
+                navigationController?.pushViewController(LegacySourceSettingsViewController(source: source), animated: true)
             case .listing(let listing):
                 navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: listing), animated: true)
             case .website(let url):
@@ -1058,11 +1069,11 @@ final class LegacySourceMenuViewController: UITableViewController {
                     let dynamicRows = listings
                         .filter { !existing.contains($0.id) }
                         .map { Row.listing($0) }
-                    let prefixCount = self.source.runner.features.providesHome ? 2 : 1
+                    let prefixCount = self.fixedPrefixCount
                     let insertIndex = min(prefixCount + self.source.staticListings.count, self.rows.count)
                     self.rows.insert(contentsOf: dynamicRows, at: insertIndex)
                 case .failure(let error):
-                    let prefixCount = self.source.runner.features.providesHome ? 2 : 1
+                    let prefixCount = self.fixedPrefixCount
                     self.rows.insert(
                         .message(title: "Listings Unavailable", subtitle: error.localizedDescription),
                         at: min(prefixCount + self.source.staticListings.count, self.rows.count)
@@ -1070,6 +1081,346 @@ final class LegacySourceMenuViewController: UITableViewController {
             }
             self.tableView.reloadData()
         }
+    }
+
+    private var fixedPrefixCount: Int {
+        var count = 1 // Search
+        if source.runner.features.providesHome {
+            count += 1
+        }
+        if source.hasConfigurableSettings {
+            count += 1
+        }
+        return count
+    }
+}
+
+final class LegacySourceSettingsViewController: UITableViewController {
+    private enum Row {
+        case languages
+        case baseURL
+        case setting(AidokuRunnerLegacySettingItem)
+    }
+
+    private struct Section {
+        let title: String?
+        let rows: [Row]
+    }
+
+    private let source: AidokuRunnerLegacySource
+    private var sections: [Section] = []
+
+    init(source: AidokuRunnerLegacySource) {
+        self.source = source
+        super.init(style: .grouped)
+        title = "Source Settings"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        tableView.backgroundColor = LegacyPalette.background
+        buildSections()
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return sections[section].rows.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return sections[section].title
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "SourceSettingCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "SourceSettingCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.accessoryView = nil
+        cell.accessoryType = .disclosureIndicator
+
+        switch sections[indexPath.section].rows[indexPath.row] {
+            case .languages:
+                cell.textLabel?.text = "Languages"
+                cell.detailTextLabel?.text = selectedLanguages().joined(separator: ", ")
+            case .baseURL:
+                cell.textLabel?.text = "Base URL"
+                cell.detailTextLabel?.text = currentBaseURL()
+            case .setting(let setting):
+                cell.textLabel?.text = settingTitle(setting)
+                cell.detailTextLabel?.text = detailText(for: setting)
+                if setting.type == "switch" || setting.type == "toggle" {
+                    cell.accessoryType = boolValue(for: setting) ? .checkmark : .none
+                }
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        switch sections[indexPath.section].rows[indexPath.row] {
+            case .languages:
+                openLanguagePicker()
+            case .baseURL:
+                openBaseURLPicker()
+            case .setting(let setting):
+                edit(setting)
+        }
+    }
+
+    private func buildSections() {
+        var sourceRows: [Row] = []
+        if source.languages.count > 1 {
+            sourceRows.append(.languages)
+        }
+        if (source.config?.allowsBaseUrlSelect ?? false) && source.urls.count > 1 {
+            sourceRows.append(.baseURL)
+        }
+        if !sourceRows.isEmpty {
+            sections.append(Section(title: "Source", rows: sourceRows))
+        }
+
+        var looseRows: [Row] = []
+        for setting in source.staticSettings {
+            if setting.type == "group" || setting.type == "page" {
+                let rows = settingRows(in: setting.items ?? [])
+                if !rows.isEmpty {
+                    sections.append(Section(title: setting.title, rows: rows))
+                }
+            } else if isEditable(setting) {
+                looseRows.append(.setting(setting))
+            }
+        }
+        if !looseRows.isEmpty {
+            sections.append(Section(title: "Settings", rows: looseRows))
+        }
+    }
+
+    private func settingRows(in settings: [AidokuRunnerLegacySettingItem]) -> [Row] {
+        var rows: [Row] = []
+        for setting in settings {
+            if setting.type == "group" || setting.type == "page" {
+                rows.append(contentsOf: settingRows(in: setting.items ?? []))
+            } else if isEditable(setting) {
+                rows.append(.setting(setting))
+            }
+        }
+        return rows
+    }
+
+    private func isEditable(_ setting: AidokuRunnerLegacySettingItem) -> Bool {
+        guard setting.key != nil else { return false }
+        switch setting.type {
+            case "select", "segment", "multi-select", "multi-single-select", "switch", "toggle", "text", "stepper", "editable-list":
+                return true
+            default:
+                return false
+        }
+    }
+
+    private func openLanguagePicker() {
+        let allowsMultiple = (source.config?.languageSelectType ?? .multiple) != .single
+        let selected = Set(selectedLanguages())
+        let options = source.languages.map { language -> (label: String, value: String) in
+            let label = Locale.current.localizedString(forIdentifier: language) ?? language
+            return (label, language)
+        }
+        let picker = LegacyFilterOptionPickerViewController(
+            title: "Languages",
+            options: options,
+            selectedValues: selected,
+            allowsMultiple: allowsMultiple,
+            allowsExclusion: false
+        ) { [weak self] selected, _ in
+            guard let self = self else { return }
+            if allowsMultiple {
+                UserDefaults.standard.set(selected, forKey: "\(self.source.key).languages")
+            } else if let first = selected.first {
+                UserDefaults.standard.set(first, forKey: "\(self.source.key).language")
+                UserDefaults.standard.set([first], forKey: "\(self.source.key).languages")
+            }
+            self.tableView.reloadData()
+        }
+        navigationController?.pushViewController(picker, animated: true)
+    }
+
+    private func openBaseURLPicker() {
+        let options = source.urls.map { ($0.absoluteString, $0.absoluteString) }
+        let picker = LegacyFilterOptionPickerViewController(
+            title: "Base URL",
+            options: options,
+            selectedValues: Set([currentBaseURL()]),
+            allowsMultiple: false,
+            allowsExclusion: false
+        ) { [weak self] selected, _ in
+            guard let self = self, let value = selected.first else { return }
+            UserDefaults.standard.set(value, forKey: "\(self.source.key).url")
+            self.tableView.reloadData()
+        }
+        navigationController?.pushViewController(picker, animated: true)
+    }
+
+    private func edit(_ setting: AidokuRunnerLegacySettingItem) {
+        guard let key = setting.key else { return }
+        switch setting.type {
+            case "switch", "toggle":
+                let defaultsKey = "\(source.key).\(key)"
+                UserDefaults.standard.set(!boolValue(for: setting), forKey: defaultsKey)
+                tableView.reloadData()
+            case "select", "segment":
+                openSettingPicker(setting: setting, allowsMultiple: false)
+            case "multi-select", "multi-single-select":
+                openSettingPicker(setting: setting, allowsMultiple: true)
+            case "text", "stepper":
+                editText(setting: setting)
+            case "editable-list":
+                editList(setting: setting)
+            default:
+                return
+        }
+    }
+
+    private func openSettingPicker(setting: AidokuRunnerLegacySettingItem, allowsMultiple: Bool) {
+        guard let key = setting.key, setting.values?.isEmpty == false else { return }
+        let defaultsKey = "\(source.key).\(key)"
+        let selected: Set<String> = allowsMultiple
+            ? Set(UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [])
+            : Set([UserDefaults.standard.string(forKey: defaultsKey) ?? ""])
+        let picker = LegacyFilterOptionPickerViewController(
+            title: settingTitle(setting),
+            options: options(for: setting),
+            selectedValues: selected,
+            allowsMultiple: allowsMultiple,
+            allowsExclusion: false
+        ) { [weak self] selected, _ in
+            guard let self = self else { return }
+            if allowsMultiple {
+                UserDefaults.standard.set(selected, forKey: defaultsKey)
+            } else if let value = selected.first {
+                UserDefaults.standard.set(value, forKey: defaultsKey)
+            }
+            self.tableView.reloadData()
+        }
+        navigationController?.pushViewController(picker, animated: true)
+    }
+
+    private func editText(setting: AidokuRunnerLegacySettingItem) {
+        guard let key = setting.key else { return }
+        let defaultsKey = "\(source.key).\(key)"
+        let alert = UIAlertController(title: settingTitle(setting), message: nil, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.text = self.stringValue(forKey: defaultsKey)
+            if setting.type == "stepper" {
+                textField.keyboardType = .decimalPad
+            }
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self = self, let text = alert?.textFields?.first?.text else { return }
+            if setting.type == "stepper", let number = Double(text) {
+                UserDefaults.standard.set(number, forKey: defaultsKey)
+            } else {
+                UserDefaults.standard.set(text, forKey: defaultsKey)
+            }
+            self.tableView.reloadData()
+        })
+        present(alert, animated: true)
+    }
+
+    private func editList(setting: AidokuRunnerLegacySettingItem) {
+        guard let key = setting.key else { return }
+        let defaultsKey = "\(source.key).\(key)"
+        let alert = UIAlertController(
+            title: settingTitle(setting),
+            message: "Enter comma-separated values.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.text = (UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []).joined(separator: ", ")
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self = self, let text = alert?.textFields?.first?.text else { return }
+            let values = text
+                .components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            UserDefaults.standard.set(values, forKey: defaultsKey)
+            self.tableView.reloadData()
+        })
+        present(alert, animated: true)
+    }
+
+    private func selectedLanguages() -> [String] {
+        if (source.config?.languageSelectType ?? .multiple) == .single,
+           let language = UserDefaults.standard.string(forKey: "\(source.key).language"),
+           !language.isEmpty {
+            return [language]
+        }
+        return UserDefaults.standard.stringArray(forKey: "\(source.key).languages") ?? []
+    }
+
+    private func currentBaseURL() -> String {
+        return UserDefaults.standard.string(forKey: "\(source.key).url") ?? source.urls.first?.absoluteString ?? ""
+    }
+
+    private func boolValue(for setting: AidokuRunnerLegacySettingItem) -> Bool {
+        guard let key = setting.key else { return false }
+        return UserDefaults.standard.bool(forKey: "\(source.key).\(key)")
+    }
+
+    private func detailText(for setting: AidokuRunnerLegacySettingItem) -> String? {
+        guard let key = setting.key else { return nil }
+        let defaultsKey = "\(source.key).\(key)"
+        switch setting.type {
+            case "switch", "toggle":
+                return boolValue(for: setting) ? "On" : "Off"
+            case "multi-select", "multi-single-select", "editable-list":
+                let values = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+                return values.isEmpty ? "None" : values.joined(separator: ", ")
+            case "select", "segment":
+                let value = UserDefaults.standard.string(forKey: defaultsKey) ?? ""
+                return label(for: value, in: setting) ?? value
+            default:
+                return stringValue(forKey: defaultsKey)
+        }
+    }
+
+    private func stringValue(forKey key: String) -> String {
+        if let value = UserDefaults.standard.string(forKey: key) {
+            return value
+        }
+        if let number = UserDefaults.standard.object(forKey: key) as? NSNumber {
+            return number.stringValue
+        }
+        return ""
+    }
+
+    private func options(for setting: AidokuRunnerLegacySettingItem) -> [(label: String, value: String)] {
+        let values = setting.values ?? []
+        let titles = setting.titles ?? []
+        return values.enumerated().map { index, value in
+            let title = index < titles.count ? titles[index] : value
+            return (title, value)
+        }
+    }
+
+    private func label(for value: String, in setting: AidokuRunnerLegacySettingItem) -> String? {
+        return options(for: setting).first { $0.value == value }?.label
+    }
+
+    private func settingTitle(_ setting: AidokuRunnerLegacySettingItem) -> String {
+        return setting.title ?? setting.key ?? setting.type
     }
 }
 

@@ -19,6 +19,7 @@ final class AidokuRunnerLegacySource {
     let config: AidokuRunnerLegacySourceInfo.Configuration?
     let staticListings: [AidokuRunnerLegacyListing]
     let staticFilters: [AidokuRunnerLegacyFilter]
+    let staticSettings: [AidokuRunnerLegacySettingItem]
     let runner: AidokuRunnerLegacyRunner
 
     init(
@@ -36,6 +37,8 @@ final class AidokuRunnerLegacySource {
         self.config = info.config
         self.staticListings = info.listings ?? []
         self.staticFilters = Self.filters(in: url)
+        let sourceSettings = Self.settings(in: url)
+        self.staticSettings = sourceSettings
         self.imageUrl = Self.iconURL(in: url)
 
         var baseUrls = [URL]()
@@ -46,6 +49,13 @@ final class AidokuRunnerLegacySource {
             baseUrls.append(contentsOf: sourceUrls.compactMap { URL(string: $0) })
         }
         self.urls = baseUrls
+        Self.registerDefaults(
+            sourceKey: sourceInfo.id,
+            languages: sourceInfo.languages,
+            urls: baseUrls,
+            config: info.config,
+            settings: sourceSettings
+        )
         self.runner = runner
     }
 
@@ -75,6 +85,10 @@ final class AidokuRunnerLegacySource {
         return runner.features.providesListings || !staticListings.isEmpty
     }
 
+    var hasConfigurableSettings: Bool {
+        return !staticSettings.isEmpty || languages.count > 1 || ((config?.allowsBaseUrlSelect ?? false) && urls.count > 1)
+    }
+
     private static func iconURL(in sourceURL: URL) -> URL? {
         let lowercaseIcon = sourceURL.appendingPathComponent("icon.png")
         if FileManager.default.fileExists(atPath: lowercaseIcon.path) {
@@ -99,6 +113,107 @@ final class AidokuRunnerLegacySource {
             return []
         }
         return filters
+    }
+
+    private static func settings(in sourceURL: URL) -> [AidokuRunnerLegacySettingItem] {
+        let settingsURL = sourceURL.appendingPathComponent("settings.json")
+        guard
+            FileManager.default.fileExists(atPath: settingsURL.path),
+            let data = try? Data(contentsOf: settingsURL),
+            let settings = try? JSONDecoder().decode([AidokuRunnerLegacySettingItem].self, from: data)
+        else {
+            return []
+        }
+        return settings
+    }
+
+    private static func registerDefaults(
+        sourceKey: String,
+        languages: [String],
+        urls: [URL],
+        config: AidokuRunnerLegacySourceInfo.Configuration?,
+        settings: [AidokuRunnerLegacySettingItem]
+    ) {
+        var defaults: [String: Any] = [:]
+
+        let languageDefaults = defaultLanguages(from: languages)
+        if let firstLanguage = languageDefaults.first {
+            defaults["\(sourceKey).language"] = firstLanguage
+            defaults["\(sourceKey).languages"] = languageDefaults
+        }
+
+        if config?.allowsBaseUrlSelect ?? false, urls.count > 1, let defaultURL = urls.first?.absoluteString {
+            defaults["\(sourceKey).url"] = defaultURL
+        }
+
+        collectSettingDefaults(settings, sourceKey: sourceKey, defaults: &defaults)
+
+        if !defaults.isEmpty {
+            UserDefaults.standard.register(defaults: defaults)
+        }
+    }
+
+    private static func defaultLanguages(from languages: [String]) -> [String] {
+        guard !languages.isEmpty else { return [] }
+
+        var preferredValues: [String] = []
+        for identifier in Locale.preferredLanguages {
+            let normalizedIdentifier = identifier.replacingOccurrences(of: "_", with: "-")
+            appendUnique(normalizedIdentifier, to: &preferredValues)
+
+            let locale = Locale(identifier: identifier)
+            guard let languageCode = locale.languageCode else { continue }
+
+            if let scriptCode = locale.scriptCode {
+                appendUnique("\(languageCode)-\(scriptCode)", to: &preferredValues)
+            }
+            if let regionCode = locale.regionCode {
+                appendUnique("\(languageCode)-\(regionCode)", to: &preferredValues)
+            }
+            appendUnique(languageCode, to: &preferredValues)
+        }
+
+        var result: [String] = []
+        for language in languages where preferredValues.contains(language) {
+            appendUnique(language, to: &result)
+        }
+
+        if result.isEmpty, let fallback = languages.first {
+            result = [fallback]
+        }
+        return result
+    }
+
+    private static func collectSettingDefaults(
+        _ settings: [AidokuRunnerLegacySettingItem],
+        sourceKey: String,
+        defaults: inout [String: Any]
+    ) {
+        for setting in settings {
+            switch setting.type {
+                case "group", "page":
+                    collectSettingDefaults(setting.items ?? [], sourceKey: sourceKey, defaults: &defaults)
+                case "select", "segment":
+                    if let key = setting.key {
+                        if let value = setting.defaultValue?.userDefaultsValue {
+                            defaults["\(sourceKey).\(key)"] = value
+                        } else if let value = setting.values?.first {
+                            defaults["\(sourceKey).\(key)"] = value
+                        }
+                    }
+                case "switch", "toggle", "text", "multi-select", "multi-single-select", "stepper", "editable-list":
+                    if let key = setting.key, let value = setting.defaultValue?.userDefaultsValue {
+                        defaults["\(sourceKey).\(key)"] = value
+                    }
+                default:
+                    continue
+            }
+        }
+    }
+
+    private static func appendUnique(_ value: String, to values: inout [String]) {
+        guard !value.isEmpty, !values.contains(value) else { return }
+        values.append(value)
     }
 }
 
