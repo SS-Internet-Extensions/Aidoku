@@ -37,7 +37,7 @@ private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
 private func aidokuLegacyReaderPrefetchCount() -> Int {
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages")
     if aidokuLegacyIsLowMemoryMode() {
-        return max(1, min(storedValue, 1))
+        return max(2, min(storedValue, 2))
     }
     let bounded = min(max(storedValue, 0), 2)
     return bounded
@@ -139,7 +139,285 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     return URLSession(configuration: configuration)
 }()
 
+private final class LegacyReaderImagePipeline {
+    static let shared = LegacyReaderImagePipeline()
+
+    private typealias Completion = (UIImage?) -> Void
+
+    private let cache = NSCache<NSString, UIImage>()
+    private let stateQueue = DispatchQueue(label: "AidokuLegacy.readerImagePipeline")
+    private var waiters: [String: [Completion]] = [:]
+    private var memoryObserver: NSObjectProtocol?
+
+    private init() {
+        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 6 : 24
+        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 6 * 1024 * 1024 : 48 * 1024 * 1024
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.clear()
+        }
+    }
+
+    deinit {
+        if let memoryObserver = memoryObserver {
+            NotificationCenter.default.removeObserver(memoryObserver)
+        }
+    }
+
+    func clear() {
+        stateQueue.async { [weak self] in
+            self?.cache.removeAllObjects()
+        }
+    }
+
+    func preload(url: URL, context: [String: String]?, source: AidokuRunnerLegacySource) {
+        load(url: url, context: context, source: source) { _ in }
+    }
+
+    func load(
+        url: URL,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        if url.isFileURL {
+            loadLocalFile(url: url, context: context, source: source, completion: completion)
+            return
+        }
+
+        let cacheKey = self.cacheKey(url: url, context: context, source: source)
+        guard startLoad(cacheKey: cacheKey, completion: completion) else { return }
+        source.runner.getImageRequest(url: url, context: context) { [weak self] result in
+            guard let self = self else { return }
+            let request: URLRequest
+            switch result {
+                case .success(let imageRequest):
+                    request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                case .failure:
+                    request = legacyFallbackImageRequest(url: url, source: source)
+            }
+            let fallbackRequests = legacyFallbackImageRequests(url: url, source: source, excluding: request)
+            self.fetchRemote(
+                request: request,
+                fallbackRequests: fallbackRequests,
+                cacheKey: cacheKey,
+                context: context,
+                source: source,
+                retriesRemaining: 1
+            )
+        }
+    }
+
+    private func loadLocalFile(
+        url: URL,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        completion: @escaping Completion
+    ) {
+        let cacheKey = localCacheKey(url: url, context: context, source: source)
+        guard startLoad(cacheKey: cacheKey, completion: completion) else { return }
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+            let image = autoreleasepool { () -> UIImage? in
+                guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+                return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
+            self?.finish(cacheKey: cacheKey, image: image)
+        }
+    }
+
+    private func fetchRemote(
+        request: URLRequest,
+        fallbackRequests: [URLRequest],
+        cacheKey: String,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        retriesRemaining: Int
+    ) {
+        aidokuLegacyReaderImageSession.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            let httpResponse = response as? HTTPURLResponse
+            let statusCode = httpResponse?.statusCode
+            if self.shouldRetry(error: error, statusCode: statusCode, data: data), retriesRemaining > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    self.fetchRemote(
+                        request: request,
+                        fallbackRequests: fallbackRequests,
+                        cacheKey: cacheKey,
+                        context: context,
+                        source: source,
+                        retriesRemaining: retriesRemaining - 1
+                    )
+                }
+                return
+            }
+
+            guard
+                let data = data,
+                !data.isEmpty,
+                let httpResponse = httpResponse,
+                (200..<300).contains(httpResponse.statusCode)
+            else {
+                self.fetchNextFallback(
+                    fallbackRequests,
+                    cacheKey: cacheKey,
+                    context: context,
+                    source: source
+                )
+                return
+            }
+
+            if source.runner.features.processesPages {
+                DispatchQueue.main.async {
+                    source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { result in
+                        switch result {
+                            case .success(let image?):
+                                self.prepareProcessedImage(image, cacheKey: cacheKey)
+                            case .success(nil), .failure:
+                                self.decodeImageData(data, cacheKey: cacheKey)
+                        }
+                    }
+                }
+            } else {
+                self.decodeImageData(data, cacheKey: cacheKey)
+            }
+        }.resume()
+    }
+
+    private func fetchNextFallback(
+        _ fallbackRequests: [URLRequest],
+        cacheKey: String,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource
+    ) {
+        guard let fallbackRequest = fallbackRequests.first else {
+            finish(cacheKey: cacheKey, image: nil)
+            return
+        }
+        let remainingRequests = Array(fallbackRequests.dropFirst())
+        fetchRemote(
+            request: fallbackRequest,
+            fallbackRequests: remainingRequests,
+            cacheKey: cacheKey,
+            context: context,
+            source: source,
+            retriesRemaining: 1
+        )
+    }
+
+    private func prepareProcessedImage(_ image: UIImage, cacheKey: String) {
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+            let preparedImage = autoreleasepool {
+                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+            }
+            self?.finish(cacheKey: cacheKey, image: preparedImage)
+        }
+    }
+
+    private func decodeImageData(_ data: Data, cacheKey: String) {
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+            let image = autoreleasepool {
+                LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
+            self?.finish(cacheKey: cacheKey, image: image)
+        }
+    }
+
+    private func startLoad(cacheKey: String, completion: @escaping Completion) -> Bool {
+        let key = cacheKey as NSString
+        var cachedImage: UIImage?
+        var shouldStart = false
+        stateQueue.sync {
+            if let image = cache.object(forKey: key) {
+                cachedImage = image
+            } else if waiters[cacheKey] != nil {
+                waiters[cacheKey]?.append(completion)
+            } else {
+                waiters[cacheKey] = [completion]
+                shouldStart = true
+            }
+        }
+        if let cachedImage = cachedImage {
+            completion(cachedImage)
+        }
+        return shouldStart
+    }
+
+    private func finish(cacheKey: String, image: UIImage?) {
+        stateQueue.async { [weak self] in
+            guard let self = self else { return }
+            if let image = image {
+                self.cache.setObject(image, forKey: cacheKey as NSString, cost: self.imageCost(image))
+            }
+            let callbacks = self.waiters.removeValue(forKey: cacheKey) ?? []
+            DispatchQueue.main.async {
+                callbacks.forEach { $0(image) }
+            }
+        }
+    }
+
+    private func shouldRetry(error: Error?, statusCode: Int?, data: Data?) -> Bool {
+        if error != nil || data == nil || data?.isEmpty == true {
+            return true
+        }
+        guard let statusCode = statusCode else { return false }
+        return statusCode == 408 || statusCode == 429 || (500..<600).contains(statusCode)
+    }
+
+    private func imageCost(_ image: UIImage) -> Int {
+        if let cgImage = image.cgImage {
+            return max(1, cgImage.bytesPerRow * cgImage.height)
+        }
+        let pixels = image.size.width * image.size.height * image.scale * image.scale
+        return max(1, Int(pixels * 4))
+    }
+
+    private func localCacheKey(
+        url: URL,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource
+    ) -> String {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        return [
+            "file",
+            source.key,
+            url.path,
+            "\(values?.fileSize ?? 0)",
+            "\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)",
+            contextKey(context),
+            "\(Int(aidokuLegacyReaderMaxPixelHeight()))"
+        ].joined(separator: "\n")
+    }
+
+    private func cacheKey(
+        url: URL,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource
+    ) -> String {
+        return [
+            "remote",
+            source.key,
+            url.absoluteString,
+            contextKey(context),
+            "\(Int(aidokuLegacyReaderMaxPixelHeight()))"
+        ].joined(separator: "\n")
+    }
+
+    private func contextKey(_ context: [String: String]?) -> String {
+        return (context ?? [:])
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "&")
+    }
+}
+
 func aidokuLegacyTrimVolatileCaches() {
+    LegacyReaderImagePipeline.shared.clear()
     LegacyImageLoader.shared.clear()
     aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
     URLCache.shared.removeAllCachedResponses()
@@ -6020,21 +6298,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             updatePageHUD()
         }
 
-        let preloadCount = aidokuLegacyReaderPrefetchCount()
-        guard preloadCount > 0 else { return }
-        let candidateIndexes = (1...preloadCount).flatMap { offset in
-            [indexPath.row + offset, indexPath.row - offset]
-        }
-        let source = self.source
-        for pageIndex in candidateIndexes where pages.indices.contains(pageIndex) {
-            guard case .url(let url, let context) = pages[pageIndex].content else { continue }
-            guard !url.isFileURL else { continue }
-            source.runner.getImageRequest(url: url, context: context) { result in
-                if case .success(let request) = result {
-                    aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
-                }
-            }
-        }
+        preloadPages(around: indexPath.row, includeCurrent: false)
     }
 
     override func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -6090,6 +6354,23 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         let prepared = aidokuLegacyPreparePagesForLowMemory(newPages)
         pages = prepared.pages
         temporaryPageDirectories = prepared.temporaryDirectories
+        let warmupPageIndex = pages.indices.contains(initialPageIndex) ? initialPageIndex : 0
+        preloadPages(around: warmupPageIndex, includeCurrent: true)
+    }
+
+    private func preloadPages(around pageIndex: Int, includeCurrent: Bool) {
+        let preloadCount = aidokuLegacyReaderPrefetchCount()
+        guard preloadCount > 0 || includeCurrent else { return }
+        var candidateIndexes = includeCurrent ? [pageIndex] : []
+        if preloadCount > 0 {
+            candidateIndexes += (1...preloadCount).flatMap { offset in
+                [pageIndex + offset, pageIndex - offset]
+            }
+        }
+        for candidateIndex in candidateIndexes where pages.indices.contains(candidateIndex) {
+            guard case .url(let url, let context) = pages[candidateIndex].content else { continue }
+            LegacyReaderImagePipeline.shared.preload(url: url, context: context, source: source)
+        }
     }
 
     @objc private func toggleBars() {
@@ -6500,7 +6781,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         currentPageIndex = pageIndex
         recordHistory(pageIndex: pageIndex, force: false)
         updatePageHUD()
-        preloadPages(around: pageIndex)
+        preloadPages(around: pageIndex, includeCurrent: false)
     }
 
     func collectionView(
@@ -6555,6 +6836,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let prepared = aidokuLegacyPreparePagesForLowMemory(newPages)
         pages = prepared.pages
         temporaryPageDirectories = prepared.temporaryDirectories
+        let warmupPageIndex = pages.indices.contains(initialPageIndex) ? initialPageIndex : 0
+        preloadPages(around: warmupPageIndex, includeCurrent: true)
     }
 
     private func scrollToInitialPageIfNeeded() {
@@ -6592,21 +6875,18 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         return visualIndex
     }
 
-    private func preloadPages(around pageIndex: Int) {
+    private func preloadPages(around pageIndex: Int, includeCurrent: Bool) {
         let preloadCount = aidokuLegacyReaderPrefetchCount()
-        guard preloadCount > 0 else { return }
-        let candidateIndexes = (1...preloadCount).flatMap { offset -> [Int] in
-            return [pageIndex + offset, pageIndex - offset]
+        guard preloadCount > 0 || includeCurrent else { return }
+        var candidateIndexes = includeCurrent ? [pageIndex] : []
+        if preloadCount > 0 {
+            candidateIndexes += (1...preloadCount).flatMap { offset -> [Int] in
+                return [pageIndex + offset, pageIndex - offset]
+            }
         }
-        let source = self.source
         for candidateIndex in candidateIndexes where pages.indices.contains(candidateIndex) {
             guard case .url(let url, let context) = pages[candidateIndex].content else { continue }
-            guard !url.isFileURL else { continue }
-            source.runner.getImageRequest(url: url, context: context) { result in
-                if case .success(let request) = result {
-                    aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
-                }
-            }
+            LegacyReaderImagePipeline.shared.preload(url: url, context: context, source: source)
         }
     }
 
@@ -7116,22 +7396,13 @@ private final class LegacyPageImageCell: UITableViewCell {
         heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         switch page.content {
             case .url(let url, let context):
-                if url.isFileURL {
-                    loadLocalImage(url: url, loadID: loadID)
-                    return
-                }
                 pageLabel.text = "Loading..."
-                source.runner.getImageRequest(url: url, context: context) { [weak self] result in
-                    DispatchQueue.main.async {
-                        guard let self = self, self.representedLoadID == loadID else { return }
-                        let request: URLRequest
-                        switch result {
-                            case .success(let imageRequest):
-                                request = imageRequest.urlRequest(source: source, fallbackURL: url)
-                            case .failure:
-                                request = legacyFallbackImageRequest(url: url, source: source)
-                        }
-                        self.load(request: request, context: context, source: source, loadID: loadID)
+                LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source) { [weak self] image in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    if let image = image {
+                        self.setImage(image, loadID: loadID)
+                    } else {
+                        self.showFailure("Image failed to load.", loadID: loadID)
                     }
                 }
             case .image(let data):
@@ -7482,22 +7753,13 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         pageLabel.text = nil
         switch page.content {
             case .url(let url, let context):
-                if url.isFileURL {
-                    loadLocalImage(url: url, loadID: loadID)
-                    return
-                }
                 pageLabel.text = "Loading..."
-                source.runner.getImageRequest(url: url, context: context) { [weak self] result in
-                    DispatchQueue.main.async {
-                        guard let self = self, self.representedLoadID == loadID else { return }
-                        let request: URLRequest
-                        switch result {
-                            case .success(let imageRequest):
-                                request = imageRequest.urlRequest(source: source, fallbackURL: url)
-                            case .failure:
-                                request = legacyFallbackImageRequest(url: url, source: source)
-                        }
-                        self.load(request: request, context: context, source: source, loadID: loadID)
+                LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source) { [weak self] image in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    if let image = image {
+                        self.setImage(image, loadID: loadID)
+                    } else {
+                        self.showFailure("Image failed to load.", loadID: loadID)
                     }
                 }
             case .image(let data):
