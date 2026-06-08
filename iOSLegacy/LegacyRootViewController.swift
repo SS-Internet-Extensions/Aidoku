@@ -6559,8 +6559,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         for cell in collectionView.visibleCells {
             guard let pageCell = cell as? LegacyPagedImageCell else { continue }
             let indexPath = collectionView.indexPath(for: cell)
-            let pageIndex = indexPath.map { pageIndex(forVisualIndex: $0.item) }
-            if pageIndex != current {
+            let visiblePageIndex: Int?
+            if let indexPath = indexPath {
+                visiblePageIndex = pageIndex(forVisualIndex: indexPath.item)
+            } else {
+                visiblePageIndex = nil
+            }
+            if visiblePageIndex != current {
                 pageCell.releaseDecodedImage()
             }
         }
