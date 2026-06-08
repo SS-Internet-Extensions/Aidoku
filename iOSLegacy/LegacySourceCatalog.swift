@@ -41,6 +41,15 @@ final class LegacySourceRepositoryStore {
         save([LegacySourceCatalog.communityIndexURL])
     }
 
+    func replace(with urls: [URL]) {
+        var uniqueURLs: [URL] = []
+        for url in urls {
+            guard !uniqueURLs.contains(url) else { continue }
+            uniqueURLs.append(url)
+        }
+        save(uniqueURLs.isEmpty ? [LegacySourceCatalog.communityIndexURL] : uniqueURLs)
+    }
+
     func normalizedURL(from rawValue: String) -> URL? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -329,8 +338,8 @@ final class LegacySourceCatalogClient {
         guard let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw LegacySourceCatalogError.missingApplicationSupportDirectory
         }
-        let dot = UnicodeScalar(".")
-        let dash = UnicodeScalar("-")
+        let dot: UnicodeScalar = "."
+        let dash: UnicodeScalar = "-"
         let safeId = source.id.unicodeScalars.reduce(into: "") { result, scalar in
             if CharacterSet.alphanumerics.contains(scalar) || scalar == dot || scalar == dash {
                 result.unicodeScalars.append(scalar)

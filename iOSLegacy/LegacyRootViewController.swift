@@ -14,11 +14,61 @@ import avif
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
+
+private func aidokuLegacyIsLowMemoryMode() -> Bool {
+    if UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") {
+        return true
+    }
+    return ProcessInfo.processInfo.physicalMemory <= 1_350_000_000
+}
+
+private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
+    let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
+    if storedValue > 0 {
+        return CGFloat(storedValue)
+    }
+    return aidokuLegacyIsLowMemoryMode() ? 1200 : 2200
+}
+
+private func aidokuLegacyReaderPrefetchCount() -> Int {
+    let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages")
+    let bounded = min(max(storedValue, 0), aidokuLegacyIsLowMemoryMode() ? 1 : 2)
+    return bounded
+}
+
+private func aidokuLegacyApplicationSupportDirectory() throws -> URL {
+    guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        throw NSError(domain: "AidokuLegacy", code: 1, userInfo: [NSLocalizedDescriptionKey: "Application Support is unavailable."])
+    }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+    return directory
+}
+
+private func aidokuLegacySanitizedPathComponent(_ value: String) -> String {
+    let dot: UnicodeScalar = "."
+    let dash: UnicodeScalar = "-"
+    let underscore: UnicodeScalar = "_"
+    let sanitized = value.unicodeScalars.reduce(into: "") { result, scalar in
+        if CharacterSet.alphanumerics.contains(scalar) || scalar == dot || scalar == dash || scalar == underscore {
+            result.unicodeScalars.append(scalar)
+        } else {
+            result.append("_")
+        }
+    }
+    return sanitized.isEmpty ? UUID().uuidString : sanitized
+}
+
 private let aidokuLegacyReaderImageSession: URLSession = {
     let configuration = URLSessionConfiguration.default
     configuration.requestCachePolicy = .returnCacheDataElseLoad
-    configuration.timeoutIntervalForRequest = 30
-    configuration.httpMaximumConnectionsPerHost = 4
+    configuration.timeoutIntervalForRequest = 25
+    configuration.timeoutIntervalForResource = 60
+    configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
+    configuration.urlCache = URLCache(
+        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 2 * 1024 * 1024 : 6 * 1024 * 1024,
+        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 24 * 1024 * 1024 : 48 * 1024 * 1024,
+        diskPath: "AidokuLegacyReaderImageCache"
+    )
     configuration.httpAdditionalHeaders = [
         "Accept": aidokuLegacyImageAcceptHeader,
         "User-Agent": aidokuLegacyImageUserAgent
@@ -140,6 +190,8 @@ private extension Notification.Name {
     static let legacyLibraryDidChange = Notification.Name("AidokuLegacyLibraryDidChange")
     static let legacyHistoryDidChange = Notification.Name("AidokuLegacyHistoryDidChange")
     static let legacyAppearanceDidChange = Notification.Name("AidokuLegacyAppearanceDidChange")
+    static let legacyDownloadsDidChange = Notification.Name("AidokuLegacyDownloadsDidChange")
+    static let legacyUpdatesDidChange = Notification.Name("AidokuLegacyUpdatesDidChange")
 }
 
 final class LegacyTabBarController: UITabBarController {
@@ -209,11 +261,45 @@ final class LegacyTabBarController: UITabBarController {
     }
 }
 
+private enum LegacyLibrarySortOption: String, CaseIterable {
+    case recentlyAdded
+    case title
+    case source
+
+    private static let defaultsKey = "AidokuLegacy.library.sortOption"
+
+    static var current: LegacyLibrarySortOption {
+        guard
+            let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+            let option = LegacyLibrarySortOption(rawValue: rawValue)
+        else {
+            return .recentlyAdded
+        }
+        return option
+    }
+
+    static func setCurrent(_ option: LegacyLibrarySortOption) {
+        UserDefaults.standard.set(option.rawValue, forKey: defaultsKey)
+    }
+
+    var title: String {
+        switch self {
+            case .recentlyAdded:
+                return "Recently Added"
+            case .title:
+                return "Title"
+            case .source:
+                return "Source"
+        }
+    }
+}
+
 struct LegacyLibraryEntry: Codable, Hashable {
     var sourceKey: String
     var sourceName: String
     var manga: AidokuRunnerLegacyManga
     var dateAdded: Date
+    var category: String?
 
     var key: String {
         return "\(sourceKey)::\(manga.key)"
@@ -228,30 +314,60 @@ final class LegacyLibraryStore {
     private let encoder = JSONEncoder()
 
     var entries: [LegacyLibraryEntry] {
+        return entries(sort: .recentlyAdded)
+    }
+
+    var rawEntries: [LegacyLibraryEntry] {
         guard
             let data = UserDefaults.standard.data(forKey: defaultsKey),
             let entries = try? decoder.decode([LegacyLibraryEntry].self, from: data)
         else {
             return []
         }
-        return entries.sorted { $0.dateAdded > $1.dateAdded }
+        return entries
+    }
+
+    func entries(category: String? = nil, query: String? = nil, sort: LegacyLibrarySortOption = .recentlyAdded) -> [LegacyLibraryEntry] {
+        var filteredEntries = rawEntries
+        if let category = category {
+            if category.isEmpty {
+                filteredEntries = filteredEntries.filter { ($0.category ?? "").isEmpty }
+            } else {
+                filteredEntries = filteredEntries.filter { $0.category == category }
+            }
+        }
+        let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedQuery.isEmpty {
+            filteredEntries = filteredEntries.filter {
+                $0.manga.title.localizedCaseInsensitiveContains(trimmedQuery)
+                    || $0.sourceName.localizedCaseInsensitiveContains(trimmedQuery)
+                    || ($0.category?.localizedCaseInsensitiveContains(trimmedQuery) ?? false)
+            }
+        }
+        return sortEntries(filteredEntries, sort: sort)
+    }
+
+    func categories() -> [String] {
+        let values = rawEntries.compactMap { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     func contains(sourceKey: String, mangaKey: String) -> Bool {
-        return entries.contains { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
+        return rawEntries.contains { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
     }
 
     func add(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
-        var current = entries.filter { !($0.sourceKey == source.key && $0.manga.key == manga.key) }
+        var current = rawEntries.filter { !($0.sourceKey == source.key && $0.manga.key == manga.key) }
         current.insert(
-            LegacyLibraryEntry(sourceKey: source.key, sourceName: source.name, manga: manga, dateAdded: Date()),
+            LegacyLibraryEntry(sourceKey: source.key, sourceName: source.name, manga: manga, dateAdded: Date(), category: nil),
             at: 0
         )
         save(current)
     }
 
     func update(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
-        var current = entries
+        var current = rawEntries
         guard let index = current.firstIndex(where: { $0.sourceKey == source.key && $0.manga.key == manga.key }) else {
             return
         }
@@ -259,17 +375,53 @@ final class LegacyLibraryStore {
             sourceKey: source.key,
             sourceName: source.name,
             manga: manga,
-            dateAdded: current[index].dateAdded
+            dateAdded: current[index].dateAdded,
+            category: current[index].category
         )
         save(current)
     }
 
+    func setCategory(sourceKey: String, mangaKey: String, category: String?) {
+        var current = rawEntries
+        guard let index = current.firstIndex(where: { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }) else {
+            return
+        }
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
+        current[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        save(current)
+    }
+
     func remove(sourceKey: String, mangaKey: String) {
-        save(entries.filter { !($0.sourceKey == sourceKey && $0.manga.key == mangaKey) })
+        save(rawEntries.filter { !($0.sourceKey == sourceKey && $0.manga.key == mangaKey) })
     }
 
     func clear() {
         save([])
+    }
+
+    func replace(_ entries: [LegacyLibraryEntry]) {
+        save(entries)
+    }
+
+    private func entries(sort: LegacyLibrarySortOption) -> [LegacyLibraryEntry] {
+        return sortEntries(rawEntries, sort: sort)
+    }
+
+    private func sortEntries(_ entries: [LegacyLibraryEntry], sort: LegacyLibrarySortOption) -> [LegacyLibraryEntry] {
+        switch sort {
+            case .recentlyAdded:
+                return entries.sorted { $0.dateAdded > $1.dateAdded }
+            case .title:
+                return entries.sorted { $0.manga.title.localizedCaseInsensitiveCompare($1.manga.title) == .orderedAscending }
+            case .source:
+                return entries.sorted {
+                    let sourceCompare = $0.sourceName.localizedCaseInsensitiveCompare($1.sourceName)
+                    if sourceCompare != .orderedSame {
+                        return sourceCompare == .orderedAscending
+                    }
+                    return $0.manga.title.localizedCaseInsensitiveCompare($1.manga.title) == .orderedAscending
+                }
+        }
     }
 
     private func save(_ entries: [LegacyLibraryEntry]) {
@@ -351,6 +503,10 @@ final class LegacyHistoryStore {
         save([])
     }
 
+    func replace(_ entries: [LegacyHistoryEntry]) {
+        save(entries)
+    }
+
     private func save(_ entries: [LegacyHistoryEntry]) {
         if let data = try? encoder.encode(entries) {
             UserDefaults.standard.set(data, forKey: defaultsKey)
@@ -359,28 +515,717 @@ final class LegacyHistoryStore {
     }
 }
 
+struct LegacyUpdateEntry: Codable, Hashable {
+    var sourceKey: String
+    var sourceName: String
+    var manga: AidokuRunnerLegacyManga
+    var chapter: AidokuRunnerLegacyChapter
+    var dateFound: Date
+
+    var key: String {
+        return "\(sourceKey)::\(manga.key)::\(chapter.key)"
+    }
+}
+
+final class LegacyUpdateStore {
+    static let shared = LegacyUpdateStore()
+
+    private let defaultsKey = "AidokuLegacy.updates.entries"
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    var entries: [LegacyUpdateEntry] {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let entries = try? decoder.decode([LegacyUpdateEntry].self, from: data)
+        else {
+            return []
+        }
+        return entries.sorted { $0.dateFound > $1.dateFound }
+    }
+
+    func add(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga, chapters: [AidokuRunnerLegacyChapter]) {
+        guard !chapters.isEmpty else { return }
+        var current = entries
+        let now = Date()
+        for chapter in chapters {
+            let entry = LegacyUpdateEntry(
+                sourceKey: source.key,
+                sourceName: source.name,
+                manga: manga,
+                chapter: chapter,
+                dateFound: now
+            )
+            current.removeAll { $0.key == entry.key }
+            current.insert(entry, at: 0)
+        }
+        save(Array(current.prefix(500)))
+    }
+
+    func remove(key: String) {
+        save(entries.filter { $0.key != key })
+    }
+
+    func clear() {
+        save([])
+    }
+
+    func replace(_ entries: [LegacyUpdateEntry]) {
+        save(entries)
+    }
+
+    private func save(_ entries: [LegacyUpdateEntry]) {
+        if let data = try? encoder.encode(entries) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+            NotificationCenter.default.post(name: .legacyUpdatesDidChange, object: nil)
+        }
+    }
+}
+
+struct LegacyDownloadedChapter: Codable, Hashable {
+    var sourceKey: String
+    var sourceName: String
+    var manga: AidokuRunnerLegacyManga
+    var chapter: AidokuRunnerLegacyChapter
+    var pageCount: Int
+    var byteCount: Int64
+    var dateDownloaded: Date
+
+    var key: String {
+        return "\(sourceKey)::\(manga.key)::\(chapter.key)"
+    }
+}
+
+private struct LegacyDownloadedPageRecord: Codable {
+    enum Kind: String, Codable {
+        case image
+        case text
+    }
+
+    var kind: Kind
+    var fileName: String?
+    var text: String?
+    var description: String?
+}
+
+private struct LegacyDownloadedChapterManifest: Codable {
+    var chapter: LegacyDownloadedChapter
+    var pages: [LegacyDownloadedPageRecord]
+}
+
+final class LegacyDownloadStore {
+    static let shared = LegacyDownloadStore()
+
+    private let fileManager = FileManager.default
+    private let manifestFileName = "manifest.json"
+
+    var downloadedChapters: [LegacyDownloadedChapter] {
+        guard
+            let root = try? downloadsDirectory(),
+            let manifests = try? fileManager.subpathsOfDirectory(atPath: root.path)
+        else {
+            return []
+        }
+        return manifests
+            .filter { $0.hasSuffix(manifestFileName) }
+            .compactMap { relativePath -> LegacyDownloadedChapter? in
+                let url = root.appendingPathComponent(relativePath)
+                guard
+                    let data = try? Data(contentsOf: url),
+                    let manifest = try? JSONDecoder().decode(LegacyDownloadedChapterManifest.self, from: data)
+                else {
+                    return nil
+                }
+                return manifest.chapter
+            }
+            .sorted { $0.dateDownloaded > $1.dateDownloaded }
+    }
+
+    func hasChapter(sourceKey: String, mangaKey: String, chapterKey: String) -> Bool {
+        let directory = chapterDirectory(sourceKey: sourceKey, mangaKey: mangaKey, chapterKey: chapterKey)
+        return fileManager.fileExists(atPath: directory.appendingPathComponent(manifestFileName).path)
+    }
+
+    func pages(sourceKey: String, mangaKey: String, chapterKey: String) -> [AidokuRunnerLegacyPage]? {
+        let directory = chapterDirectory(sourceKey: sourceKey, mangaKey: mangaKey, chapterKey: chapterKey)
+        let manifestURL = directory.appendingPathComponent(manifestFileName)
+        guard
+            let data = try? Data(contentsOf: manifestURL),
+            let manifest = try? JSONDecoder().decode(LegacyDownloadedChapterManifest.self, from: data)
+        else {
+            return nil
+        }
+        let pages: [AidokuRunnerLegacyPage] = manifest.pages.compactMap { record in
+            switch record.kind {
+                case .text:
+                    return AidokuRunnerLegacyPage(
+                        content: .text(record.text ?? ""),
+                        hasDescription: !(record.description ?? "").isEmpty,
+                        description: record.description
+                    )
+                case .image:
+                    guard
+                        let fileName = record.fileName
+                    else {
+                        return nil
+                    }
+                    return AidokuRunnerLegacyPage(
+                        content: .url(directory.appendingPathComponent(fileName), context: nil),
+                        hasDescription: !(record.description ?? "").isEmpty,
+                        description: record.description
+                    )
+            }
+        }
+        return pages.count == manifest.pages.count ? pages : nil
+    }
+
+    func makeWriter(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        pageCount: Int
+    ) throws -> LegacyDownloadWriter {
+        return try LegacyDownloadWriter(
+            store: self,
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            pageCount: pageCount
+        )
+    }
+
+    func delete(_ chapter: LegacyDownloadedChapter) {
+        let directory = chapterDirectory(sourceKey: chapter.sourceKey, mangaKey: chapter.manga.key, chapterKey: chapter.chapter.key)
+        try? fileManager.removeItem(at: directory)
+        NotificationCenter.default.post(name: .legacyDownloadsDidChange, object: nil)
+    }
+
+    func delete(sourceKey: String, mangaKey: String, chapterKey: String) {
+        let directory = chapterDirectory(sourceKey: sourceKey, mangaKey: mangaKey, chapterKey: chapterKey)
+        try? fileManager.removeItem(at: directory)
+        NotificationCenter.default.post(name: .legacyDownloadsDidChange, object: nil)
+    }
+
+    func clear() {
+        if let directory = try? downloadsDirectory() {
+            try? fileManager.removeItem(at: directory)
+        }
+        NotificationCenter.default.post(name: .legacyDownloadsDidChange, object: nil)
+    }
+
+    fileprivate func downloadsDirectory() throws -> URL {
+        let directory = try aidokuLegacyApplicationSupportDirectory()
+            .appendingPathComponent("AidokuLegacyDownloads", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+        return directory
+    }
+
+    fileprivate func chapterDirectory(sourceKey: String, mangaKey: String, chapterKey: String) -> URL {
+        let root = (try? downloadsDirectory()) ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return root
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(sourceKey), isDirectory: true)
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(mangaKey), isDirectory: true)
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(chapterKey), isDirectory: true)
+    }
+
+    final class LegacyDownloadWriter {
+        private let store: LegacyDownloadStore
+        private let fileManager = FileManager.default
+        private let finalDirectory: URL
+        private let tempDirectory: URL
+        private let chapterInfo: LegacyDownloadedChapter
+        private var records: [LegacyDownloadedPageRecord] = []
+        private var byteCount: Int64 = 0
+
+        fileprivate init(
+            store: LegacyDownloadStore,
+            source: AidokuRunnerLegacySource,
+            manga: AidokuRunnerLegacyManga,
+            chapter: AidokuRunnerLegacyChapter,
+            pageCount: Int
+        ) throws {
+            self.store = store
+            finalDirectory = store.chapterDirectory(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key)
+            tempDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("AidokuLegacyDownload-\(UUID().uuidString)", isDirectory: true)
+            chapterInfo = LegacyDownloadedChapter(
+                sourceKey: source.key,
+                sourceName: source.name,
+                manga: manga,
+                chapter: chapter,
+                pageCount: pageCount,
+                byteCount: 0,
+                dateDownloaded: Date()
+            )
+            try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true, attributes: nil)
+        }
+
+        func writeImageData(_ data: Data, index: Int, description: String?) throws {
+            let fileName = String(format: "%04d.img", index)
+            try data.write(to: tempDirectory.appendingPathComponent(fileName), options: .atomic)
+            byteCount += Int64(data.count)
+            records.append(LegacyDownloadedPageRecord(kind: .image, fileName: fileName, text: nil, description: description))
+        }
+
+        func writeText(_ text: String, description: String?) {
+            records.append(LegacyDownloadedPageRecord(kind: .text, fileName: nil, text: text, description: description))
+            byteCount += Int64(text.utf8.count)
+        }
+
+        func finish() throws -> LegacyDownloadedChapter {
+            var finishedChapter = chapterInfo
+            finishedChapter.byteCount = byteCount
+            finishedChapter.pageCount = records.count
+            let manifest = LegacyDownloadedChapterManifest(chapter: finishedChapter, pages: records)
+            let data = try JSONEncoder().encode(manifest)
+            try data.write(to: tempDirectory.appendingPathComponent(store.manifestFileName), options: .atomic)
+            try? fileManager.removeItem(at: finalDirectory)
+            try fileManager.createDirectory(at: finalDirectory.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+            try fileManager.moveItem(at: tempDirectory, to: finalDirectory)
+            NotificationCenter.default.post(name: .legacyDownloadsDidChange, object: nil)
+            return finishedChapter
+        }
+
+        func cancel() {
+            try? fileManager.removeItem(at: tempDirectory)
+        }
+    }
+}
+
+final class LegacyDownloadManager {
+    static let shared = LegacyDownloadManager()
+
+    private init() {}
+
+    private enum DownloadPageRequest {
+        case request(URLRequest)
+        case localFile(URL)
+    }
+
+    func download(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            let existing = LegacyDownloadStore.shared.downloadedChapters.first {
+                $0.sourceKey == source.key && $0.manga.key == manga.key && $0.chapter.key == chapter.key
+            }
+            if let existing = existing {
+                completion(.success(existing))
+                return
+            }
+        }
+        source.runner.getPageList(manga: manga, chapter: chapter) { result in
+            switch result {
+                case .success(let pages):
+                    guard !pages.isEmpty else {
+                        completion(.failure(NSError(domain: "AidokuLegacy", code: 2, userInfo: [NSLocalizedDescriptionKey: "No pages to download."])))
+                        return
+                    }
+                    do {
+                        let writer = try LegacyDownloadStore.shared.makeWriter(
+                            source: source,
+                            manga: manga,
+                            chapter: chapter,
+                            pageCount: pages.count
+                        )
+                        self.downloadPage(
+                            pages: pages,
+                            index: 0,
+                            source: source,
+                            writer: writer,
+                            progress: progress,
+                            completion: completion
+                        )
+                    } catch {
+                        completion(.failure(error))
+                    }
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
+    }
+
+    private func downloadPage(
+        pages: [AidokuRunnerLegacyPage],
+        index: Int,
+        source: AidokuRunnerLegacySource,
+        writer: LegacyDownloadStore.LegacyDownloadWriter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        guard pages.indices.contains(index) else {
+            do {
+                completion(.success(try writer.finish()))
+            } catch {
+                writer.cancel()
+                completion(.failure(error))
+            }
+            return
+        }
+        autoreleasepool {
+            let page = pages[index]
+            progress(index + 1, pages.count)
+            switch page.content {
+                case .image(let data):
+                    do {
+                        try writer.writeImageData(data, index: index, description: page.description)
+                        self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
+                    } catch {
+                        writer.cancel()
+                        completion(.failure(error))
+                    }
+                case .text(let text):
+                    writer.writeText(text, description: page.description)
+                    self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
+                case .zipFile(_, _):
+                    writer.writeText("ZIP pages are not supported in the legacy downloader yet.", description: page.description)
+                    self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
+                case .url(let url, let context):
+                    if url.isFileURL {
+                        self.fetchDownloadedPage(
+                            request: .localFile(url),
+                            context: context,
+                            source: source,
+                            pageDescription: page.description,
+                            pageIndex: index,
+                            pages: pages,
+                            writer: writer,
+                            progress: progress,
+                            completion: completion
+                        )
+                        return
+                    }
+                    source.runner.getImageRequest(url: url, context: context) { result in
+                        let pageRequest: URLRequest
+                        switch result {
+                            case .success(let imageRequest):
+                                pageRequest = imageRequest.urlRequest(source: source, fallbackURL: url)
+                            case .failure:
+                                pageRequest = legacyFallbackImageRequest(url: url, source: source)
+                        }
+                        self.fetchDownloadedPage(
+                            request: .request(pageRequest),
+                            context: context,
+                            source: source,
+                            pageDescription: page.description,
+                            pageIndex: index,
+                            pages: pages,
+                            writer: writer,
+                            progress: progress,
+                            completion: completion
+                        )
+                    }
+            }
+        }
+    }
+
+    private func fetchDownloadedPage(
+        request: DownloadPageRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        pageDescription: String?,
+        pageIndex: Int,
+        pages: [AidokuRunnerLegacyPage],
+        writer: LegacyDownloadStore.LegacyDownloadWriter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        switch request {
+            case .localFile(let url):
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let data = try? Data(contentsOf: url)
+                    guard let data = data, !data.isEmpty else {
+                        writer.cancel()
+                        completion(.failure(NSError(domain: "AidokuLegacy", code: 4, userInfo: [NSLocalizedDescriptionKey: "Downloaded page \(pageIndex + 1) is missing."])))
+                        return
+                    }
+                    self.writeDownloadedPageData(
+                        data,
+                        pageDescription: pageDescription,
+                        pageIndex: pageIndex,
+                        pages: pages,
+                        source: source,
+                        writer: writer,
+                        progress: progress,
+                        completion: completion
+                    )
+                }
+                return
+            case .request(let urlRequest):
+                fetchRemoteDownloadedPage(
+                    request: urlRequest,
+                    context: context,
+                    source: source,
+                    pageDescription: pageDescription,
+                    pageIndex: pageIndex,
+                    pages: pages,
+                    writer: writer,
+                    progress: progress,
+                    completion: completion
+                )
+        }
+    }
+
+    private func fetchRemoteDownloadedPage(
+        request: URLRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        pageDescription: String?,
+        pageIndex: Int,
+        pages: [AidokuRunnerLegacyPage],
+        writer: LegacyDownloadStore.LegacyDownloadWriter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        aidokuLegacyReaderImageSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                writer.cancel()
+                completion(.failure(error))
+                return
+            }
+            guard
+                let data = data,
+                !data.isEmpty,
+                let httpResponse = response as? HTTPURLResponse,
+                (200..<300).contains(httpResponse.statusCode)
+            else {
+                writer.cancel()
+                completion(.failure(NSError(domain: "AidokuLegacy", code: 3, userInfo: [NSLocalizedDescriptionKey: "Page \(pageIndex + 1) failed to download."])))
+                return
+            }
+            if source.runner.features.processesPages {
+                source.runner.processPageImage(data: data, response: httpResponse, request: request, context: context) { result in
+                    let outputData: Data
+                    if case .success(let image?) = result {
+                        let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+                        let preparedImage = autoreleasepool {
+                            LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                        }
+                        outputData = preparedImage.jpegData(compressionQuality: 0.92) ?? preparedImage.pngData() ?? data
+                    } else {
+                        outputData = data
+                    }
+                    self.writeDownloadedPageData(
+                        outputData,
+                        pageDescription: pageDescription,
+                        pageIndex: pageIndex,
+                        pages: pages,
+                        source: source,
+                        writer: writer,
+                        progress: progress,
+                        completion: completion
+                    )
+                }
+            } else {
+                self.writeDownloadedPageData(
+                    data,
+                    pageDescription: pageDescription,
+                    pageIndex: pageIndex,
+                    pages: pages,
+                    source: source,
+                    writer: writer,
+                    progress: progress,
+                    completion: completion
+                )
+            }
+        }.resume()
+    }
+
+    private func writeDownloadedPageData(
+        _ data: Data,
+        pageDescription: String?,
+        pageIndex: Int,
+        pages: [AidokuRunnerLegacyPage],
+        source: AidokuRunnerLegacySource,
+        writer: LegacyDownloadStore.LegacyDownloadWriter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        do {
+            try writer.writeImageData(data, index: pageIndex, description: pageDescription)
+            self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
+        } catch {
+            writer.cancel()
+            completion(.failure(error))
+        }
+    }
+}
+
+private struct LegacyBackupFile: Codable {
+    var version: Int
+    var createdAt: Date
+    var library: [LegacyLibraryEntry]
+    var history: [LegacyHistoryEntry]
+    var updates: [LegacyUpdateEntry]
+    var repositories: [String]
+    var settings: [LegacyBackupSetting]
+}
+
+private struct LegacyBackupSetting: Codable {
+    var key: String
+    var boolValue: Bool?
+    var intValue: Int?
+    var doubleValue: Double?
+    var stringValue: String?
+    var stringArrayValue: [String]?
+}
+
+final class LegacyBackupManager {
+    static let shared = LegacyBackupManager()
+
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    private init() {
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    func createBackup() throws -> URL {
+        let backup = LegacyBackupFile(
+            version: 1,
+            createdAt: Date(),
+            library: LegacyLibraryStore.shared.rawEntries,
+            history: LegacyHistoryStore.shared.entries,
+            updates: LegacyUpdateStore.shared.entries,
+            repositories: LegacySourceRepositoryStore.shared.repositoryURLs.map { $0.absoluteString },
+            settings: collectSettings()
+        )
+        let directory = try backupDirectory()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let url = directory.appendingPathComponent("AidokuLegacy-\(formatter.string(from: Date())).json")
+        try encoder.encode(backup).write(to: url, options: .atomic)
+        return url
+    }
+
+    func restore(from url: URL) throws {
+        let data = try Data(contentsOf: url)
+        let backup = try decoder.decode(LegacyBackupFile.self, from: data)
+        LegacyLibraryStore.shared.replace(backup.library)
+        LegacyHistoryStore.shared.replace(backup.history)
+        LegacyUpdateStore.shared.replace(backup.updates)
+        LegacySourceRepositoryStore.shared.replace(with: backup.repositories.compactMap(URL.init(string:)))
+        applySettings(backup.settings)
+    }
+
+    func backupURLs() -> [URL] {
+        guard
+            let directory = try? backupDirectory(),
+            let urls = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return []
+        }
+        return urls
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted {
+                let lhsDate = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                let rhsDate = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                return lhsDate > rhsDate
+            }
+    }
+
+    private func backupDirectory() throws -> URL {
+        let directory = try aidokuLegacyApplicationSupportDirectory()
+            .appendingPathComponent("AidokuLegacyBackups", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+        return directory
+    }
+
+    private func collectSettings() -> [LegacyBackupSetting] {
+        return UserDefaults.standard.dictionaryRepresentation().compactMap { key, value in
+            guard shouldBackupSetting(key: key) else { return nil }
+            if let value = value as? Bool {
+                return LegacyBackupSetting(key: key, boolValue: value, intValue: nil, doubleValue: nil, stringValue: nil, stringArrayValue: nil)
+            }
+            if let value = value as? Int {
+                return LegacyBackupSetting(key: key, boolValue: nil, intValue: value, doubleValue: nil, stringValue: nil, stringArrayValue: nil)
+            }
+            if let value = value as? Double {
+                return LegacyBackupSetting(key: key, boolValue: nil, intValue: nil, doubleValue: value, stringValue: nil, stringArrayValue: nil)
+            }
+            if let value = value as? String {
+                return LegacyBackupSetting(key: key, boolValue: nil, intValue: nil, doubleValue: nil, stringValue: value, stringArrayValue: nil)
+            }
+            if let value = value as? [String] {
+                return LegacyBackupSetting(key: key, boolValue: nil, intValue: nil, doubleValue: nil, stringValue: nil, stringArrayValue: value)
+            }
+            return nil
+        }
+    }
+
+    private func shouldBackupSetting(key: String) -> Bool {
+        if key == "AidokuLegacy.library.entries" || key == "AidokuLegacy.history.entries" || key == "AidokuLegacy.updates.entries" {
+            return false
+        }
+        if key.hasPrefix("AidokuLegacy.") {
+            return true
+        }
+        return key.hasSuffix(".languages") || key.hasSuffix(".language") || key.hasSuffix(".url")
+    }
+
+    private func applySettings(_ settings: [LegacyBackupSetting]) {
+        for setting in settings {
+            if let value = setting.boolValue {
+                UserDefaults.standard.set(value, forKey: setting.key)
+            } else if let value = setting.intValue {
+                UserDefaults.standard.set(value, forKey: setting.key)
+            } else if let value = setting.doubleValue {
+                UserDefaults.standard.set(value, forKey: setting.key)
+            } else if let value = setting.stringValue {
+                UserDefaults.standard.set(value, forKey: setting.key)
+            } else if let value = setting.stringArrayValue {
+                UserDefaults.standard.set(value, forKey: setting.key)
+            }
+        }
+        NotificationCenter.default.post(name: .legacyAppearanceDidChange, object: nil)
+        NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
+    }
+}
+
 final class LegacyImageLoader {
     static let shared = LegacyImageLoader()
 
     private let cache = NSCache<NSURL, UIImage>()
     private let session: URLSession
+    private var memoryObserver: NSObjectProtocol?
 
     private init() {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 25
-        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
+        configuration.urlCache = URLCache(
+            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 2 * 1024 * 1024 : 6 * 1024 * 1024,
+            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 24 * 1024 * 1024 : 48 * 1024 * 1024,
+            diskPath: "AidokuLegacyCoverImageCache"
+        )
         configuration.httpAdditionalHeaders = [
             "Accept": aidokuLegacyImageAcceptHeader,
             "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
-        cache.countLimit = 160
-        cache.totalCostLimit = 32 * 1024 * 1024
+        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 48 : 120
+        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 10 * 1024 * 1024 : 28 * 1024 * 1024
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.clear()
+        }
     }
 
     func clear() {
         cache.removeAllObjects()
+        session.configuration.urlCache?.removeAllCachedResponses()
     }
 
     @discardableResult
@@ -393,6 +1238,11 @@ final class LegacyImageLoader {
         let key = url as NSURL
         if let cached = cache.object(forKey: key) {
             completion(cached)
+            return nil
+        }
+
+        if url.isFileURL {
+            loadLocalFile(url: url, cacheKey: key, targetHeight: targetHeight, completion: completion)
             return nil
         }
 
@@ -425,6 +1275,31 @@ final class LegacyImageLoader {
         )
     }
 
+    private func loadLocalFile(
+        url: URL,
+        cacheKey key: NSURL,
+        targetHeight: CGFloat,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let image = (try? Data(contentsOf: url)).flatMap { data -> UIImage? in
+                return autoreleasepool {
+                    self?.makeImage(
+                        from: data,
+                        maxPixelHeight: targetHeight * UIScreen.main.scale,
+                        forceDownsample: true
+                    )
+                }
+            }
+            if let image = image {
+                self?.store(image, forKey: key)
+            }
+            DispatchQueue.main.async {
+                completion(image)
+            }
+        }
+    }
+
     @discardableResult
     private func load(
         request: URLRequest,
@@ -444,8 +1319,7 @@ final class LegacyImageLoader {
                 }
             }
             if let image = image {
-                let pixels = image.size.width * image.size.height * image.scale * image.scale
-                self?.cache.setObject(image, forKey: key, cost: max(1, Int(min(pixels, CGFloat(16 * 1024 * 1024)))))
+                self?.store(image, forKey: key)
             }
             DispatchQueue.main.async {
                 completion(image)
@@ -453,6 +1327,12 @@ final class LegacyImageLoader {
         }
         task.resume()
         return task
+    }
+
+    private func store(_ image: UIImage, forKey key: NSURL) {
+        let pixels = image.size.width * image.size.height * image.scale * image.scale
+        let costLimit = aidokuLegacyIsLowMemoryMode() ? CGFloat(6 * 1024 * 1024) : CGFloat(16 * 1024 * 1024)
+        cache.setObject(image, forKey: key, cost: max(1, Int(min(pixels, costLimit))))
     }
 
     func makeImage(from data: Data, maxPixelHeight: CGFloat, forceDownsample: Bool = false) -> UIImage? {
@@ -574,12 +1454,15 @@ final class LegacyImageLoader {
 
 final class LegacyLibraryViewController: UITableViewController {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
+    private let searchController = UISearchController(searchResultsController: nil)
     private let automaticUpdateDefaultsKey = "AidokuLegacy.library.automaticUpdates"
     private let lastAutomaticUpdateDefaultsKey = "AidokuLegacy.library.lastAutomaticUpdate"
     private var entries: [LegacyLibraryEntry] = []
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
     private var isUpdatingLibrary = false
+    private var activeCategory: String?
+    private var sortOption = LegacyLibrarySortOption.current
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -587,11 +1470,24 @@ final class LegacyLibraryViewController: UITableViewController {
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
-        tableView.rowHeight = 86
+        tableView.rowHeight = 94
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = LegacyPalette.accent
+
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search library"
+        navigationItem.searchController = searchController
+        definesPresentationContext = true
+
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Updates", style: .plain, target: self, action: #selector(openUpdates))
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: "Sort", style: .plain, target: self, action: #selector(showLibraryOptions)),
+            UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateLibraryManually))
+        ]
+
         refreshControl = UIRefreshControl()
-        refreshControl?.addTarget(self, action: #selector(reloadData), for: .valueChanged)
+        refreshControl?.addTarget(self, action: #selector(updateLibraryManually), for: .valueChanged)
         observer = NotificationCenter.default.addObserver(
             forName: .legacyLibraryDidChange,
             object: nil,
@@ -614,8 +1510,10 @@ final class LegacyLibraryViewController: UITableViewController {
     }
 
     @objc private func reloadData() {
-        entries = LegacyLibraryStore.shared.entries
+        let query = searchController.searchBar.text
+        entries = LegacyLibraryStore.shared.entries(category: activeCategory, query: query, sort: sortOption)
         sources = packageInstaller.loadInstalledSources()
+        title = activeCategory.map { $0.isEmpty ? "Uncategorized" : $0 } ?? "Library"
         refreshControl?.endRefreshing()
         tableView.reloadData()
     }
@@ -630,6 +1528,7 @@ final class LegacyLibraryViewController: UITableViewController {
         cell.backgroundColor = LegacyPalette.panel
         cell.textLabel?.textColor = LegacyPalette.primaryText
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
 
         guard !entries.isEmpty else {
             cell.imageView?.image = nil
@@ -653,7 +1552,7 @@ final class LegacyLibraryViewController: UITableViewController {
             }
         }
         cell.textLabel?.text = entry.manga.title
-        cell.detailTextLabel?.text = entry.sourceName
+        cell.detailTextLabel?.text = librarySubtitle(for: entry)
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -683,13 +1582,103 @@ final class LegacyLibraryViewController: UITableViewController {
         LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
     }
 
+    override func tableView(
+        _ tableView: UITableView,
+        editActionsForRowAt indexPath: IndexPath
+    ) -> [UITableViewRowAction]? {
+        guard entries.indices.contains(indexPath.row) else { return nil }
+        let entry = entries[indexPath.row]
+        let remove = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
+            LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        }
+        let category = UITableViewRowAction(style: .normal, title: "Category") { [weak self] _, _ in
+            self?.showCategoryPrompt(for: entry)
+        }
+        return [remove, category]
+    }
+
     private func source(for entry: LegacyLibraryEntry) -> AidokuRunnerLegacySource? {
         return sources.first { $0.key == entry.sourceKey }
     }
 
+    private func librarySubtitle(for entry: LegacyLibraryEntry) -> String {
+        var components = [entry.sourceName]
+        if let category = entry.category, !category.isEmpty {
+            components.append(category)
+        }
+        let downloadedCount = LegacyDownloadStore.shared.downloadedChapters.filter {
+            $0.sourceKey == entry.sourceKey && $0.manga.key == entry.manga.key
+        }.count
+        if downloadedCount > 0 {
+            components.append("\(downloadedCount) downloaded")
+        }
+        return components.joined(separator: " - ")
+    }
+
+    @objc private func openUpdates() {
+        navigationController?.pushViewController(LegacyUpdatesViewController(), animated: true)
+    }
+
+    @objc private func showLibraryOptions() {
+        let alert = UIAlertController(title: "Library", message: nil, preferredStyle: .actionSheet)
+        for option in LegacyLibrarySortOption.allCases {
+            let title = option == sortOption ? "Sort: \(option.title) (Current)" : "Sort: \(option.title)"
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.sortOption = option
+                LegacyLibrarySortOption.setCurrent(option)
+                self?.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: activeCategory == nil ? "All Categories (Current)" : "All Categories", style: .default) { [weak self] _ in
+            self?.activeCategory = nil
+            self?.reloadData()
+        })
+        alert.addAction(UIAlertAction(title: activeCategory == "" ? "Uncategorized (Current)" : "Uncategorized", style: .default) { [weak self] _ in
+            self?.activeCategory = ""
+            self?.reloadData()
+        })
+        for category in LegacyLibraryStore.shared.categories() {
+            let title = activeCategory == category ? "\(category) (Current)" : category
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.activeCategory = category
+                self?.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItems?.first
+        }
+        present(alert, animated: true)
+    }
+
+    private func showCategoryPrompt(for entry: LegacyLibraryEntry) {
+        let alert = UIAlertController(title: "Set Category", message: entry.manga.title, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = "Category name"
+            textField.text = entry.category
+            textField.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            LegacyLibraryStore.shared.setCategory(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, category: nil)
+        })
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak alert] _ in
+            LegacyLibraryStore.shared.setCategory(
+                sourceKey: entry.sourceKey,
+                mangaKey: entry.manga.key,
+                category: alert?.textFields?.first?.text
+            )
+        })
+        present(alert, animated: true)
+    }
+
+    @objc private func updateLibraryManually() {
+        startLibraryUpdate(automatic: false)
+    }
+
     private func updateLibraryIfNeeded() {
         guard UserDefaults.standard.bool(forKey: automaticUpdateDefaultsKey), !isUpdatingLibrary else { return }
-        guard !entries.isEmpty else { return }
+        guard !LegacyLibraryStore.shared.rawEntries.isEmpty else { return }
         let now = Date()
         if
             let lastUpdate = UserDefaults.standard.object(forKey: lastAutomaticUpdateDefaultsKey) as? Date,
@@ -698,39 +1687,78 @@ final class LegacyLibraryViewController: UITableViewController {
             return
         }
         UserDefaults.standard.set(now, forKey: lastAutomaticUpdateDefaultsKey)
-        let updateItems = entries.compactMap { entry -> (LegacyLibraryEntry, AidokuRunnerLegacySource)? in
-            guard let source = source(for: entry) else { return nil }
-            return (entry, source)
-        }
-        guard !updateItems.isEmpty else { return }
-        isUpdatingLibrary = true
-        navigationItem.prompt = "Updating library..."
-        updateLibraryItems(updateItems, index: 0)
+        startLibraryUpdate(automatic: true)
     }
 
-    private func updateLibraryItems(_ items: [(LegacyLibraryEntry, AidokuRunnerLegacySource)], index: Int) {
+    private func startLibraryUpdate(automatic: Bool) {
+        guard !isUpdatingLibrary else { return }
+        let allEntries = LegacyLibraryStore.shared.rawEntries
+        let updateItems = allEntries.compactMap { entry -> (LegacyLibraryEntry, AidokuRunnerLegacySource)? in
+            guard let source = sources.first(where: { $0.key == entry.sourceKey }) else { return nil }
+            return (entry, source)
+        }
+        let items = automatic && aidokuLegacyIsLowMemoryMode() ? Array(updateItems.prefix(25)) : updateItems
+        guard !items.isEmpty else {
+            refreshControl?.endRefreshing()
+            return
+        }
+        isUpdatingLibrary = true
+        navigationItem.prompt = automatic ? "Updating library..." : "Updating \(items.count) manga..."
+        updateLibraryItems(items, index: 0, automatic: automatic)
+    }
+
+    private func updateLibraryItems(_ items: [(LegacyLibraryEntry, AidokuRunnerLegacySource)], index: Int, automatic: Bool) {
         guard index < items.count else {
             isUpdatingLibrary = false
             navigationItem.prompt = nil
+            refreshControl?.endRefreshing()
             reloadData()
+            if !automatic {
+                showAlert(title: "Library Updated", message: "Finished checking \(items.count) manga.")
+            }
             return
         }
+        navigationItem.prompt = "Updating \(index + 1) of \(items.count)..."
         let item = items[index]
         item.1.runner.getMangaUpdate(manga: item.0.manga, needsDetails: true, needsChapters: true) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if case .success(let manga) = result {
+                    self.recordUpdates(oldManga: item.0.manga, newManga: manga, source: item.1)
                     LegacyLibraryStore.shared.update(manga: manga, source: item.1)
                 }
-                self.updateLibraryItems(items, index: index + 1)
+                self.updateLibraryItems(items, index: index + 1, automatic: automatic)
             }
         }
+    }
+
+    private func recordUpdates(
+        oldManga: AidokuRunnerLegacyManga,
+        newManga: AidokuRunnerLegacyManga,
+        source: AidokuRunnerLegacySource
+    ) {
+        guard
+            let oldChapters = oldManga.chapters,
+            !oldChapters.isEmpty,
+            let newChapters = newManga.chapters
+        else {
+            return
+        }
+        let oldKeys = Set(oldChapters.map { $0.key })
+        let addedChapters = newChapters.filter { !oldKeys.contains($0.key) && !$0.locked }
+        LegacyUpdateStore.shared.add(source: source, manga: newManga, chapters: addedChapters)
     }
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+}
+
+extension LegacyLibraryViewController: UISearchResultsUpdating {
+    func updateSearchResults(for searchController: UISearchController) {
+        reloadData()
     }
 }
 
@@ -876,12 +1904,217 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 }
 
-final class LegacySettingsViewController: UITableViewController {
+final class LegacyUpdatesViewController: UITableViewController {
+    private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
+    private var entries: [LegacyUpdateEntry] = []
+    private var sources: [AidokuRunnerLegacySource] = []
+    private var observer: NSObjectProtocol?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Updates"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.rowHeight = 86
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Clear", style: .plain, target: self, action: #selector(confirmClear))
+        observer = NotificationCenter.default.addObserver(
+            forName: .legacyUpdatesDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reloadData()
+        }
+        reloadData()
+    }
+
+    deinit {
+        if let observer = observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    @objc private func reloadData() {
+        entries = LegacyUpdateStore.shared.entries
+        sources = packageInstaller.loadInstalledSources()
+        tableView.reloadData()
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return entries.isEmpty ? 1 : entries.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "UpdateCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "UpdateCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+        guard !entries.isEmpty else {
+            cell.textLabel?.text = "No new chapters recorded."
+            cell.detailTextLabel?.text = "Use Library Update to check saved manga."
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+        let entry = entries[indexPath.row]
+        cell.textLabel?.text = entry.manga.title
+        let dateText = DateFormatter.localizedString(from: entry.dateFound, dateStyle: .short, timeStyle: .short)
+        cell.detailTextLabel?.text = "\(entry.chapter.legacyFormattedTitle)\n\(entry.sourceName) - \(dateText)"
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard entries.indices.contains(indexPath.row) else { return }
+        let entry = entries[indexPath.row]
+        guard let source = sources.first(where: { $0.key == entry.sourceKey }) else {
+            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to open this manga.")
+            return
+        }
+        navigationController?.pushViewController(
+            LegacyMangaDetailViewController(source: source, manga: entry.manga),
+            animated: true
+        )
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
+        LegacyUpdateStore.shared.remove(key: entries[indexPath.row].key)
+    }
+
+    @objc private func confirmClear() {
+        let alert = UIAlertController(title: "Clear Updates", message: "Remove recorded chapter updates?", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            LegacyUpdateStore.shared.clear()
+        })
+        present(alert, animated: true)
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
+final class LegacyDownloadsViewController: UITableViewController {
+    private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
+    private var entries: [LegacyDownloadedChapter] = []
+    private var sources: [AidokuRunnerLegacySource] = []
+    private var observer: NSObjectProtocol?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Downloads"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.rowHeight = 86
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Clear", style: .plain, target: self, action: #selector(confirmClear))
+        observer = NotificationCenter.default.addObserver(
+            forName: .legacyDownloadsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reloadData()
+        }
+        reloadData()
+    }
+
+    deinit {
+        if let observer = observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    @objc private func reloadData() {
+        entries = LegacyDownloadStore.shared.downloadedChapters
+        sources = packageInstaller.loadInstalledSources()
+        tableView.reloadData()
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return entries.isEmpty ? 1 : entries.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "DownloadCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "DownloadCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+        guard !entries.isEmpty else {
+            cell.textLabel?.text = "No downloaded chapters."
+            cell.detailTextLabel?.text = "Open a manga and download chapters for offline reading."
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+        let entry = entries[indexPath.row]
+        cell.textLabel?.text = entry.manga.title
+        let size = ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
+        cell.detailTextLabel?.text = "\(entry.chapter.legacyFormattedTitle)\n\(entry.sourceName) - \(entry.pageCount) pages - \(size)"
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard entries.indices.contains(indexPath.row) else { return }
+        let entry = entries[indexPath.row]
+        guard let source = sources.first(where: { $0.key == entry.sourceKey }) else {
+            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to read this download.")
+            return
+        }
+        navigationController?.pushViewController(
+            LegacyReaderFactory.makeReader(source: source, manga: entry.manga, chapter: entry.chapter),
+            animated: true
+        )
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
+        LegacyDownloadStore.shared.delete(entries[indexPath.row])
+    }
+
+    @objc private func confirmClear() {
+        let alert = UIAlertController(title: "Clear Downloads", message: "Remove all downloaded chapters?", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            LegacyDownloadStore.shared.clear()
+        })
+        present(alert, animated: true)
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
+final class LegacySettingsViewController: UITableViewController, UIDocumentPickerDelegate {
     private enum Row: Int, CaseIterable {
         case readerMode
         case readerMemory
         case darkTheme
         case automaticLibraryUpdates
+        case downloads
+        case createBackup
+        case restoreBackup
         case clearImageCache
         case clearHistory
         case clearLibrary
@@ -930,6 +2163,16 @@ final class LegacySettingsViewController: UITableViewController {
                 cell.textLabel?.text = "Automatic Library Updates"
                 cell.detailTextLabel?.text = enabled ? "Fetch manga details and chapters when Library opens" : "Update saved manga manually"
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .downloads:
+                let count = LegacyDownloadStore.shared.downloadedChapters.count
+                cell.textLabel?.text = "Downloads"
+                cell.detailTextLabel?.text = count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"
+            case .createBackup:
+                cell.textLabel?.text = "Create Backup"
+                cell.detailTextLabel?.text = "Export library, history, updates, repos, and legacy settings."
+            case .restoreBackup:
+                cell.textLabel?.text = "Restore Backup"
+                cell.detailTextLabel?.text = "Import a legacy JSON backup file."
             case .clearImageCache:
                 cell.textLabel?.text = "Clear Image Cache"
                 cell.detailTextLabel?.text = "Remove cached covers and reader pages."
@@ -967,6 +2210,12 @@ final class LegacySettingsViewController: UITableViewController {
                 let key = "AidokuLegacy.library.automaticUpdates"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
                 tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .downloads:
+                navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
+            case .createBackup:
+                createBackup()
+            case .restoreBackup:
+                showRestoreOptions(from: indexPath)
             case .clearImageCache:
                 LegacyImageLoader.shared.clear()
             case .clearHistory:
@@ -976,6 +2225,83 @@ final class LegacySettingsViewController: UITableViewController {
             case .about:
                 break
         }
+    }
+
+    private func createBackup() {
+        do {
+            let url = try LegacyBackupManager.shared.createBackup()
+            let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let popover = controller.popoverPresentationController {
+                popover.sourceView = view
+                popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            }
+            present(controller, animated: true)
+        } catch {
+            showAlert(title: "Backup Failed", message: error.localizedDescription)
+        }
+    }
+
+    private func showRestoreOptions(from indexPath: IndexPath) {
+        let backups = LegacyBackupManager.shared.backupURLs()
+        let alert = UIAlertController(title: "Restore Backup", message: nil, preferredStyle: .actionSheet)
+        if let latest = backups.first {
+            alert.addAction(UIAlertAction(title: "Restore Latest Local Backup", style: .default) { [weak self] _ in
+                self?.confirmRestore(url: latest)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Import Backup File", style: .default) { [weak self] _ in
+            self?.openBackupPicker()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
+    }
+
+    private func openBackupPicker() {
+        let picker = UIDocumentPickerViewController(documentTypes: ["public.json", "public.data"], in: .import)
+        picker.delegate = self
+        picker.modalPresentationStyle = .formSheet
+        present(picker, animated: true)
+    }
+
+    private func confirmRestore(url: URL) {
+        let alert = UIAlertController(
+            title: "Restore Backup",
+            message: "This replaces the local legacy library, history, updates, repositories, and settings.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Restore", style: .destructive) { [weak self] _ in
+            self?.restoreBackup(url: url)
+        })
+        present(alert, animated: true)
+    }
+
+    private func restoreBackup(url: URL) {
+        do {
+            try LegacyBackupManager.shared.restore(from: url)
+            tableView.reloadData()
+            showAlert(title: "Backup Restored", message: "Restart the app if a source setting does not refresh immediately.")
+        } catch {
+            showAlert(title: "Restore Failed", message: error.localizedDescription)
+        }
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let url = urls.first else { return }
+        confirmRestore(url: url)
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        dismiss(animated: true)
     }
 
     private func showReaderModePicker(from indexPath: IndexPath) {
@@ -1028,6 +2354,12 @@ final class LegacySettingsViewController: UITableViewController {
         alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
             LegacyLibraryStore.shared.clear()
         })
+        present(alert, animated: true)
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
 }
@@ -3432,7 +4764,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private let source: AidokuRunnerLegacySource
     private var manga: AidokuRunnerLegacyManga
     private var isLoading = false
+    private var isDownloading = false
     private var errorMessage: String?
+    private lazy var bookmarkButton = UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
+    private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
 
     init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
         self.source = source
@@ -3452,9 +4787,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
         tableView.backgroundColor = LegacyPalette.background
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 96
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
-        ]
+        navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton]
         updateBookmarkButton()
         loadDetails()
     }
@@ -3545,7 +4878,11 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let chapter = groups[indexPath.section - 2].chapters[indexPath.row]
         cell.imageView?.image = nil
         cell.textLabel?.text = chapter.legacyFormattedTitle
-        cell.detailTextLabel?.text = chapter.legacyFormattedSubtitle(sourceKey: source.key)
+        var subtitle = chapter.legacyFormattedSubtitle(sourceKey: source.key)
+        if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            subtitle = subtitle.isEmpty ? "Downloaded" : "\(subtitle)\nDownloaded"
+        }
+        cell.detailTextLabel?.text = subtitle
         if chapter.locked {
             cell.textLabel?.textColor = LegacyPalette.disabledText
             cell.detailTextLabel?.textColor = LegacyPalette.disabledText
@@ -3586,6 +4923,33 @@ final class LegacyMangaDetailViewController: UITableViewController {
         pushReader(chapter: chapter)
     }
 
+    override func tableView(
+        _ tableView: UITableView,
+        editActionsForRowAt indexPath: IndexPath
+    ) -> [UITableViewRowAction]? {
+        guard
+            indexPath.section >= 2,
+            chapterGroups.indices.contains(indexPath.section - 2),
+            chapterGroups[indexPath.section - 2].chapters.indices.contains(indexPath.row)
+        else {
+            return nil
+        }
+        let chapter = chapterGroups[indexPath.section - 2].chapters[indexPath.row]
+        guard !chapter.locked else { return nil }
+        if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            let remove = UITableViewRowAction(style: .destructive, title: "Remove Download") { [weak self] _, _ in
+                guard let self = self else { return }
+                LegacyDownloadStore.shared.delete(sourceKey: self.source.key, mangaKey: self.manga.key, chapterKey: chapter.key)
+                self.tableView.reloadData()
+            }
+            return [remove]
+        }
+        let download = UITableViewRowAction(style: .normal, title: "Download") { [weak self] _, _ in
+            self?.download(chapters: [chapter])
+        }
+        return [download]
+    }
+
     private func loadDetails() {
         isLoading = true
         tableView.reloadData()
@@ -3617,7 +4981,84 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func updateBookmarkButton() {
         let inLibrary = LegacyLibraryStore.shared.contains(sourceKey: source.key, mangaKey: manga.key)
-        navigationItem.rightBarButtonItems?.first?.title = inLibrary ? "Remove" : "Add"
+        bookmarkButton.title = inLibrary ? "Remove" : "Add"
+    }
+
+    @objc private func showDownloadOptions() {
+        let readableChapters = displayChapters.filter { !$0.locked }
+        guard !readableChapters.isEmpty else {
+            showAlert(title: "No Chapters", message: "No readable chapters are available to download.")
+            return
+        }
+        let alert = UIAlertController(title: "Download", message: manga.title, preferredStyle: .actionSheet)
+        if let first = firstReadableChapter {
+            alert.addAction(UIAlertAction(title: "Download First Chapter", style: .default) { [weak self] _ in
+                self?.download(chapters: [first])
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Download All Chapters", style: .default) { [weak self] _ in
+            self?.download(chapters: readableChapters)
+        })
+        alert.addAction(UIAlertAction(title: "Open Downloads", style: .default) { [weak self] _ in
+            self?.navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = downloadButton
+        }
+        present(alert, animated: true)
+    }
+
+    private func download(chapters: [AidokuRunnerLegacyChapter]) {
+        guard !isDownloading else { return }
+        let pending = chapters.filter {
+            !LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: $0.key)
+        }
+        guard !pending.isEmpty else {
+            showAlert(title: "Already Downloaded", message: "Selected chapters are already saved offline.")
+            return
+        }
+        isDownloading = true
+        downloadButton.isEnabled = false
+        download(chapters: pending, index: 0, completed: 0)
+    }
+
+    private func download(chapters: [AidokuRunnerLegacyChapter], index: Int, completed: Int) {
+        guard chapters.indices.contains(index) else {
+            isDownloading = false
+            downloadButton.isEnabled = true
+            navigationItem.prompt = nil
+            tableView.reloadData()
+            showAlert(title: "Download Complete", message: "Saved \(completed) chapter(s) for offline reading.")
+            return
+        }
+        let chapter = chapters[index]
+        navigationItem.prompt = "Downloading \(index + 1) of \(chapters.count)..."
+        LegacyDownloadManager.shared.download(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            progress: { [weak self] page, total in
+                DispatchQueue.main.async {
+                    self?.navigationItem.prompt = "Downloading \(index + 1) of \(chapters.count) - Page \(page)/\(total)"
+                }
+            },
+            completion: { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    switch result {
+                        case .success:
+                            self.download(chapters: chapters, index: index + 1, completed: completed + 1)
+                        case .failure(let error):
+                            self.isDownloading = false
+                            self.downloadButton.isEnabled = true
+                            self.navigationItem.prompt = nil
+                            self.tableView.reloadData()
+                            self.showAlert(title: "Download Failed", message: error.localizedDescription)
+                    }
+                }
+            }
+        )
     }
 
     private var readingActions: [ReadingAction] {
@@ -3751,6 +5192,12 @@ final class LegacyMangaDetailViewController: UITableViewController {
             message: "\(chapter.legacyFormattedTitle) is marked unavailable by this source.",
             preferredStyle: .alert
         )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
@@ -3939,6 +5386,12 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         }
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        LegacyImageLoader.shared.clear()
+        aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
+    }
+
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         if fitToScreen {
@@ -3997,12 +5450,14 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             updatePageHUD()
         }
 
-        let preloadCount = max(1, UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages"))
+        let preloadCount = aidokuLegacyReaderPrefetchCount()
+        guard preloadCount > 0 else { return }
         let maxIndex = min(pages.count - 1, indexPath.row + preloadCount)
         guard maxIndex >= indexPath.row else { return }
         let source = self.source
         for pageIndex in (indexPath.row...maxIndex) {
             guard case .url(let url, let context) = pages[pageIndex].content else { continue }
+            guard !url.isFileURL else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
                 if case .success(let request) = result {
                     aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
@@ -4012,6 +5467,14 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     private func loadPages() {
+        if let downloadedPages = LegacyDownloadStore.shared.pages(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            pages = downloadedPages
+            message = downloadedPages.isEmpty ? "No downloaded pages." : ""
+            tableView.reloadData()
+            scrollToInitialPageIfNeeded()
+            updatePageHUD()
+            return
+        }
         guard !chapter.locked else {
             pages = []
             message = "\(chapter.legacyFormattedTitle) is unavailable from this source."
@@ -4320,6 +5783,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        LegacyImageLoader.shared.clear()
+        aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
+        collectionView.reloadData()
+    }
+
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         collectionView?.collectionViewLayout.invalidateLayout()
@@ -4373,6 +5843,14 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     private func loadPages() {
+        if let downloadedPages = LegacyDownloadStore.shared.pages(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            pages = downloadedPages
+            message = downloadedPages.isEmpty ? "No downloaded pages." : ""
+            collectionView.reloadData()
+            scrollToInitialPageIfNeeded()
+            updatePageHUD()
+            return
+        }
         guard !chapter.locked else {
             pages = []
             message = "\(chapter.legacyFormattedTitle) is unavailable from this source."
@@ -4432,7 +5910,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     private func preloadPages(around pageIndex: Int) {
-        let preloadCount = max(1, UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages"))
+        let preloadCount = aidokuLegacyReaderPrefetchCount()
+        guard preloadCount > 0 else { return }
         let candidateIndexes = (0...preloadCount).flatMap { offset -> [Int] in
             if offset == 0 { return [pageIndex] }
             return [pageIndex + offset, pageIndex - offset]
@@ -4440,6 +5919,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let source = self.source
         for candidateIndex in candidateIndexes where pages.indices.contains(candidateIndex) {
             guard case .url(let url, let context) = pages[candidateIndex].content else { continue }
+            guard !url.isFileURL else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
                 if case .success(let request) = result {
                     aidokuLegacyReaderImageSession.dataTask(with: request.urlRequest(source: source, fallbackURL: url)).resume()
@@ -4859,9 +6339,18 @@ private final class LegacyPageImageCell: UITableViewCell {
         representedLoadID = loadID
         self.availableSize = availableSize
         self.fitsViewport = fitsViewport
+        task?.cancel()
+        task = nil
+        pageImageView.image = nil
+        pageImageView.isHidden = false
+        pageLabel.text = nil
         heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         switch page.content {
             case .url(let url, let context):
+                if url.isFileURL {
+                    loadLocalImage(url: url, loadID: loadID)
+                    return
+                }
                 pageLabel.text = "Loading..."
                 source.runner.getImageRequest(url: url, context: context) { [weak self] result in
                     DispatchQueue.main.async {
@@ -4886,6 +6375,21 @@ private final class LegacyPageImageCell: UITableViewCell {
                 pageImageView.isHidden = true
                 heightConstraint.constant = 180
                 pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
+        }
+    }
+
+    private func loadLocalImage(url: URL, loadID: UUID) {
+        pageLabel.text = "Loading..."
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = try? Data(contentsOf: url)
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                if let data = data, !data.isEmpty {
+                    self.setImage(from: data, loadID: loadID, failureMessage: "Downloaded image failed to decode.")
+                } else {
+                    self.showFailure("Downloaded image is missing.", loadID: loadID)
+                }
+            }
         }
     }
 
@@ -4988,7 +6492,7 @@ private final class LegacyPageImageCell: UITableViewCell {
 
     private func setProcessedImage(_ image: UIImage, loadID: UUID) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
                 LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
             }
@@ -5005,7 +6509,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         failureMessage: String = "Image failed to load."
     ) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
             }
@@ -5132,10 +6636,17 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
         let loadID = UUID()
         representedLoadID = loadID
+        task?.cancel()
+        task = nil
         pageImageView.image = nil
         pageImageView.isHidden = false
+        pageLabel.text = nil
         switch page.content {
             case .url(let url, let context):
+                if url.isFileURL {
+                    loadLocalImage(url: url, loadID: loadID)
+                    return
+                }
                 pageLabel.text = "Loading..."
                 source.runner.getImageRequest(url: url, context: context) { [weak self] result in
                     DispatchQueue.main.async {
@@ -5158,6 +6669,21 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             case .zipFile(_, _):
                 pageImageView.isHidden = true
                 pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
+        }
+    }
+
+    private func loadLocalImage(url: URL, loadID: UUID) {
+        pageLabel.text = "Loading..."
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = try? Data(contentsOf: url)
+            DispatchQueue.main.async {
+                guard let self = self, self.representedLoadID == loadID else { return }
+                if let data = data, !data.isEmpty {
+                    self.setImage(from: data, loadID: loadID, failureMessage: "Downloaded image failed to decode.")
+                } else {
+                    self.showFailure("Downloaded image is missing.", loadID: loadID)
+                }
+            }
         }
     }
 
@@ -5258,7 +6784,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 
     private func setProcessedImage(_ image: UIImage, loadID: UUID) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
                 LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
             }
@@ -5275,7 +6801,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         failureMessage: String = "Image failed to load."
     ) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let maxHeight = CGFloat(UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight"))
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
             }
