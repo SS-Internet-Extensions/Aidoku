@@ -23,17 +23,31 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
+    let lowMemoryLimit: CGFloat = 1100
+    let normalLimit: CGFloat = 2200
+    let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
     if storedValue > 0 {
-        return CGFloat(storedValue)
+        return min(CGFloat(storedValue), limit)
     }
-    return aidokuLegacyIsLowMemoryMode() ? 1200 : 2200
+    return limit
 }
 
 private func aidokuLegacyReaderPrefetchCount() -> Int {
+    if aidokuLegacyIsLowMemoryMode() {
+        return 0
+    }
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages")
-    let bounded = min(max(storedValue, 0), aidokuLegacyIsLowMemoryMode() ? 1 : 2)
+    let bounded = min(max(storedValue, 0), 2)
     return bounded
+}
+
+private func aidokuLegacyReaderShowsPageNumber() -> Bool {
+    return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.showPageNumber")
+}
+
+private func aidokuLegacyReaderShowsTapZones() -> Bool {
+    return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.showTapZones")
 }
 
 private func aidokuLegacyApplicationSupportDirectory() throws -> URL {
@@ -65,8 +79,8 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     configuration.timeoutIntervalForResource = 60
     configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
     configuration.urlCache = URLCache(
-        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 2 * 1024 * 1024 : 6 * 1024 * 1024,
-        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 24 * 1024 * 1024 : 48 * 1024 * 1024,
+        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 1 * 1024 * 1024 : 6 * 1024 * 1024,
+        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 16 * 1024 * 1024 : 48 * 1024 * 1024,
         diskPath: "AidokuLegacyReaderImageCache"
     )
     configuration.httpAdditionalHeaders = [
@@ -1203,8 +1217,8 @@ final class LegacyImageLoader {
         configuration.timeoutIntervalForRequest = 25
         configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
         configuration.urlCache = URLCache(
-            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 2 * 1024 * 1024 : 6 * 1024 * 1024,
-            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 24 * 1024 * 1024 : 48 * 1024 * 1024,
+            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 1 * 1024 * 1024 : 6 * 1024 * 1024,
+            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 16 * 1024 * 1024 : 48 * 1024 * 1024,
             diskPath: "AidokuLegacyCoverImageCache"
         )
         configuration.httpAdditionalHeaders = [
@@ -1212,8 +1226,8 @@ final class LegacyImageLoader {
             "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
-        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 48 : 120
-        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 10 * 1024 * 1024 : 28 * 1024 * 1024
+        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 32 : 120
+        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 6 * 1024 * 1024 : 28 * 1024 * 1024
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -1260,6 +1274,7 @@ final class LegacyImageLoader {
                     cacheKey: key,
                     targetHeight: targetHeight,
                     forceDownsample: true,
+                    fallbackRequests: legacyFallbackImageRequests(url: url, source: source, excluding: request),
                     completion: completion
                 )
             }
@@ -1271,6 +1286,7 @@ final class LegacyImageLoader {
             cacheKey: key,
             targetHeight: targetHeight,
             forceDownsample: true,
+            fallbackRequests: legacyFallbackImageRequests(url: url, source: nil),
             completion: completion
         )
     }
@@ -1306,10 +1322,14 @@ final class LegacyImageLoader {
         cacheKey key: NSURL,
         targetHeight: CGFloat,
         forceDownsample: Bool,
+        fallbackRequests: [URLRequest] = [],
         completion: @escaping (UIImage?) -> Void
     ) -> URLSessionDataTask {
-        let task = session.dataTask(with: request) { [weak self] data, _, _ in
+        let task = session.dataTask(with: request) { [weak self] data, response, _ in
             let image = data.flatMap { data -> UIImage? in
+                if let statusCode = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(statusCode) {
+                    return nil
+                }
                 return autoreleasepool {
                     self?.makeImage(
                         from: data,
@@ -1317,6 +1337,18 @@ final class LegacyImageLoader {
                         forceDownsample: forceDownsample
                     )
                 }
+            }
+            if image == nil, let fallbackRequest = fallbackRequests.first, let self = self {
+                let remainingFallbackRequests = Array(fallbackRequests.dropFirst())
+                self.load(
+                    request: fallbackRequest,
+                    cacheKey: key,
+                    targetHeight: targetHeight,
+                    forceDownsample: forceDownsample,
+                    fallbackRequests: remainingFallbackRequests,
+                    completion: completion
+                )
+                return
             }
             if let image = image {
                 self?.store(image, forKey: key)
@@ -1331,7 +1363,7 @@ final class LegacyImageLoader {
 
     private func store(_ image: UIImage, forKey key: NSURL) {
         let pixels = image.size.width * image.size.height * image.scale * image.scale
-        let costLimit = aidokuLegacyIsLowMemoryMode() ? CGFloat(6 * 1024 * 1024) : CGFloat(16 * 1024 * 1024)
+        let costLimit = aidokuLegacyIsLowMemoryMode() ? CGFloat(4 * 1024 * 1024) : CGFloat(16 * 1024 * 1024)
         cache.setObject(image, forKey: key, cost: max(1, Int(min(pixels, costLimit))))
     }
 
@@ -2110,6 +2142,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     private enum Row: Int, CaseIterable {
         case readerMode
         case readerMemory
+        case readerPageNumber
+        case readerTapZones
         case darkTheme
         case automaticLibraryUpdates
         case downloads
@@ -2153,6 +2187,17 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
                 cell.textLabel?.text = "Reader Memory Mode"
                 cell.detailTextLabel?.text = enabled ? "Optimized for iPad Air Gen 1" : "Full-size image decoding"
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .readerPageNumber:
+                let enabled = aidokuLegacyReaderShowsPageNumber()
+                cell.textLabel?.text = "Reader Page Number"
+                cell.detailTextLabel?.text = enabled ? "Show page count in the reader." : "Hide page count in the reader."
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .readerTapZones:
+                let enabled = aidokuLegacyReaderShowsTapZones()
+                cell.textLabel?.text = "Tap Zones Overlay"
+                cell.detailTextLabel?.text = enabled ? "Briefly show previous and next tap zones." : "Do not show tap zone hints."
+                cell.accessoryType = enabled ? .checkmark : .none
             case .darkTheme:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.appearance.darkTheme")
                 cell.textLabel?.text = "Dark Theme"
@@ -2197,6 +2242,14 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 showReaderModePicker(from: indexPath)
             case .readerMemory:
                 let key = "AidokuLegacy.reader.downsampleImages"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .readerPageNumber:
+                let key = "AidokuLegacy.reader.showPageNumber"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .readerTapZones:
+                let key = "AidokuLegacy.reader.showTapZones"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .darkTheme:
@@ -5253,7 +5306,107 @@ private func legacyFallbackImageRequest(url: URL, source: AidokuRunnerLegacySour
     var request = URLRequest(url: url)
     request.applyLegacyImageDefaults(for: url)
     request.applyLegacyRefererIfNeeded(source: source, imageURL: url)
+    if aidokuLegacyIsHitomiImage(url: url, source: source), request.value(forHTTPHeaderField: "Origin") == nil {
+        request.setValue("https://hitomi.la", forHTTPHeaderField: "Origin")
+    }
     return request
+}
+
+private func legacyFallbackImageRequests(
+    url: URL,
+    source: AidokuRunnerLegacySource?,
+    excluding primaryRequest: URLRequest? = nil
+) -> [URLRequest] {
+    var requests: [URLRequest] = []
+    let urls = [url] + legacyHitomiThumbnailFallbackURLs(from: url)
+    for candidateURL in urls {
+        let request = legacyFallbackImageRequest(url: candidateURL, source: source)
+        if let primaryRequest = primaryRequest, legacyImageRequestsMatch(request, primaryRequest) {
+            continue
+        }
+        guard !requests.contains(where: { legacyImageRequestsMatch($0, request) }) else {
+            continue
+        }
+        requests.append(request)
+    }
+    return requests
+}
+
+private func legacyImageRequestsMatch(_ lhs: URLRequest, _ rhs: URLRequest) -> Bool {
+    return lhs.url == rhs.url
+        && lhs.httpMethod == rhs.httpMethod
+        && lhs.httpBody == rhs.httpBody
+        && lhs.allHTTPHeaderFields == rhs.allHTTPHeaderFields
+}
+
+private func aidokuLegacyIsHitomiImage(url: URL, source: AidokuRunnerLegacySource?) -> Bool {
+    let sourceText = [source?.key, source?.name]
+        .compactMap { $0?.lowercased() }
+        .joined(separator: " ")
+    if sourceText.contains("hitomi") {
+        return true
+    }
+    let host = url.host?.lowercased() ?? ""
+    return host.contains("hitomi.la") || host.contains("gold-usergeneratedcontent.net")
+}
+
+private func legacyHitomiThumbnailFallbackURLs(from url: URL) -> [URL] {
+    guard aidokuLegacyIsHitomiImage(url: url, source: nil) else { return [] }
+    let path = url.path
+    let lowercasedPath = path.lowercased()
+    guard lowercasedPath.contains("/avif") || url.pathExtension.lowercased() == "avif" else { return [] }
+
+    let replacements = [
+        (from: "/avifbigtn/", to: "/webpbigtn/", pathExtension: "webp"),
+        (from: "/avifsmalltn/", to: "/webpsmalltn/", pathExtension: "webp"),
+        (from: "/avifbigtn/", to: "/bigtn/", pathExtension: "jpg"),
+        (from: "/avifsmalltn/", to: "/smalltn/", pathExtension: "jpg")
+    ]
+
+    var paths = [path]
+    for replacement in replacements {
+        let replacedPath = path.replacingOccurrences(
+            of: replacement.from,
+            with: replacement.to,
+            options: [.caseInsensitive]
+        )
+        guard replacedPath != path else { continue }
+        let pathWithExtension = legacyPath(replacedPath, replacingExtensionWith: replacement.pathExtension)
+        if !paths.contains(pathWithExtension) {
+            paths.append(pathWithExtension)
+        }
+    }
+
+    guard let currentHost = url.host?.lowercased() else { return [] }
+    let hosts = legacyHitomiThumbnailHosts(for: currentHost)
+    var urls: [URL] = []
+    for host in hosts {
+        for candidatePath in paths {
+            guard host != currentHost || candidatePath != path else { continue }
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.scheme = "https"
+            components?.host = host
+            components?.path = candidatePath
+            guard let candidateURL = components?.url, !urls.contains(candidateURL) else { continue }
+            urls.append(candidateURL)
+        }
+    }
+    return urls
+}
+
+private func legacyHitomiThumbnailHosts(for currentHost: String) -> [String] {
+    var hosts = [currentHost]
+    for host in ["tn.gold-usergeneratedcontent.net", "atn.gold-usergeneratedcontent.net", "tn.hitomi.la"] {
+        if !hosts.contains(host) {
+            hosts.append(host)
+        }
+    }
+    return hosts
+}
+
+private func legacyPath(_ path: String, replacingExtensionWith pathExtension: String) -> String {
+    let basePath = (path as NSString).deletingPathExtension
+    return basePath + "." + pathExtension
 }
 
 private enum LegacyReaderFactory {
@@ -5334,6 +5487,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         navigationController?.navigationBar.isTranslucent = false
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
+        if aidokuLegacyIsLowMemoryMode() {
+            tableView.isPrefetchingEnabled = false
+        }
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
         let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleReaderTap(_:)))
         tapRecognizer.cancelsTouchesInView = false
@@ -5572,7 +5728,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     private func showTapOverlayIfNeeded() {
-        guard !didShowTapOverlay else { return }
+        guard aidokuLegacyReaderShowsTapZones(), !didShowTapOverlay else { return }
         didShowTapOverlay = true
         overlayView.showGuide(modeTitle: LegacyReaderMode.current.title)
     }
@@ -5718,6 +5874,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         collectionView.showsVerticalScrollIndicator = false
         collectionView.decelerationRate = .fast
         collectionView.alwaysBounceVertical = false
+        if aidokuLegacyIsLowMemoryMode() {
+            collectionView.isPrefetchingEnabled = false
+        }
         collectionView.register(LegacyPagedImageCell.self, forCellWithReuseIdentifier: "PagedImageCell")
         collectionView.register(LegacyPagedMessageCell.self, forCellWithReuseIdentifier: "PagedMessageCell")
         view.addSubview(collectionView)
@@ -6002,7 +6161,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     private func showTapOverlayIfNeeded() {
-        guard !didShowTapOverlay else { return }
+        guard aidokuLegacyReaderShowsTapZones(), !didShowTapOverlay else { return }
         didShowTapOverlay = true
         overlayView.showGuide(modeTitle: mode.title)
     }
@@ -6134,7 +6293,7 @@ private final class LegacyReaderOverlayView: UIView {
     }
 
     func updatePage(index: Int?, count: Int) {
-        guard count > 0, let index = index else {
+        guard aidokuLegacyReaderShowsPageNumber(), count > 0, let index = index else {
             pageLabel.text = nil
             pageLabel.alpha = 0
             return
@@ -6145,12 +6304,19 @@ private final class LegacyReaderOverlayView: UIView {
 
     func showGuide(modeTitle: String) {
         hideWorkItem?.cancel()
+        guard aidokuLegacyReaderShowsTapZones() else {
+            leftZone.alpha = 0
+            rightZone.alpha = 0
+            modeLabel.alpha = 0
+            pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && pageLabel.text != nil ? 0.95 : 0
+            return
+        }
         modeLabel.text = modeTitle
         UIView.animate(withDuration: 0.18) {
             self.leftZone.alpha = 1
             self.rightZone.alpha = 1
             self.modeLabel.alpha = 1
-            self.pageLabel.alpha = self.pageLabel.text == nil ? 0 : 0.95
+            self.pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
         }
         let workItem = DispatchWorkItem { [weak self] in
             self?.hideGuide(animated: true)
@@ -6166,6 +6332,7 @@ private final class LegacyReaderOverlayView: UIView {
             self.leftZone.alpha = 0
             self.rightZone.alpha = 0
             self.modeLabel.alpha = 0
+            self.pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
         }
         if animated {
             UIView.animate(withDuration: 0.25, animations: changes)
@@ -6976,12 +7143,32 @@ private extension AidokuRunnerLegacyManga {
 
     private static func urlCandidates(from value: String) -> [String] {
         var candidates: [String] = []
-        appendUnique(value, to: &candidates)
-        appendUnique(value.replacingOccurrences(of: " ", with: "%20"), to: &candidates)
-        if let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            appendUnique(encoded, to: &candidates)
+        let normalized = value.replacingOccurrences(of: "\\/", with: "/")
+        appendURLCandidate(normalized, to: &candidates)
+        appendURLCandidate(normalized.replacingOccurrences(of: " ", with: "%20"), to: &candidates)
+        if let encoded = normalized.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            appendURLCandidate(encoded, to: &candidates)
         }
         return candidates
+    }
+
+    private static func appendURLCandidate(_ value: String, to candidates: inout [String]) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        appendUnique(trimmed, to: &candidates)
+        if trimmed.hasPrefix("//") {
+            appendUnique("https:" + trimmed, to: &candidates)
+        } else if looksLikeHostPath(trimmed) {
+            appendUnique("https://" + trimmed, to: &candidates)
+        }
+    }
+
+    private static func looksLikeHostPath(_ value: String) -> Bool {
+        guard !value.contains("://"), !value.hasPrefix("/"), !value.contains(" ") else {
+            return false
+        }
+        let host = value.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true).first ?? ""
+        return host.contains(".")
     }
 
     private static func appendUnique(_ value: String, to values: inout [String]) {
