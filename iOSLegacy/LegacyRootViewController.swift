@@ -35,12 +35,16 @@ private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
 }
 
 private func aidokuLegacyReaderPrefetchCount() -> Int {
-    if aidokuLegacyIsLowMemoryMode() {
-        return 0
-    }
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages")
+    if aidokuLegacyIsLowMemoryMode() {
+        return max(1, min(storedValue, 1))
+    }
     let bounded = min(max(storedValue, 0), 2)
     return bounded
+}
+
+private func aidokuLegacyReaderRetainedPageDelay() -> TimeInterval {
+    return aidokuLegacyIsLowMemoryMode() ? 8 : 15
 }
 
 private func aidokuLegacyReaderShowsPageNumber() -> Bool {
@@ -124,8 +128,8 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     configuration.timeoutIntervalForResource = 60
     configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
     configuration.urlCache = URLCache(
-        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 0 : 6 * 1024 * 1024,
-        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 0 : 48 * 1024 * 1024,
+        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 256 * 1024 : 6 * 1024 * 1024,
+        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 12 * 1024 * 1024 : 48 * 1024 * 1024,
         diskPath: "AidokuLegacyReaderImageCache"
     )
     configuration.httpAdditionalHeaders = [
@@ -6018,10 +6022,11 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
 
         let preloadCount = aidokuLegacyReaderPrefetchCount()
         guard preloadCount > 0 else { return }
-        let maxIndex = min(pages.count - 1, indexPath.row + preloadCount)
-        guard maxIndex >= indexPath.row else { return }
+        let candidateIndexes = (1...preloadCount).flatMap { offset in
+            [indexPath.row + offset, indexPath.row - offset]
+        }
         let source = self.source
-        for pageIndex in (indexPath.row...maxIndex) {
+        for pageIndex in candidateIndexes where pages.indices.contains(pageIndex) {
             guard case .url(let url, let context) = pages[pageIndex].content else { continue }
             guard !url.isFileURL else { continue }
             source.runner.getImageRequest(url: url, context: context) { result in
@@ -6033,7 +6038,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     override func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        (cell as? LegacyPageImageCell)?.releaseDecodedImage()
+        guard let pageCell = cell as? LegacyPageImageCell else { return }
+        let loadID = pageCell.currentLoadID
+        DispatchQueue.main.asyncAfter(deadline: .now() + aidokuLegacyReaderRetainedPageDelay()) { [weak tableView, weak pageCell] in
+            guard let tableView = tableView, let pageCell = pageCell else { return }
+            guard tableView.indexPath(for: pageCell) == nil else { return }
+            pageCell.releaseDecodedImage(ifLoadID: loadID)
+        }
     }
 
     private func loadPages() {
@@ -6497,7 +6508,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
-        (cell as? LegacyPagedImageCell)?.releaseDecodedImage()
+        guard let pageCell = cell as? LegacyPagedImageCell else { return }
+        let loadID = pageCell.currentLoadID
+        DispatchQueue.main.asyncAfter(deadline: .now() + aidokuLegacyReaderRetainedPageDelay()) { [weak collectionView, weak pageCell] in
+            guard let collectionView = collectionView, let pageCell = pageCell else { return }
+            guard collectionView.indexPath(for: pageCell) == nil else { return }
+            pageCell.releaseDecodedImage(ifLoadID: loadID)
+        }
     }
 
     private func loadPages() {
@@ -6578,8 +6595,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private func preloadPages(around pageIndex: Int) {
         let preloadCount = aidokuLegacyReaderPrefetchCount()
         guard preloadCount > 0 else { return }
-        let candidateIndexes = (0...preloadCount).flatMap { offset -> [Int] in
-            if offset == 0 { return [pageIndex] }
+        let candidateIndexes = (1...preloadCount).flatMap { offset -> [Int] in
             return [pageIndex + offset, pageIndex - offset]
         }
         let source = self.source
@@ -7066,11 +7082,20 @@ private final class LegacyPageImageCell: UITableViewCell {
         onHeightChange = nil
     }
 
+    var currentLoadID: UUID {
+        return representedLoadID
+    }
+
     func releaseDecodedImage() {
         task?.cancel()
         task = nil
         representedLoadID = UUID()
         pageImageView.image = nil
+    }
+
+    func releaseDecodedImage(ifLoadID loadID: UUID) {
+        guard representedLoadID == loadID else { return }
+        releaseDecodedImage()
     }
 
     func configure(
@@ -7431,11 +7456,20 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         pageImageView.isHidden = false
     }
 
+    var currentLoadID: UUID {
+        return representedLoadID
+    }
+
     func releaseDecodedImage() {
         task?.cancel()
         task = nil
         representedLoadID = UUID()
         pageImageView.image = nil
+    }
+
+    func releaseDecodedImage(ifLoadID loadID: UUID) {
+        guard representedLoadID == loadID else { return }
+        releaseDecodedImage()
     }
 
     func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
