@@ -24,14 +24,44 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
-    let lowMemoryLimit: CGFloat = 768
+    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? 1200 : 768
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
     if storedValue > 0 {
+        if aidokuLegacyIsLowMemoryMode(), aidokuLegacyReaderUpscaleImages(), storedValue <= 768 {
+            return limit
+        }
         return min(CGFloat(storedValue), limit)
     }
     return limit
+}
+
+private func aidokuLegacyReaderUpscaleImages() -> Bool {
+    return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.upscaleImages")
+}
+
+private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIImage {
+    guard aidokuLegacyReaderUpscaleImages() else { return image }
+    let maxPixelHeight = aidokuLegacyReaderMaxPixelHeight()
+    let pixelHeight = image.size.height * image.scale
+    let pixelWidth = image.size.width * image.scale
+    guard pixelHeight > 0, pixelWidth > 0, pixelHeight < maxPixelHeight else {
+        return image
+    }
+
+    let scale = min(maxPixelHeight / pixelHeight, 1.6)
+    guard scale > 1.05 else { return image }
+    let targetSize = CGSize(width: max(1, pixelWidth * scale), height: max(1, pixelHeight * scale))
+
+    UIGraphicsBeginImageContextWithOptions(targetSize, false, 1)
+    if let context = UIGraphicsGetCurrentContext() {
+        context.interpolationQuality = .high
+    }
+    image.draw(in: CGRect(origin: .zero, size: targetSize))
+    let upscaledImage = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+    return upscaledImage ?? image
 }
 
 private func aidokuLegacyReaderPrefetchCount() -> Int {
@@ -150,8 +180,7 @@ private final class LegacyReaderImagePipeline {
     private var memoryObserver: NSObjectProtocol?
 
     private init() {
-        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 6 : 24
-        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 6 * 1024 * 1024 : 48 * 1024 * 1024
+        configureCacheLimits()
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -169,6 +198,7 @@ private final class LegacyReaderImagePipeline {
 
     func clear() {
         stateQueue.async { [weak self] in
+            self?.configureCacheLimits()
             self?.cache.removeAllObjects()
         }
     }
@@ -224,6 +254,7 @@ private final class LegacyReaderImagePipeline {
             let image = autoreleasepool { () -> UIImage? in
                 guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
                 return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             self?.finish(cacheKey: cacheKey, image: image)
         }
@@ -312,7 +343,9 @@ private final class LegacyReaderImagePipeline {
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
-                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                aidokuLegacyPrepareReaderImageForDisplay(
+                    LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                )
             }
             self?.finish(cacheKey: cacheKey, image: preparedImage)
         }
@@ -323,6 +356,7 @@ private final class LegacyReaderImagePipeline {
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             self?.finish(cacheKey: cacheKey, image: image)
         }
@@ -377,6 +411,16 @@ private final class LegacyReaderImagePipeline {
         return max(1, Int(pixels * 4))
     }
 
+    private func configureCacheLimits() {
+        if aidokuLegacyIsLowMemoryMode() {
+            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 4 : 6
+            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 12 * 1024 * 1024 : 6 * 1024 * 1024
+        } else {
+            cache.countLimit = 24
+            cache.totalCostLimit = 48 * 1024 * 1024
+        }
+    }
+
     private func localCacheKey(
         url: URL,
         context: [String: String]?,
@@ -390,7 +434,8 @@ private final class LegacyReaderImagePipeline {
             "\(values?.fileSize ?? 0)",
             "\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)",
             contextKey(context),
-            "\(Int(aidokuLegacyReaderMaxPixelHeight()))"
+            "\(Int(aidokuLegacyReaderMaxPixelHeight()))",
+            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0"
         ].joined(separator: "\n")
     }
 
@@ -404,7 +449,8 @@ private final class LegacyReaderImagePipeline {
             source.key,
             url.absoluteString,
             contextKey(context),
-            "\(Int(aidokuLegacyReaderMaxPixelHeight()))"
+            "\(Int(aidokuLegacyReaderMaxPixelHeight()))",
+            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0"
         ].joined(separator: "\n")
     }
 
@@ -2791,6 +2837,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     private enum Row: Int, CaseIterable {
         case readerMode
         case readerMemory
+        case readerUpscale
         case readerPageNumber
         case readerTapZones
         case darkTheme
@@ -2837,6 +2884,17 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
                 cell.textLabel?.text = "Reader Memory Mode"
                 cell.detailTextLabel?.text = enabled ? "Optimized for iPad Air Gen 1" : "Full-size image decoding"
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .readerUpscale:
+                let enabled = aidokuLegacyReaderUpscaleImages()
+                let detail: String
+                if enabled {
+                    detail = "Sharpen low-resolution pages. Uses more CPU and memory."
+                } else {
+                    detail = "Use fastest low-memory page decoding."
+                }
+                cell.textLabel?.text = "Reader Upscale"
+                cell.detailTextLabel?.text = detail
                 cell.accessoryType = enabled ? .checkmark : .none
             case .readerPageNumber:
                 let enabled = aidokuLegacyReaderShowsPageNumber()
@@ -2898,6 +2956,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             case .readerMemory:
                 let key = "AidokuLegacy.reader.downsampleImages"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                aidokuLegacyTrimVolatileCaches()
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .readerUpscale:
+                let key = "AidokuLegacy.reader.upscaleImages"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                aidokuLegacyTrimVolatileCaches()
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .readerPageNumber:
                 let key = "AidokuLegacy.reader.showPageNumber"
@@ -7425,6 +7489,7 @@ private final class LegacyPageImageCell: UITableViewCell {
             let image = autoreleasepool { () -> UIImage? in
                 guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
                 return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7590,7 +7655,9 @@ private final class LegacyPageImageCell: UITableViewCell {
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
-                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                aidokuLegacyPrepareReaderImageForDisplay(
+                    LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                )
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7608,6 +7675,7 @@ private final class LegacyPageImageCell: UITableViewCell {
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7780,6 +7848,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             let image = autoreleasepool { () -> UIImage? in
                 guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
                 return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7943,7 +8012,9 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
-                LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                aidokuLegacyPrepareReaderImageForDisplay(
+                    LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
+                )
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7961,6 +8032,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+                    .map(aidokuLegacyPrepareReaderImageForDisplay)
             }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
