@@ -12,6 +12,10 @@ A free and open source manga reading application for iOS and iPadOS.
 
 For detailed installation instructions, check out [the website](https://aidoku.app).
 
+## Release
+
+[Legacy](https://github.com/SS-Internet-Extensions/Aidoku/releases/download/legacy-ios12-latest/AidokuLegacy-iOS12-latest-fakesigned.ipa)
+
 ### TestFlight
 
 To join the TestFlight, you will need to join the [Aidoku Discord](https://discord.gg/kh2PYT8V8d).
