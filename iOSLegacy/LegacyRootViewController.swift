@@ -5487,9 +5487,6 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         navigationController?.navigationBar.isTranslucent = false
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
-        if aidokuLegacyIsLowMemoryMode() {
-            tableView.isPrefetchingEnabled = false
-        }
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
         let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleReaderTap(_:)))
         tapRecognizer.cancelsTouchesInView = false
