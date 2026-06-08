@@ -24,7 +24,7 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
-    let lowMemoryLimit: CGFloat = 900
+    let lowMemoryLimit: CGFloat = 768
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
@@ -73,6 +73,50 @@ private func aidokuLegacySanitizedPathComponent(_ value: String) -> String {
     return sanitized.isEmpty ? UUID().uuidString : sanitized
 }
 
+private func aidokuLegacyPreparePagesForLowMemory(
+    _ pages: [AidokuRunnerLegacyPage]
+) -> (pages: [AidokuRunnerLegacyPage], temporaryDirectories: [URL]) {
+    guard aidokuLegacyIsLowMemoryMode() else {
+        return (pages, [])
+    }
+
+    var preparedPages = pages
+    var temporaryDirectory: URL?
+    for index in preparedPages.indices {
+        guard case .image(let data) = preparedPages[index].content else { continue }
+        guard !data.isEmpty else { continue }
+        if temporaryDirectory == nil {
+            let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("AidokuLegacyInlinePages-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                temporaryDirectory = directory
+            } catch {
+                continue
+            }
+        }
+        guard let directory = temporaryDirectory else { continue }
+        let fileURL = directory.appendingPathComponent("page-\(index).img")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            preparedPages[index].content = .url(fileURL, context: nil)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    if let temporaryDirectory = temporaryDirectory {
+        return (preparedPages, [temporaryDirectory])
+    }
+    return (preparedPages, [])
+}
+
+private func aidokuLegacyRemoveTemporaryPageDirectories(_ directories: [URL]) {
+    for directory in directories {
+        try? FileManager.default.removeItem(at: directory)
+    }
+}
+
 private let aidokuLegacyReaderImageSession: URLSession = {
     let configuration = URLSessionConfiguration.default
     configuration.requestCachePolicy = .returnCacheDataElseLoad
@@ -81,7 +125,7 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
     configuration.urlCache = URLCache(
         memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 0 : 6 * 1024 * 1024,
-        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 8 * 1024 * 1024 : 48 * 1024 * 1024,
+        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 0 : 48 * 1024 * 1024,
         diskPath: "AidokuLegacyReaderImageCache"
     )
     configuration.httpAdditionalHeaders = [
@@ -1392,8 +1436,8 @@ final class LegacyImageLoader {
         configuration.timeoutIntervalForRequest = 25
         configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
         configuration.urlCache = URLCache(
-            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 512 * 1024 : 6 * 1024 * 1024,
-            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 8 * 1024 * 1024 : 48 * 1024 * 1024,
+            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 128 * 1024 : 6 * 1024 * 1024,
+            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 4 * 1024 * 1024 : 48 * 1024 * 1024,
             diskPath: "AidokuLegacyCoverImageCache"
         )
         configuration.httpAdditionalHeaders = [
@@ -1401,8 +1445,8 @@ final class LegacyImageLoader {
             "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
-        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 16 : 120
-        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 3 * 1024 * 1024 : 28 * 1024 * 1024
+        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 8 : 120
+        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 1024 * 1024 : 28 * 1024 * 1024
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -1550,7 +1594,7 @@ final class LegacyImageLoader {
 
     private func store(_ image: UIImage, forKey key: NSURL) {
         let pixels = image.size.width * image.size.height * image.scale * image.scale
-        let costLimit = aidokuLegacyIsLowMemoryMode() ? CGFloat(4 * 1024 * 1024) : CGFloat(16 * 1024 * 1024)
+        let costLimit = aidokuLegacyIsLowMemoryMode() ? CGFloat(1024 * 1024) : CGFloat(16 * 1024 * 1024)
         cache.setObject(image, forKey: key, cost: max(1, Int(min(pixels, costLimit))))
     }
 
@@ -5810,6 +5854,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
+    private var temporaryPageDirectories: [URL] = []
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
     }
@@ -5844,6 +5889,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         for observer in appStateObservers {
             NotificationCenter.default.removeObserver(observer)
         }
+        aidokuLegacyRemoveTemporaryPageDirectories(temporaryPageDirectories)
     }
 
     override func viewDidLoad() {
@@ -5889,6 +5935,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         if let currentPageIndex = currentPageIndex {
             recordHistory(pageIndex: currentPageIndex, force: true)
         }
+        trimReaderMemory(keepCurrentPage: false)
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
         overlayView.removeFromSuperview()
@@ -5985,9 +6032,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         }
     }
 
+    override func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        (cell as? LegacyPageImageCell)?.releaseDecodedImage()
+    }
+
     private func loadPages() {
         if let downloadedPages = LegacyDownloadStore.shared.pages(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
-            pages = downloadedPages
+            setPages(downloadedPages)
             message = downloadedPages.isEmpty ? "No downloaded pages." : ""
             tableView.reloadData()
             scrollToInitialPageIfNeeded()
@@ -6005,7 +6056,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
                 guard let self = self else { return }
                 switch result {
                     case .success(let pages):
-                        self.pages = pages
+                        self.setPages(pages)
                         self.message = pages.isEmpty ? "No pages." : ""
                     case .failure(let error):
                         self.message = self.readerMessage(for: error)
@@ -6020,6 +6071,14 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private func updateReaderMode() {
         tableView.isPagingEnabled = fitToScreen
         tableView.decelerationRate = fitToScreen ? .fast : .normal
+    }
+
+    private func setPages(_ newPages: [AidokuRunnerLegacyPage]) {
+        aidokuLegacyRemoveTemporaryPageDirectories(temporaryPageDirectories)
+        temporaryPageDirectories = []
+        let prepared = aidokuLegacyPreparePagesForLowMemory(newPages)
+        pages = prepared.pages
+        temporaryPageDirectories = prepared.temporaryDirectories
     }
 
     @objc private func toggleBars() {
@@ -6253,6 +6312,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
+    private var temporaryPageDirectories: [URL] = []
 
     init(
         source: AidokuRunnerLegacySource,
@@ -6280,6 +6340,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         for observer in appStateObservers {
             NotificationCenter.default.removeObserver(observer)
         }
+        aidokuLegacyRemoveTemporaryPageDirectories(temporaryPageDirectories)
     }
 
     override func viewDidLoad() {
@@ -6352,6 +6413,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         if let currentPageIndex = currentPageIndex {
             recordHistory(pageIndex: currentPageIndex, force: true)
         }
+        trimReaderMemory(keepCurrentPage: false)
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
         overlayView.removeFromSuperview()
@@ -6430,9 +6492,17 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         preloadPages(around: pageIndex)
     }
 
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        (cell as? LegacyPagedImageCell)?.releaseDecodedImage()
+    }
+
     private func loadPages() {
         if let downloadedPages = LegacyDownloadStore.shared.pages(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
-            pages = downloadedPages
+            setPages(downloadedPages)
             message = downloadedPages.isEmpty ? "No downloaded pages." : ""
             collectionView.reloadData()
             scrollToInitialPageIfNeeded()
@@ -6450,7 +6520,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                 guard let self = self else { return }
                 switch result {
                     case .success(let pages):
-                        self.pages = pages
+                        self.setPages(pages)
                         self.message = pages.isEmpty ? "No pages." : ""
                     case .failure(let error):
                         self.message = self.readerMessage(for: error)
@@ -6460,6 +6530,14 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                 self.updatePageHUD()
             }
         }
+    }
+
+    private func setPages(_ newPages: [AidokuRunnerLegacyPage]) {
+        aidokuLegacyRemoveTemporaryPageDirectories(temporaryPageDirectories)
+        temporaryPageDirectories = []
+        let prepared = aidokuLegacyPreparePagesForLowMemory(newPages)
+        pages = prepared.pages
+        temporaryPageDirectories = prepared.temporaryDirectories
     }
 
     private func scrollToInitialPageIfNeeded() {
@@ -6884,7 +6962,7 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
         backgroundColor = .black
         delegate = self
         minimumZoomScale = 1
-        maximumZoomScale = aidokuLegacyIsLowMemoryMode() ? 2.5 : 4
+        maximumZoomScale = aidokuLegacyIsLowMemoryMode() ? 2 : 4
         bouncesZoom = true
         showsHorizontalScrollIndicator = false
         showsVerticalScrollIndicator = false
@@ -7047,13 +7125,17 @@ private final class LegacyPageImageCell: UITableViewCell {
     private func loadLocalImage(url: URL, loadID: UUID) {
         pageLabel.text = "Loading..."
         aidokuLegacyImageDecodeQueue.async { [weak self] in
-            let data = try? Data(contentsOf: url)
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+            let image = autoreleasepool { () -> UIImage? in
+                guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+                return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
-                if let data = data, !data.isEmpty {
-                    self.setImage(from: data, loadID: loadID, failureMessage: "Downloaded image failed to decode.")
+                if let image = image {
+                    self.setImage(image, loadID: loadID)
                 } else {
-                    self.showFailure("Downloaded image is missing.", loadID: loadID)
+                    self.showFailure("Downloaded image failed to decode.", loadID: loadID)
                 }
             }
         }
@@ -7068,20 +7150,72 @@ private final class LegacyPageImageCell: UITableViewCell {
     ) {
         task?.cancel()
         task = aidokuLegacyReaderImageSession.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                self?.handleLoadResult(
-                    data: data,
-                    response: response,
-                    error: error,
-                    request: request,
-                    context: context,
-                    source: source,
-                    loadID: loadID,
-                    retriesRemaining: retriesRemaining
-                )
+            if source.runner.features.processesPages {
+                DispatchQueue.main.async {
+                    self?.handleLoadResult(
+                        data: data,
+                        response: response,
+                        error: error,
+                        request: request,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        retriesRemaining: retriesRemaining
+                    )
+                }
+                return
             }
+            self?.handleDirectLoadResult(
+                data: data,
+                response: response,
+                error: error,
+                request: request,
+                context: context,
+                source: source,
+                loadID: loadID,
+                retriesRemaining: retriesRemaining
+            )
         }
         task?.resume()
+    }
+
+    private func handleDirectLoadResult(
+        data: Data?,
+        response: URLResponse?,
+        error: Error?,
+        request: URLRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID,
+        retriesRemaining: Int
+    ) {
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode
+        if shouldRetry(error: error, statusCode: statusCode, data: data), retriesRemaining > 0 {
+            DispatchQueue.main.async {
+                guard self.representedLoadID == loadID else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    self.load(
+                        request: request,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        retriesRemaining: retriesRemaining - 1
+                    )
+                }
+            }
+            return
+        }
+        guard let data = data, !data.isEmpty else {
+            showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
+            return
+        }
+        if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
+            return
+        }
+        setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage(data: data, response: httpResponse))
     }
 
     private func handleLoadResult(
@@ -7200,7 +7334,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         } else {
             let width = max(availableSize.width, 1)
             let ratio = image.size.height / max(image.size.width, 1)
-            let maximumHeight: CGFloat = aidokuLegacyIsLowMemoryMode() ? max(availableSize.height, 900) : 2600
+            let maximumHeight: CGFloat = aidokuLegacyIsLowMemoryMode() ? max(availableSize.height, 768) : 2600
             let targetHeight = min(max(width * ratio, 320), maximumHeight)
             heightConstraint.constant = targetHeight
         }
@@ -7346,13 +7480,17 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     private func loadLocalImage(url: URL, loadID: UUID) {
         pageLabel.text = "Loading..."
         aidokuLegacyImageDecodeQueue.async { [weak self] in
-            let data = try? Data(contentsOf: url)
+            let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+            let image = autoreleasepool { () -> UIImage? in
+                guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+                return LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
+            }
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
-                if let data = data, !data.isEmpty {
-                    self.setImage(from: data, loadID: loadID, failureMessage: "Downloaded image failed to decode.")
+                if let image = image {
+                    self.setImage(image, loadID: loadID)
                 } else {
-                    self.showFailure("Downloaded image is missing.", loadID: loadID)
+                    self.showFailure("Downloaded image failed to decode.", loadID: loadID)
                 }
             }
         }
@@ -7367,20 +7505,72 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     ) {
         task?.cancel()
         task = aidokuLegacyReaderImageSession.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                self?.handleLoadResult(
-                    data: data,
-                    response: response,
-                    error: error,
-                    request: request,
-                    context: context,
-                    source: source,
-                    loadID: loadID,
-                    retriesRemaining: retriesRemaining
-                )
+            if source.runner.features.processesPages {
+                DispatchQueue.main.async {
+                    self?.handleLoadResult(
+                        data: data,
+                        response: response,
+                        error: error,
+                        request: request,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        retriesRemaining: retriesRemaining
+                    )
+                }
+                return
             }
+            self?.handleDirectLoadResult(
+                data: data,
+                response: response,
+                error: error,
+                request: request,
+                context: context,
+                source: source,
+                loadID: loadID,
+                retriesRemaining: retriesRemaining
+            )
         }
         task?.resume()
+    }
+
+    private func handleDirectLoadResult(
+        data: Data?,
+        response: URLResponse?,
+        error: Error?,
+        request: URLRequest,
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID,
+        retriesRemaining: Int
+    ) {
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode
+        if shouldRetry(error: error, statusCode: statusCode, data: data), retriesRemaining > 0 {
+            DispatchQueue.main.async {
+                guard self.representedLoadID == loadID else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    self.load(
+                        request: request,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        retriesRemaining: retriesRemaining - 1
+                    )
+                }
+            }
+            return
+        }
+        guard let data = data, !data.isEmpty else {
+            showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
+            return
+        }
+        if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
+            return
+        }
+        setImage(from: data, loadID: loadID, failureMessage: decodeFailureMessage(data: data, response: httpResponse))
     }
 
     private func handleLoadResult(

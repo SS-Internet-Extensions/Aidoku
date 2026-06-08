@@ -58,7 +58,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.downsampleImages": isLegacyIPadAir,
                 "AidokuLegacy.reader.fitToScreen": true,
                 "AidokuLegacy.reader.mode": "verticalFit",
-                "AidokuLegacy.reader.maxImageHeight": isLegacyIPadAir ? 900 : 2200,
+                "AidokuLegacy.reader.maxImageHeight": isLegacyIPadAir ? 768 : 2200,
                 "AidokuLegacy.reader.prefetchPages": isLegacyIPadAir ? 0 : 1,
                 "AidokuLegacy.reader.backgroundColor": "black",
                 "AidokuLegacy.reader.showPageNumber": true,
@@ -72,6 +72,11 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     private func registerImageCoders() {
+        if UIDevice.current.isFirstGenerationIPadAir || ProcessInfo.processInfo.physicalMemory <= 1_350_000_000 {
+            SDImageCache.shared.config.shouldCacheImagesInMemory = false
+            SDImageCache.shared.config.maxMemoryCost = 1024 * 1024
+            SDImageCache.shared.config.maxMemoryCount = 4
+        }
         SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
     }
 
