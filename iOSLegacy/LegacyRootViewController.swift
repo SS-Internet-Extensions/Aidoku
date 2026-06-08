@@ -261,7 +261,7 @@ final class LegacyTabBarController: UITabBarController {
     }
 }
 
-private enum LegacyLibrarySortOption: String, CaseIterable {
+enum LegacyLibrarySortOption: String, CaseIterable {
     case recentlyAdded
     case title
     case source
@@ -4878,11 +4878,11 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let chapter = groups[indexPath.section - 2].chapters[indexPath.row]
         cell.imageView?.image = nil
         cell.textLabel?.text = chapter.legacyFormattedTitle
-        var subtitle = chapter.legacyFormattedSubtitle(sourceKey: source.key)
+        var subtitle = chapter.legacyFormattedSubtitle(sourceKey: source.key) ?? ""
         if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
             subtitle = subtitle.isEmpty ? "Downloaded" : "\(subtitle)\nDownloaded"
         }
-        cell.detailTextLabel?.text = subtitle
+        cell.detailTextLabel?.text = subtitle.isEmpty ? nil : subtitle
         if chapter.locked {
             cell.textLabel?.textColor = LegacyPalette.disabledText
             cell.detailTextLabel?.textColor = LegacyPalette.disabledText
