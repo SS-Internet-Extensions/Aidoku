@@ -308,6 +308,33 @@ enum LegacyLibrarySortOption: String, CaseIterable {
     }
 }
 
+private extension AidokuRunnerLegacyManga {
+    func mergedWithUpdate(_ update: AidokuRunnerLegacyManga) -> AidokuRunnerLegacyManga {
+        var manga = update
+        if manga.sourceKey.isEmpty {
+            manga.sourceKey = sourceKey
+        }
+        if manga.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            manga.title = title
+        }
+        manga.cover = Self.nonEmpty(manga.cover) ?? Self.nonEmpty(cover)
+        manga.artists = manga.artists ?? artists
+        manga.authors = manga.authors ?? authors
+        manga.description = manga.description ?? description
+        manga.url = manga.url ?? url
+        manga.tags = manga.tags ?? tags
+        manga.chapters = manga.chapters ?? chapters
+        return manga
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+}
+
 struct LegacyLibraryEntry: Codable, Hashable {
     var sourceKey: String
     var sourceName: String
@@ -371,6 +398,10 @@ final class LegacyLibraryStore {
         return rawEntries.contains { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
     }
 
+    func entry(sourceKey: String, mangaKey: String) -> LegacyLibraryEntry? {
+        return rawEntries.first { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
+    }
+
     func add(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
         var current = rawEntries.filter { !($0.sourceKey == source.key && $0.manga.key == manga.key) }
         current.insert(
@@ -385,14 +416,31 @@ final class LegacyLibraryStore {
         guard let index = current.firstIndex(where: { $0.sourceKey == source.key && $0.manga.key == manga.key }) else {
             return
         }
+        let mergedManga = current[index].manga.mergedWithUpdate(manga)
         current[index] = LegacyLibraryEntry(
             sourceKey: source.key,
             sourceName: source.name,
-            manga: manga,
+            manga: mergedManga,
             dateAdded: current[index].dateAdded,
             category: current[index].category
         )
         save(current)
+    }
+
+    func updateMangaMetadata(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
+        var current = rawEntries
+        var didChange = false
+        for index in current.indices where current[index].sourceKey == source.key && current[index].manga.key == manga.key {
+            let mergedManga = current[index].manga.mergedWithUpdate(manga)
+            if mergedManga != current[index].manga {
+                current[index].manga = mergedManga
+                current[index].sourceName = source.name
+                didChange = true
+            }
+        }
+        if didChange {
+            save(current)
+        }
     }
 
     func setCategory(sourceKey: String, mangaKey: String, category: String?) {
@@ -485,12 +533,20 @@ final class LegacyHistoryStore {
         pageCount: Int
     ) {
         let key = "\(source.key)::\(manga.key)::\(chapter.key)"
-        var current = entries.filter { $0.key != key }
+        let currentEntries = entries
+        var mergedManga = manga
+        if let libraryManga = LegacyLibraryStore.shared.entry(sourceKey: source.key, mangaKey: manga.key)?.manga {
+            mergedManga = libraryManga.mergedWithUpdate(mergedManga)
+        }
+        if let existingManga = currentEntries.first(where: { $0.sourceKey == source.key && $0.manga.key == manga.key })?.manga {
+            mergedManga = existingManga.mergedWithUpdate(mergedManga)
+        }
+        var current = currentEntries.filter { $0.key != key }
         current.insert(
             LegacyHistoryEntry(
                 sourceKey: source.key,
                 sourceName: source.name,
-                manga: manga,
+                manga: mergedManga,
                 chapter: chapter,
                 pageIndex: max(0, pageIndex),
                 pageCount: max(pageCount, 0),
@@ -511,6 +567,22 @@ final class LegacyHistoryStore {
 
     func latest(sourceKey: String, mangaKey: String) -> LegacyHistoryEntry? {
         return entries.first { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
+    }
+
+    func updateMangaMetadata(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
+        var current = entries
+        var didChange = false
+        for index in current.indices where current[index].sourceKey == source.key && current[index].manga.key == manga.key {
+            let mergedManga = current[index].manga.mergedWithUpdate(manga)
+            if mergedManga != current[index].manga {
+                current[index].manga = mergedManga
+                current[index].sourceName = source.name
+                didChange = true
+            }
+        }
+        if didChange {
+            save(current)
+        }
     }
 
     func clear() {
@@ -574,6 +646,22 @@ final class LegacyUpdateStore {
             current.insert(entry, at: 0)
         }
         save(Array(current.prefix(500)))
+    }
+
+    func updateMangaMetadata(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
+        var current = entries
+        var didChange = false
+        for index in current.indices where current[index].sourceKey == source.key && current[index].manga.key == manga.key {
+            let mergedManga = current[index].manga.mergedWithUpdate(manga)
+            if mergedManga != current[index].manga {
+                current[index].manga = mergedManga
+                current[index].sourceName = source.name
+                didChange = true
+            }
+        }
+        if didChange {
+            save(current)
+        }
     }
 
     func remove(key: String) {
@@ -1339,6 +1427,7 @@ final class LegacyImageLoader {
                 }
             }
             if image == nil, let fallbackRequest = fallbackRequests.first, let self = self {
+                self.session.configuration.urlCache?.removeCachedResponse(for: request)
                 let remainingFallbackRequests = Array(fallbackRequests.dropFirst())
                 self.load(
                     request: fallbackRequest,
@@ -1352,6 +1441,8 @@ final class LegacyImageLoader {
             }
             if let image = image {
                 self?.store(image, forKey: key)
+            } else {
+                self?.session.configuration.urlCache?.removeCachedResponse(for: request)
             }
             DispatchQueue.main.async {
                 completion(image)
@@ -1495,6 +1586,7 @@ final class LegacyLibraryViewController: UITableViewController {
     private var isUpdatingLibrary = false
     private var activeCategory: String?
     private var sortOption = LegacyLibrarySortOption.current
+    private var pendingCoverRepairs = Set<String>()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1572,17 +1664,7 @@ final class LegacyLibraryViewController: UITableViewController {
         }
 
         let entry = entries[indexPath.row]
-        cell.imageView?.image = LegacyImageLoader.placeholder()
-        if let source = source(for: entry), let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
-                guard
-                    let visibleIndexPath = tableView.indexPath(for: cell),
-                    visibleIndexPath == indexPath
-                else { return }
-                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                cell.setNeedsLayout()
-            }
-        }
+        loadCover(for: entry, into: cell, at: indexPath)
         cell.textLabel?.text = entry.manga.title
         cell.detailTextLabel?.text = librarySubtitle(for: entry)
         cell.accessoryType = .disclosureIndicator
@@ -1645,6 +1727,43 @@ final class LegacyLibraryViewController: UITableViewController {
             components.append("\(downloadedCount) downloaded")
         }
         return components.joined(separator: " - ")
+    }
+
+    private func loadCover(for entry: LegacyLibraryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        guard let source = source(for: entry) else { return }
+        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+            repairCover(for: entry, source: source)
+            return
+        }
+        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+            guard
+                let self = self,
+                let visibleIndexPath = self.tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+            if image == nil {
+                self.repairCover(for: entry, source: source)
+            }
+        }
+    }
+
+    private func repairCover(for entry: LegacyLibraryEntry, source: AidokuRunnerLegacySource) {
+        guard !pendingCoverRepairs.contains(entry.key) else { return }
+        pendingCoverRepairs.insert(entry.key)
+        source.runner.getMangaUpdate(manga: entry.manga, needsDetails: true, needsChapters: false) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.pendingCoverRepairs.remove(entry.key)
+                guard case .success(let updatedManga) = result else { return }
+                let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
+                guard mergedManga.coverURL(relativeTo: source.urls.first) != nil else { return }
+                LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+            }
+        }
     }
 
     @objc private func openUpdates() {
@@ -1756,8 +1875,11 @@ final class LegacyLibraryViewController: UITableViewController {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if case .success(let manga) = result {
-                    self.recordUpdates(oldManga: item.0.manga, newManga: manga, source: item.1)
-                    LegacyLibraryStore.shared.update(manga: manga, source: item.1)
+                    let mergedManga = item.0.manga.mergedWithUpdate(manga)
+                    self.recordUpdates(oldManga: item.0.manga, newManga: mergedManga, source: item.1)
+                    LegacyLibraryStore.shared.update(manga: mergedManga, source: item.1)
+                    LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: item.1)
+                    LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: item.1)
                 }
                 self.updateLibraryItems(items, index: index + 1, automatic: automatic)
             }
@@ -1799,6 +1921,7 @@ final class LegacyHistoryViewController: UITableViewController {
     private var entries: [LegacyHistoryEntry] = []
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
+    private var pendingCoverRepairs = Set<String>()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1856,17 +1979,7 @@ final class LegacyHistoryViewController: UITableViewController {
         }
 
         let entry = entries[indexPath.row]
-        cell.imageView?.image = LegacyImageLoader.placeholder()
-        if let source = source(for: entry), let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
-                guard
-                    let visibleIndexPath = tableView.indexPath(for: cell),
-                    visibleIndexPath == indexPath
-                else { return }
-                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                cell.setNeedsLayout()
-            }
-        }
+        loadCover(for: entry, into: cell, at: indexPath)
         cell.textLabel?.text = entry.manga.title
         cell.detailTextLabel?.text = historySubtitle(for: entry)
         cell.accessoryType = .disclosureIndicator
@@ -1929,6 +2042,43 @@ final class LegacyHistoryViewController: UITableViewController {
         return "\(chapterTitle)\n\(entry.sourceName)"
     }
 
+    private func loadCover(for entry: LegacyHistoryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        guard let source = source(for: entry) else { return }
+        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+            repairCover(for: entry, source: source)
+            return
+        }
+        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+            guard
+                let self = self,
+                let visibleIndexPath = self.tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+            if image == nil {
+                self.repairCover(for: entry, source: source)
+            }
+        }
+    }
+
+    private func repairCover(for entry: LegacyHistoryEntry, source: AidokuRunnerLegacySource) {
+        guard !pendingCoverRepairs.contains(entry.key) else { return }
+        pendingCoverRepairs.insert(entry.key)
+        source.runner.getMangaUpdate(manga: entry.manga, needsDetails: true, needsChapters: false) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.pendingCoverRepairs.remove(entry.key)
+                guard case .success(let updatedManga) = result else { return }
+                let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
+                guard mergedManga.coverURL(relativeTo: source.urls.first) != nil else { return }
+                LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+            }
+        }
+    }
+
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -1941,6 +2091,7 @@ final class LegacyUpdatesViewController: UITableViewController {
     private var entries: [LegacyUpdateEntry] = []
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
+    private var pendingCoverRepairs = Set<String>()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1983,6 +2134,7 @@ final class LegacyUpdatesViewController: UITableViewController {
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
         cell.detailTextLabel?.numberOfLines = 2
         guard !entries.isEmpty else {
+            cell.imageView?.image = nil
             cell.textLabel?.text = "No new chapters recorded."
             cell.detailTextLabel?.text = "Use Library Update to check saved manga."
             cell.accessoryType = .none
@@ -1990,6 +2142,7 @@ final class LegacyUpdatesViewController: UITableViewController {
             return cell
         }
         let entry = entries[indexPath.row]
+        loadCover(for: entry, into: cell, at: indexPath)
         cell.textLabel?.text = entry.manga.title
         let dateText = DateFormatter.localizedString(from: entry.dateFound, dateStyle: .short, timeStyle: .short)
         cell.detailTextLabel?.text = "\(entry.chapter.legacyFormattedTitle)\n\(entry.sourceName) - \(dateText)"
@@ -2019,6 +2172,43 @@ final class LegacyUpdatesViewController: UITableViewController {
     ) {
         guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
         LegacyUpdateStore.shared.remove(key: entries[indexPath.row].key)
+    }
+
+    private func loadCover(for entry: LegacyUpdateEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        guard let source = sources.first(where: { $0.key == entry.sourceKey }) else { return }
+        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+            repairCover(for: entry, source: source)
+            return
+        }
+        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+            guard
+                let self = self,
+                let visibleIndexPath = self.tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+            if image == nil {
+                self.repairCover(for: entry, source: source)
+            }
+        }
+    }
+
+    private func repairCover(for entry: LegacyUpdateEntry, source: AidokuRunnerLegacySource) {
+        guard !pendingCoverRepairs.contains(entry.key) else { return }
+        pendingCoverRepairs.insert(entry.key)
+        source.runner.getMangaUpdate(manga: entry.manga, needsDetails: true, needsChapters: false) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.pendingCoverRepairs.remove(entry.key)
+                guard case .success(let updatedManga) = result else { return }
+                let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
+                guard mergedManga.coverURL(relativeTo: source.urls.first) != nil else { return }
+                LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+            }
+        }
     }
 
     @objc private func confirmClear() {
@@ -5012,7 +5202,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 self.isLoading = false
                 switch result {
                     case .success(let updatedManga):
-                        self.manga = self.filteredManga(updatedManga)
+                        self.manga = self.filteredManga(self.manga.mergedWithUpdate(updatedManga))
+                        LegacyLibraryStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
+                        LegacyHistoryStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
+                        LegacyUpdateStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
                         self.errorMessage = nil
                     case .failure(let error):
                         self.errorMessage = error.localizedDescription
