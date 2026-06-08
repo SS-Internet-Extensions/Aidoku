@@ -13,6 +13,7 @@ import SDWebImageWebPCoder
 @UIApplicationMain
 final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+    private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
 
     func application(
         _ application: UIApplication,
@@ -28,6 +29,28 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        NotificationCenter.default.post(name: Notification.Name("AidokuLegacyMemoryTrimRequested"), object: nil)
+        aidokuLegacyTrimVolatileCaches()
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        beginShortBackgroundTask(application)
+        NotificationCenter.default.post(name: Notification.Name("AidokuLegacyAppDidEnterBackground"), object: nil)
+        aidokuLegacyTrimVolatileCaches()
+    }
+
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        NotificationCenter.default.post(name: Notification.Name("AidokuLegacyAppWillEnterForeground"), object: nil)
+        endShortBackgroundTask(application)
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        NotificationCenter.default.post(name: Notification.Name("AidokuLegacyAppDidEnterBackground"), object: nil)
+        aidokuLegacyTrimVolatileCaches()
+        endShortBackgroundTask(application)
+    }
+
     private func registerDefaults() {
         let isLegacyIPadAir = UIDevice.current.isFirstGenerationIPadAir
         UserDefaults.standard.register(
@@ -35,11 +58,12 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.downsampleImages": isLegacyIPadAir,
                 "AidokuLegacy.reader.fitToScreen": true,
                 "AidokuLegacy.reader.mode": "verticalFit",
-                "AidokuLegacy.reader.maxImageHeight": isLegacyIPadAir ? 1100 : 2200,
+                "AidokuLegacy.reader.maxImageHeight": isLegacyIPadAir ? 900 : 2200,
                 "AidokuLegacy.reader.prefetchPages": isLegacyIPadAir ? 0 : 1,
                 "AidokuLegacy.reader.backgroundColor": "black",
                 "AidokuLegacy.reader.showPageNumber": true,
                 "AidokuLegacy.reader.showTapZones": true,
+                "AidokuLegacy.reader.restoreLastSession": true,
                 "AidokuLegacy.appearance.darkTheme": false,
                 "AidokuLegacy.library.automaticUpdates": false
             ]
@@ -48,6 +72,19 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
 
     private func registerImageCoders() {
         SDImageCodersManager.shared.addCoder(SDImageWebPCoder.shared)
+    }
+
+    private func beginShortBackgroundTask(_ application: UIApplication) {
+        guard backgroundTaskIdentifier == .invalid else { return }
+        backgroundTaskIdentifier = application.beginBackgroundTask(withName: "AidokuLegacyBackgroundTrim") { [weak self] in
+            self?.endShortBackgroundTask(application)
+        }
+    }
+
+    private func endShortBackgroundTask(_ application: UIApplication) {
+        guard backgroundTaskIdentifier != .invalid else { return }
+        application.endBackgroundTask(backgroundTaskIdentifier)
+        backgroundTaskIdentifier = .invalid
     }
 }
 

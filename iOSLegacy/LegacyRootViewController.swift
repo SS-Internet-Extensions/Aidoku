@@ -14,6 +14,7 @@ import avif
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
+private let aidokuLegacyImageDecodeQueue = DispatchQueue(label: "AidokuLegacy.imageDecode", qos: .utility)
 
 private func aidokuLegacyIsLowMemoryMode() -> Bool {
     if UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") {
@@ -23,7 +24,7 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
-    let lowMemoryLimit: CGFloat = 1100
+    let lowMemoryLimit: CGFloat = 900
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
@@ -77,10 +78,10 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     configuration.requestCachePolicy = .returnCacheDataElseLoad
     configuration.timeoutIntervalForRequest = 25
     configuration.timeoutIntervalForResource = 60
-    configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
+    configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
     configuration.urlCache = URLCache(
-        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 1 * 1024 * 1024 : 6 * 1024 * 1024,
-        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 16 * 1024 * 1024 : 48 * 1024 * 1024,
+        memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 0 : 6 * 1024 * 1024,
+        diskCapacity: aidokuLegacyIsLowMemoryMode() ? 8 * 1024 * 1024 : 48 * 1024 * 1024,
         diskPath: "AidokuLegacyReaderImageCache"
     )
     configuration.httpAdditionalHeaders = [
@@ -89,6 +90,13 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     ]
     return URLSession(configuration: configuration)
 }()
+
+func aidokuLegacyTrimVolatileCaches() {
+    LegacyImageLoader.shared.clear()
+    aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
+    URLCache.shared.removeAllCachedResponses()
+    SDImageCache.shared.clearMemory()
+}
 
 enum LegacyPalette {
     static var isDarkTheme: Bool {
@@ -206,10 +214,15 @@ private extension Notification.Name {
     static let legacyAppearanceDidChange = Notification.Name("AidokuLegacyAppearanceDidChange")
     static let legacyDownloadsDidChange = Notification.Name("AidokuLegacyDownloadsDidChange")
     static let legacyUpdatesDidChange = Notification.Name("AidokuLegacyUpdatesDidChange")
+    static let legacyAppDidEnterBackground = Notification.Name("AidokuLegacyAppDidEnterBackground")
+    static let legacyAppWillEnterForeground = Notification.Name("AidokuLegacyAppWillEnterForeground")
+    static let legacyMemoryTrimRequested = Notification.Name("AidokuLegacyMemoryTrimRequested")
 }
 
 final class LegacyTabBarController: UITabBarController {
+    private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private var appearanceObserver: NSObjectProtocol?
+    private var didAttemptReaderRestore = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -246,6 +259,11 @@ final class LegacyTabBarController: UITabBarController {
         }
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        restoreLastReaderIfNeeded()
+    }
+
     deinit {
         if let appearanceObserver = appearanceObserver {
             NotificationCenter.default.removeObserver(appearanceObserver)
@@ -272,6 +290,28 @@ final class LegacyTabBarController: UITabBarController {
                 tableController.tableView.reloadData()
             }
         }
+    }
+
+    private func restoreLastReaderIfNeeded() {
+        guard !didAttemptReaderRestore else { return }
+        didAttemptReaderRestore = true
+        guard UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.restoreLastSession") else { return }
+        guard let entry = LegacyReaderSessionStore.shared.entry else { return }
+        guard Date().timeIntervalSince(entry.dateRead) < 7 * 24 * 60 * 60 else { return }
+        let sources = packageInstaller.loadInstalledSources()
+        guard let source = sources.first(where: { $0.key == entry.sourceKey }) else { return }
+        guard let navigationController = viewControllers?[1] as? UINavigationController else { return }
+        selectedIndex = 1
+        navigationController.popToRootViewController(animated: false)
+        navigationController.pushViewController(
+            LegacyReaderFactory.makeReader(
+                source: source,
+                manga: entry.manga,
+                chapter: entry.chapter,
+                initialPageIndex: entry.pageIndex
+            ),
+            animated: false
+        )
     }
 }
 
@@ -597,6 +637,45 @@ final class LegacyHistoryStore {
         if let data = try? encoder.encode(entries) {
             UserDefaults.standard.set(data, forKey: defaultsKey)
             NotificationCenter.default.post(name: .legacyHistoryDidChange, object: nil)
+        }
+    }
+}
+
+final class LegacyReaderSessionStore {
+    static let shared = LegacyReaderSessionStore()
+
+    private let defaultsKey = "AidokuLegacy.reader.lastSession"
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    var entry: LegacyHistoryEntry? {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let entry = try? decoder.decode(LegacyHistoryEntry.self, from: data)
+        else {
+            return nil
+        }
+        return entry
+    }
+
+    func save(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        pageIndex: Int,
+        pageCount: Int
+    ) {
+        let entry = LegacyHistoryEntry(
+            sourceKey: source.key,
+            sourceName: source.name,
+            manga: manga,
+            chapter: chapter,
+            pageIndex: max(0, pageIndex),
+            pageCount: max(pageCount, 0),
+            dateRead: Date()
+        )
+        if let data = try? encoder.encode(entry) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
         }
     }
 }
@@ -1303,10 +1382,10 @@ final class LegacyImageLoader {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 25
-        configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
+        configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
         configuration.urlCache = URLCache(
-            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 1 * 1024 * 1024 : 6 * 1024 * 1024,
-            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 16 * 1024 * 1024 : 48 * 1024 * 1024,
+            memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 512 * 1024 : 6 * 1024 * 1024,
+            diskCapacity: aidokuLegacyIsLowMemoryMode() ? 8 * 1024 * 1024 : 48 * 1024 * 1024,
             diskPath: "AidokuLegacyCoverImageCache"
         )
         configuration.httpAdditionalHeaders = [
@@ -1314,8 +1393,8 @@ final class LegacyImageLoader {
             "User-Agent": aidokuLegacyImageUserAgent
         ]
         session = URLSession(configuration: configuration)
-        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 32 : 120
-        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 6 * 1024 * 1024 : 28 * 1024 * 1024
+        cache.countLimit = aidokuLegacyIsLowMemoryMode() ? 16 : 120
+        cache.totalCostLimit = aidokuLegacyIsLowMemoryMode() ? 3 * 1024 * 1024 : 28 * 1024 * 1024
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -1385,7 +1464,7 @@ final class LegacyImageLoader {
         targetHeight: CGFloat,
         completion: @escaping (UIImage?) -> Void
     ) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let image = (try? Data(contentsOf: url)).flatMap { data -> UIImage? in
                 return autoreleasepool {
                     self?.makeImage(
@@ -5643,6 +5722,8 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private let overlayView = LegacyReaderOverlayView()
     private var barsHidden = false
     private var didShowTapOverlay = false
+    private var appStateObservers: [NSObjectProtocol] = []
+    private var didTrimVisibleImagesForBackground = false
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
     }
@@ -5673,6 +5754,12 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        for observer in appStateObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         edgesForExtendedLayout = []
@@ -5685,6 +5772,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
         tableView.addGestureRecognizer(tapRecognizer)
+        registerAppStateObservers()
         updateReaderMode()
         loadPages()
     }
@@ -5734,8 +5822,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
 
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
-        LegacyImageLoader.shared.clear()
-        aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
+        trimReaderMemory(keepCurrentPage: true)
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -5927,6 +6014,58 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         overlayView.updatePage(index: currentPageIndex, count: pages.count)
     }
 
+    private func registerAppStateObservers() {
+        let center = NotificationCenter.default
+        appStateObservers.append(
+            center.addObserver(forName: .legacyMemoryTrimRequested, object: nil, queue: .main) { [weak self] _ in
+                self?.trimReaderMemory(keepCurrentPage: true)
+            }
+        )
+        appStateObservers.append(
+            center.addObserver(forName: .legacyAppDidEnterBackground, object: nil, queue: .main) { [weak self] _ in
+                self?.handleAppDidEnterBackground()
+            }
+        )
+        appStateObservers.append(
+            center.addObserver(forName: .legacyAppWillEnterForeground, object: nil, queue: .main) { [weak self] _ in
+                self?.handleAppWillEnterForeground()
+            }
+        )
+    }
+
+    private func handleAppDidEnterBackground() {
+        if let currentPageIndex = currentPageIndex {
+            recordHistory(pageIndex: currentPageIndex, force: true)
+        }
+        didTrimVisibleImagesForBackground = true
+        trimReaderMemory(keepCurrentPage: false)
+    }
+
+    private func handleAppWillEnterForeground() {
+        guard didTrimVisibleImagesForBackground else { return }
+        didTrimVisibleImagesForBackground = false
+        let pageIndex = currentPageIndex
+        tableView.reloadData()
+        guard let pageIndex = pageIndex, pages.indices.contains(pageIndex) else { return }
+        DispatchQueue.main.async {
+            self.tableView.scrollToRow(at: IndexPath(row: pageIndex, section: 0), at: .top, animated: false)
+            self.currentPageIndex = pageIndex
+            self.updatePageHUD()
+        }
+    }
+
+    private func trimReaderMemory(keepCurrentPage: Bool) {
+        let current = keepCurrentPage ? currentPageIndex : nil
+        for cell in tableView.visibleCells {
+            guard let pageCell = cell as? LegacyPageImageCell else { continue }
+            let indexPath = tableView.indexPath(for: cell)
+            if indexPath?.row != current {
+                pageCell.releaseDecodedImage()
+            }
+        }
+        aidokuLegacyTrimVolatileCaches()
+    }
+
     private func enforceReaderContainer(relayout: Bool = true) {
         tabBarController?.tabBar.isHidden = true
         guard relayout else { return }
@@ -5997,6 +6136,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             pageIndex: pageIndex,
             pageCount: pages.count
         )
+        LegacyReaderSessionStore.shared.save(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            pageIndex: pageIndex,
+            pageCount: pages.count
+        )
         lastSavedHistoryPageIndex = pageIndex
         lastHistorySaveDate = now
     }
@@ -6019,6 +6165,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private let overlayView = LegacyReaderOverlayView()
     private var barsHidden = false
     private var didShowTapOverlay = false
+    private var appStateObservers: [NSObjectProtocol] = []
+    private var didTrimVisibleImagesForBackground = false
 
     init(
         source: AidokuRunnerLegacySource,
@@ -6040,6 +6188,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        for observer in appStateObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     override func viewDidLoad() {
@@ -6083,6 +6237,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         tapRecognizer.delegate = self
         collectionView.addGestureRecognizer(tapRecognizer)
 
+        registerAppStateObservers()
         loadPages()
     }
 
@@ -6134,9 +6289,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
-        LegacyImageLoader.shared.clear()
-        aidokuLegacyReaderImageSession.configuration.urlCache?.removeAllCachedResponses()
-        collectionView.reloadData()
+        trimReaderMemory(keepCurrentPage: true)
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -6360,6 +6513,60 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         overlayView.updatePage(index: currentPageIndex, count: pages.count)
     }
 
+    private func registerAppStateObservers() {
+        let center = NotificationCenter.default
+        appStateObservers.append(
+            center.addObserver(forName: .legacyMemoryTrimRequested, object: nil, queue: .main) { [weak self] _ in
+                self?.trimReaderMemory(keepCurrentPage: true)
+            }
+        )
+        appStateObservers.append(
+            center.addObserver(forName: .legacyAppDidEnterBackground, object: nil, queue: .main) { [weak self] _ in
+                self?.handleAppDidEnterBackground()
+            }
+        )
+        appStateObservers.append(
+            center.addObserver(forName: .legacyAppWillEnterForeground, object: nil, queue: .main) { [weak self] _ in
+                self?.handleAppWillEnterForeground()
+            }
+        )
+    }
+
+    private func handleAppDidEnterBackground() {
+        if let currentPageIndex = currentPageIndex {
+            recordHistory(pageIndex: currentPageIndex, force: true)
+        }
+        didTrimVisibleImagesForBackground = true
+        trimReaderMemory(keepCurrentPage: false)
+    }
+
+    private func handleAppWillEnterForeground() {
+        guard didTrimVisibleImagesForBackground else { return }
+        didTrimVisibleImagesForBackground = false
+        let pageIndex = currentPageIndex
+        collectionView.reloadData()
+        collectionView.layoutIfNeeded()
+        guard let pageIndex = pageIndex, pages.indices.contains(pageIndex) else { return }
+        DispatchQueue.main.async {
+            self.scrollTo(pageIndex: pageIndex, animated: false)
+            self.currentPageIndex = pageIndex
+            self.updatePageHUD()
+        }
+    }
+
+    private func trimReaderMemory(keepCurrentPage: Bool) {
+        let current = keepCurrentPage ? currentPageIndex : nil
+        for cell in collectionView.visibleCells {
+            guard let pageCell = cell as? LegacyPagedImageCell else { continue }
+            let indexPath = collectionView.indexPath(for: cell)
+            let pageIndex = indexPath.map { pageIndex(forVisualIndex: $0.item) }
+            if pageIndex != current {
+                pageCell.releaseDecodedImage()
+            }
+        }
+        aidokuLegacyTrimVolatileCaches()
+    }
+
     private func enforceReaderContainer(relayout: Bool = true) {
         tabBarController?.tabBar.isHidden = true
         guard relayout else { return }
@@ -6392,6 +6599,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         pendingHistorySaveWorkItem?.cancel()
         pendingHistorySaveWorkItem = nil
         LegacyHistoryStore.shared.update(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            pageIndex: pageIndex,
+            pageCount: pages.count
+        )
+        LegacyReaderSessionStore.shared.save(
             source: source,
             manga: manga,
             chapter: chapter,
@@ -6579,7 +6793,7 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
         backgroundColor = .black
         delegate = self
         minimumZoomScale = 1
-        maximumZoomScale = 4
+        maximumZoomScale = aidokuLegacyIsLowMemoryMode() ? 2.5 : 4
         bouncesZoom = true
         showsHorizontalScrollIndicator = false
         showsVerticalScrollIndicator = false
@@ -6674,16 +6888,20 @@ private final class LegacyPageImageCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        task?.cancel()
-        task = nil
-        representedLoadID = UUID()
-        pageImageView.image = nil
+        releaseDecodedImage()
         pageLabel.text = nil
         pageImageView.isHidden = false
         availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
         fitsViewport = false
         heightConstraint.constant = 420
         onHeightChange = nil
+    }
+
+    func releaseDecodedImage() {
+        task?.cancel()
+        task = nil
+        representedLoadID = UUID()
+        pageImageView.image = nil
     }
 
     func configure(
@@ -6737,7 +6955,7 @@ private final class LegacyPageImageCell: UITableViewCell {
 
     private func loadLocalImage(url: URL, loadID: UUID) {
         pageLabel.text = "Loading..."
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let data = try? Data(contentsOf: url)
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -6848,7 +7066,7 @@ private final class LegacyPageImageCell: UITableViewCell {
     }
 
     private func setProcessedImage(_ image: UIImage, loadID: UUID) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
                 LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
@@ -6865,7 +7083,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         loadID: UUID,
         failureMessage: String = "Image failed to load."
     ) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
@@ -6891,7 +7109,8 @@ private final class LegacyPageImageCell: UITableViewCell {
         } else {
             let width = max(availableSize.width, 1)
             let ratio = image.size.height / max(image.size.width, 1)
-            let targetHeight = min(max(width * ratio, 320), 2600)
+            let maximumHeight: CGFloat = aidokuLegacyIsLowMemoryMode() ? max(availableSize.height, 900) : 2600
+            let targetHeight = min(max(width * ratio, 320), maximumHeight)
             heightConstraint.constant = targetHeight
         }
         onHeightChange?()
@@ -6982,12 +7201,16 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        releaseDecodedImage()
+        pageLabel.text = nil
+        pageImageView.isHidden = false
+    }
+
+    func releaseDecodedImage() {
         task?.cancel()
         task = nil
         representedLoadID = UUID()
         pageImageView.image = nil
-        pageLabel.text = nil
-        pageImageView.isHidden = false
     }
 
     func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
@@ -7031,7 +7254,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 
     private func loadLocalImage(url: URL, loadID: UUID) {
         pageLabel.text = "Loading..."
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let data = try? Data(contentsOf: url)
             DispatchQueue.main.async {
                 guard let self = self, self.representedLoadID == loadID else { return }
@@ -7140,7 +7363,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     }
 
     private func setProcessedImage(_ image: UIImage, loadID: UUID) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let preparedImage = autoreleasepool {
                 LegacyImageLoader.shared.preparedImage(image, maxPixelHeight: maxHeight)
@@ -7157,7 +7380,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         loadID: UUID,
         failureMessage: String = "Image failed to load."
     ) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool {
                 LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: maxHeight)
