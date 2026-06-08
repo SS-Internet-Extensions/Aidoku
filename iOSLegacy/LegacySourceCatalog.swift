@@ -351,6 +351,209 @@ final class LegacySourceCatalogClient {
     }
 }
 
+struct LegacySourceUpdateResult {
+    let checkedCount: Int
+    let updatedCount: Int
+    let failedCount: Int
+    let skipped: Bool
+    let error: Error?
+}
+
+final class LegacySourceUpdateManager {
+    static let shared = LegacySourceUpdateManager()
+
+    private let lastAutomaticUpdateDefaultsKey = "AidokuLegacy.sources.lastAutomaticUpdate"
+    private let automaticUpdateInterval: TimeInterval = 6 * 60 * 60
+    private let catalogClient: LegacySourceCatalogClient
+    private let repositoryStore: LegacySourceRepositoryStore
+    private let packageInstaller: AidokuRunnerLegacyPackageInstaller
+    private var isUpdating = false
+
+    init(
+        catalogClient: LegacySourceCatalogClient = LegacySourceCatalogClient(),
+        repositoryStore: LegacySourceRepositoryStore = .shared,
+        packageInstaller: AidokuRunnerLegacyPackageInstaller = AidokuRunnerLegacyPackageInstaller()
+    ) {
+        self.catalogClient = catalogClient
+        self.repositoryStore = repositoryStore
+        self.packageInstaller = packageInstaller
+    }
+
+    func updateInstalledSourcesIfNeeded(
+        automatic: Bool,
+        progress: ((String?) -> Void)? = nil,
+        completion: ((LegacySourceUpdateResult) -> Void)? = nil
+    ) {
+        DispatchQueue.main.async {
+            if automatic {
+                guard UserDefaults.standard.bool(forKey: "AidokuLegacy.sources.automaticUpdates") else {
+                    completion?(LegacySourceUpdateResult(
+                        checkedCount: 0,
+                        updatedCount: 0,
+                        failedCount: 0,
+                        skipped: true,
+                        error: nil
+                    ))
+                    return
+                }
+                if
+                    let lastUpdate = UserDefaults.standard.object(forKey: self.lastAutomaticUpdateDefaultsKey) as? Date,
+                    Date().timeIntervalSince(lastUpdate) < self.automaticUpdateInterval
+                {
+                    completion?(LegacySourceUpdateResult(
+                        checkedCount: 0,
+                        updatedCount: 0,
+                        failedCount: 0,
+                        skipped: true,
+                        error: nil
+                    ))
+                    return
+                }
+            }
+            self.updateInstalledSources(automatic: automatic, progress: progress) { result in
+                if automatic && result.error == nil && !result.skipped {
+                    UserDefaults.standard.set(Date(), forKey: self.lastAutomaticUpdateDefaultsKey)
+                }
+                completion?(result)
+            }
+        }
+    }
+
+    func updateInstalledSources(
+        automatic _: Bool,
+        progress: ((String?) -> Void)? = nil,
+        completion: ((LegacySourceUpdateResult) -> Void)? = nil
+    ) {
+        DispatchQueue.main.async {
+            guard !self.isUpdating else {
+                completion?(LegacySourceUpdateResult(
+                    checkedCount: 0,
+                    updatedCount: 0,
+                    failedCount: 0,
+                    skipped: true,
+                    error: nil
+                ))
+                return
+            }
+
+            let installed = self.packageInstaller.loadInstalledSources()
+            guard !installed.isEmpty else {
+                completion?(LegacySourceUpdateResult(
+                    checkedCount: 0,
+                    updatedCount: 0,
+                    failedCount: 0,
+                    skipped: false,
+                    error: nil
+                ))
+                return
+            }
+
+            self.isUpdating = true
+            progress?("Checking source updates...")
+            self.catalogClient.fetchCatalogs(from: self.repositoryStore.repositoryURLs) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                        case .success(let catalog):
+                            var installedByKey: [String: AidokuRunnerLegacySource] = [:]
+                            for source in installed {
+                                installedByKey[source.key] = source
+                            }
+                            let updates = catalog.sources.filter { info in
+                                guard let current = installedByKey[info.id] else { return false }
+                                return info.version > current.version && info.resolvedDownloadURL != nil
+                            }
+                            self.installSourceUpdates(
+                                updates,
+                                checkedCount: installed.count,
+                                index: 0,
+                                updatedCount: 0,
+                                failedCount: 0,
+                                progress: progress
+                            ) { updateResult in
+                                self.isUpdating = false
+                                progress?(nil)
+                                if updateResult.updatedCount > 0 {
+                                    LegacyImageLoader.shared.clear()
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("AidokuLegacyInstalledSourcesDidChange"),
+                                        object: nil
+                                    )
+                                }
+                                completion?(updateResult)
+                            }
+                        case .failure(let error):
+                            self.isUpdating = false
+                            progress?(nil)
+                            completion?(LegacySourceUpdateResult(
+                                checkedCount: installed.count,
+                                updatedCount: 0,
+                                failedCount: 0,
+                                skipped: false,
+                                error: error
+                            ))
+                    }
+                }
+            }
+        }
+    }
+
+    private func installSourceUpdates(
+        _ updates: [LegacySourceInfo],
+        checkedCount: Int,
+        index: Int,
+        updatedCount: Int,
+        failedCount: Int,
+        progress: ((String?) -> Void)?,
+        completion: @escaping (LegacySourceUpdateResult) -> Void
+    ) {
+        guard index < updates.count else {
+            completion(LegacySourceUpdateResult(
+                checkedCount: checkedCount,
+                updatedCount: updatedCount,
+                failedCount: failedCount,
+                skipped: false,
+                error: nil
+            ))
+            return
+        }
+
+        let next = updates[index]
+        progress?("Updating \(next.name)...")
+        catalogClient.downloadPackage(for: next) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let packageURL):
+                    DispatchQueue.global(qos: .utility).async {
+                        let didInstall = (try? self.packageInstaller.installPackage(at: packageURL)) != nil
+                        DispatchQueue.main.async {
+                            self.installSourceUpdates(
+                                updates,
+                                checkedCount: checkedCount,
+                                index: index + 1,
+                                updatedCount: updatedCount + (didInstall ? 1 : 0),
+                                failedCount: failedCount + (didInstall ? 0 : 1),
+                                progress: progress,
+                                completion: completion
+                            )
+                        }
+                    }
+                case .failure:
+                    DispatchQueue.main.async {
+                        self.installSourceUpdates(
+                            updates,
+                            checkedCount: checkedCount,
+                            index: index + 1,
+                            updatedCount: updatedCount,
+                            failedCount: failedCount + 1,
+                            progress: progress,
+                            completion: completion
+                        )
+                    }
+            }
+        }
+    }
+}
+
 private struct CodableLegacySourceCatalog: Decodable {
     let name: String
     let feedbackURL: String?

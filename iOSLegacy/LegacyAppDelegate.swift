@@ -65,7 +65,8 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.showTapZones": true,
                 "AidokuLegacy.reader.restoreLastSession": true,
                 "AidokuLegacy.appearance.darkTheme": false,
-                "AidokuLegacy.library.automaticUpdates": false
+                "AidokuLegacy.library.automaticUpdates": false,
+                "AidokuLegacy.sources.automaticUpdates": true
             ]
         )
     }

@@ -223,6 +223,7 @@ final class LegacyTabBarController: UITabBarController {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private var appearanceObserver: NSObjectProtocol?
     private var didAttemptReaderRestore = false
+    private var didStartAutomaticSourceUpdate = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -262,6 +263,7 @@ final class LegacyTabBarController: UITabBarController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         restoreLastReaderIfNeeded()
+        updateInstalledSourcesIfNeeded()
     }
 
     deinit {
@@ -312,6 +314,12 @@ final class LegacyTabBarController: UITabBarController {
             ),
             animated: false
         )
+    }
+
+    private func updateInstalledSourcesIfNeeded() {
+        guard !didStartAutomaticSourceUpdate else { return }
+        didStartAutomaticSourceUpdate = true
+        LegacySourceUpdateManager.shared.updateInstalledSourcesIfNeeded(automatic: true)
     }
 }
 
@@ -1409,6 +1417,15 @@ final class LegacyImageLoader {
         session.configuration.urlCache?.removeAllCachedResponses()
     }
 
+    func removeCachedImage(for url: URL, source: AidokuRunnerLegacySource? = nil) {
+        cache.removeObject(forKey: url as NSURL)
+        let requests = [legacyFallbackImageRequest(url: url, source: source)]
+            + legacyFallbackImageRequests(url: url, source: source)
+        for request in requests {
+            session.configuration.urlCache?.removeCachedResponse(for: request)
+        }
+    }
+
     @discardableResult
     func load(
         url: URL,
@@ -1661,11 +1678,13 @@ final class LegacyLibraryViewController: UITableViewController {
     private let lastAutomaticUpdateDefaultsKey = "AidokuLegacy.library.lastAutomaticUpdate"
     private var entries: [LegacyLibraryEntry] = []
     private var sources: [AidokuRunnerLegacySource] = []
-    private var observer: NSObjectProtocol?
+    private var libraryObserver: NSObjectProtocol?
+    private var sourceObserver: NSObjectProtocol?
     private var isUpdatingLibrary = false
     private var activeCategory: String?
     private var sortOption = LegacyLibrarySortOption.current
     private var pendingCoverRepairs = Set<String>()
+    private var coverRepairAttempts: [String: Int] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1691,8 +1710,16 @@ final class LegacyLibraryViewController: UITableViewController {
 
         refreshControl = UIRefreshControl()
         refreshControl?.addTarget(self, action: #selector(updateLibraryManually), for: .valueChanged)
-        observer = NotificationCenter.default.addObserver(
+        libraryObserver = NotificationCenter.default.addObserver(
             forName: .legacyLibraryDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, !self.isUpdatingLibrary else { return }
+            self.reloadData()
+        }
+        sourceObserver = NotificationCenter.default.addObserver(
+            forName: .legacyInstalledSourcesDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -1707,8 +1734,11 @@ final class LegacyLibraryViewController: UITableViewController {
     }
 
     deinit {
-        if let observer = observer {
-            NotificationCenter.default.removeObserver(observer)
+        if let libraryObserver = libraryObserver {
+            NotificationCenter.default.removeObserver(libraryObserver)
+        }
+        if let sourceObserver = sourceObserver {
+            NotificationCenter.default.removeObserver(sourceObserver)
         }
     }
 
@@ -1815,34 +1845,58 @@ final class LegacyLibraryViewController: UITableViewController {
             repairCover(for: entry, source: source)
             return
         }
-        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+        let entryKey = entry.key
+        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self, weak cell] image in
             guard
                 let self = self,
+                let cell = cell,
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
-                visibleIndexPath == indexPath
+                visibleIndexPath == indexPath,
+                self.entries.indices.contains(indexPath.row),
+                self.entries[indexPath.row].key == entryKey
             else { return }
             cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
             cell.setNeedsLayout()
             if image == nil {
+                LegacyImageLoader.shared.removeCachedImage(for: coverURL, source: source)
                 self.repairCover(for: entry, source: source)
+            } else {
+                self.coverRepairAttempts[entryKey] = nil
             }
         }
     }
 
     private func repairCover(for entry: LegacyLibraryEntry, source: AidokuRunnerLegacySource) {
+        let attempts = coverRepairAttempts[entry.key] ?? 0
+        guard attempts < 2 else { return }
         guard !pendingCoverRepairs.contains(entry.key) else { return }
+        coverRepairAttempts[entry.key] = attempts + 1
         pendingCoverRepairs.insert(entry.key)
+        let oldCoverURL = entry.manga.coverURL(relativeTo: source.urls.first)
         source.runner.getMangaUpdate(manga: entry.manga, needsDetails: true, needsChapters: false) { [weak self] result in
             DispatchQueue.main.async {
-                self?.pendingCoverRepairs.remove(entry.key)
+                guard let self = self else { return }
+                self.pendingCoverRepairs.remove(entry.key)
                 guard case .success(let updatedManga) = result else { return }
                 let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
-                guard mergedManga.coverURL(relativeTo: source.urls.first) != nil else { return }
+                guard let newCoverURL = mergedManga.coverURL(relativeTo: source.urls.first) else { return }
+                if let oldCoverURL = oldCoverURL {
+                    LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
+                }
+                LegacyImageLoader.shared.removeCachedImage(for: newCoverURL, source: source)
                 LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                self.reloadVisibleLibraryEntry(with: entry.key)
             }
         }
+    }
+
+    private func reloadVisibleLibraryEntry(with key: String) {
+        guard let row = entries.firstIndex(where: { $0.key == key }) else { return }
+        let indexPath = IndexPath(row: row, section: 0)
+        guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
+        tableView.reloadRows(at: [indexPath], with: .none)
     }
 
     @objc private func openUpdates() {
@@ -2415,6 +2469,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case readerTapZones
         case darkTheme
         case automaticLibraryUpdates
+        case automaticSourceUpdates
         case downloads
         case createBackup
         case restoreBackup
@@ -2477,6 +2532,11 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.textLabel?.text = "Automatic Library Updates"
                 cell.detailTextLabel?.text = enabled ? "Fetch manga details and chapters when Library opens" : "Update saved manga manually"
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .automaticSourceUpdates:
+                let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.sources.automaticUpdates")
+                cell.textLabel?.text = "Automatic Source Updates"
+                cell.detailTextLabel?.text = enabled ? "Install source package updates when the app opens" : "Update installed sources manually"
+                cell.accessoryType = enabled ? .checkmark : .none
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
@@ -2530,6 +2590,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 NotificationCenter.default.post(name: .legacyAppearanceDidChange, object: nil)
             case .automaticLibraryUpdates:
                 let key = "AidokuLegacy.library.automaticUpdates"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .automaticSourceUpdates:
+                let key = "AidokuLegacy.sources.automaticUpdates"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .downloads:
@@ -2954,6 +3018,7 @@ final class LegacyRootViewController: UITableViewController {
                 switch installResult {
                     case .success(let source):
                         self.reloadInstalledSources()
+                        LegacyImageLoader.shared.clear()
                         NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
                         self.showInstallSuccess(source)
                     case .failure(let error):
@@ -3001,7 +3066,6 @@ extension LegacyRootViewController: UISearchResultsUpdating {
 }
 
 final class LegacyInstalledSourcesViewController: UITableViewController {
-    private let catalogClient = LegacySourceCatalogClient()
     private let repositoryStore = LegacySourceRepositoryStore.shared
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private var sources: [AidokuRunnerLegacySource]
@@ -3028,6 +3092,12 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
         navigationController?.navigationBar.prefersLargeTitles = true
         refreshControl = UIRefreshControl()
         refreshControl?.addTarget(self, action: #selector(reloadSources), for: .valueChanged)
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Repos",
+            style: .plain,
+            target: self,
+            action: #selector(showRepositoryOptions)
+        )
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(title: "Batch Search", style: .plain, target: self, action: #selector(openBatchSearch)),
             UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateInstalledSources))
@@ -3104,65 +3174,81 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
     }
 
     @objc private func updateInstalledSources() {
-        let installed = sources.isEmpty ? packageInstaller.loadInstalledSources() : sources
-        guard !installed.isEmpty else {
+        guard !(sources.isEmpty ? packageInstaller.loadInstalledSources() : sources).isEmpty else {
             showAlert(title: "No Sources", message: "Install sources before checking for updates.")
             return
         }
-        navigationItem.prompt = "Checking source updates..."
-        catalogClient.fetchCatalogs(from: repositoryStore.repositoryURLs) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                switch result {
-                    case .success(let catalog):
-                        let installedByKey = Dictionary(uniqueKeysWithValues: installed.map { ($0.key, $0) })
-                        let updates = catalog.sources.filter { info in
-                            guard let current = installedByKey[info.id] else { return false }
-                            return info.version > current.version && info.resolvedDownloadURL != nil
-                        }
-                        guard !updates.isEmpty else {
-                            self.navigationItem.prompt = nil
-                            self.showAlert(title: "Sources Current", message: "Installed sources are already up to date.")
-                            return
-                        }
-                        self.installSourceUpdates(updates, updatedCount: 0)
-                    case .failure(let error):
-                        self.navigationItem.prompt = nil
-                        self.showAlert(title: "Update Failed", message: error.localizedDescription)
-                }
+        LegacySourceUpdateManager.shared.updateInstalledSources(automatic: false, progress: { [weak self] message in
+            self?.navigationItem.prompt = message
+        }, completion: { [weak self] result in
+            guard let self = self else { return }
+            self.reloadSources()
+            if let error = result.error {
+                self.showAlert(title: "Update Failed", message: error.localizedDescription)
+            } else if result.skipped {
+                self.showAlert(title: "Update Skipped", message: "A source update is already running.")
+            } else if result.updatedCount == 0 && result.failedCount == 0 {
+                self.showAlert(title: "Sources Current", message: "Installed sources are already up to date.")
+            } else {
+                let failedText = result.failedCount > 0 ? " \(result.failedCount) failed." : ""
+                self.showAlert(
+                    title: "Sources Updated",
+                    message: "Updated \(result.updatedCount) source package(s).\(failedText)"
+                )
             }
-        }
+        })
     }
 
-    private func installSourceUpdates(_ updates: [LegacySourceInfo], updatedCount: Int) {
-        guard let next = updates.first else {
-            navigationItem.prompt = nil
-            reloadSources()
-            NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
-            showAlert(title: "Sources Updated", message: "Updated \(updatedCount) source package(s).")
-            return
+    @objc private func showRepositoryOptions() {
+        let repos = repositoryStore.repositoryURLs.map { $0.absoluteString }.joined(separator: "\n")
+        let alert = UIAlertController(title: "Source Repositories", message: repos, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Add Source Repo", style: .default) { [weak self] _ in
+            self?.promptForRepository()
+        })
+        alert.addAction(UIAlertAction(title: "Check Source Updates", style: .default) { [weak self] _ in
+            self?.updateInstalledSources()
+        })
+        alert.addAction(UIAlertAction(title: "Reset to Community Repo", style: .destructive) { [weak self] _ in
+            self?.repositoryStore.resetToDefault()
+            self?.updateInstalledSources()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.leftBarButtonItem
         }
-        navigationItem.prompt = "Updating \(next.name)..."
-        catalogClient.downloadPackage(for: next) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                switch result {
-                    case .success(let packageURL):
-                        self.installDownloadedUpdate(packageURL, remaining: Array(updates.dropFirst()), updatedCount: updatedCount)
-                    case .failure:
-                        self.installSourceUpdates(Array(updates.dropFirst()), updatedCount: updatedCount)
-                }
-            }
-        }
+        present(alert, animated: true)
     }
 
-    private func installDownloadedUpdate(_ packageURL: URL, remaining: [LegacySourceInfo], updatedCount: Int) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let didInstall = (try? self.packageInstaller.installPackage(at: packageURL)) != nil
-            DispatchQueue.main.async {
-                self.installSourceUpdates(remaining, updatedCount: updatedCount + (didInstall ? 1 : 0))
-            }
+    private func promptForRepository() {
+        let alert = UIAlertController(
+            title: "Add Source Repo",
+            message: "Paste an index.min.json URL or a GitHub owner/repo URL.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "https://example.com/sources/index.min.json"
+            textField.keyboardType = .URL
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
         }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+            guard
+                let self = self,
+                let value = alert?.textFields?.first?.text,
+                let url = self.repositoryStore.normalizedURL(from: value)
+            else {
+                self?.showAlert(title: "Invalid Repo", message: "Enter a valid source repository URL.")
+                return
+            }
+            self.repositoryStore.add(url)
+            if self.sources.isEmpty {
+                self.showAlert(title: "Repo Added", message: "Open Browse to install sources from this repository.")
+            } else {
+                self.updateInstalledSources()
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func showAlert(title: String, message: String) {
