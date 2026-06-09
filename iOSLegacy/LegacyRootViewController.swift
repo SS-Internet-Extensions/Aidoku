@@ -5591,6 +5591,113 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
     }
 }
 
+final class LegacyChapterDownloadPickerViewController: UITableViewController, UISearchResultsUpdating {
+    private let sourceKey: String
+    private let mangaKey: String
+    private let chapters: [AidokuRunnerLegacyChapter]
+    private let onSelect: (AidokuRunnerLegacyChapter) -> Void
+    private var filteredChapters: [AidokuRunnerLegacyChapter] = []
+    private let searchController = UISearchController(searchResultsController: nil)
+
+    init(
+        sourceKey: String,
+        mangaKey: String,
+        chapters: [AidokuRunnerLegacyChapter],
+        onSelect: @escaping (AidokuRunnerLegacyChapter) -> Void
+    ) {
+        self.sourceKey = sourceKey
+        self.mangaKey = mangaKey
+        self.chapters = chapters
+        self.filteredChapters = chapters
+        self.onSelect = onSelect
+        super.init(style: .plain)
+        title = "Download Chapter"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 72
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search chapters"
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return max(1, filteredChapters.count)
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "ChapterDownloadCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "ChapterDownloadCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+        cell.imageView?.image = nil
+
+        guard filteredChapters.indices.contains(indexPath.row) else {
+            cell.textLabel?.text = "No matching chapters."
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let chapter = filteredChapters[indexPath.row]
+        let downloaded = LegacyDownloadStore.shared.hasChapter(
+            sourceKey: sourceKey,
+            mangaKey: mangaKey,
+            chapterKey: chapter.key
+        )
+        var subtitle = chapter.legacyFormattedSubtitle(sourceKey: sourceKey) ?? ""
+        if downloaded {
+            subtitle = subtitle.isEmpty ? "Downloaded" : "\(subtitle)\nDownloaded"
+        }
+        cell.textLabel?.text = chapter.legacyFormattedTitle
+        cell.detailTextLabel?.text = subtitle.isEmpty ? nil : subtitle
+        cell.accessoryType = downloaded ? .checkmark : .none
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard filteredChapters.indices.contains(indexPath.row) else { return }
+        let chapter = filteredChapters[indexPath.row]
+        navigationController?.popViewController(animated: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [onSelect] in
+            onSelect(chapter)
+        }
+    }
+
+    func updateSearchResults(for searchController: UISearchController) {
+        let query = searchController.searchBar.text?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        if query.isEmpty {
+            filteredChapters = chapters
+        } else {
+            filteredChapters = chapters.filter { chapter in
+                chapter.legacyFormattedTitle.lowercased().contains(query)
+                    || (chapter.legacyFormattedSubtitle(sourceKey: sourceKey)?.lowercased().contains(query) ?? false)
+                    || (chapter.language?.lowercased().contains(query) ?? false)
+                    || chapter.key.lowercased().contains(query)
+            }
+        }
+        tableView.reloadData()
+    }
+}
+
 final class LegacyMangaDetailViewController: UITableViewController {
     private enum ReadingAction {
         case resume(LegacyHistoryEntry)
@@ -5885,6 +5992,9 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 self?.download(chapters: [first])
             })
         }
+        alert.addAction(UIAlertAction(title: "Download Specific Chapter", style: .default) { [weak self] _ in
+            self?.showSpecificChapterDownloadPicker(chapters: readableChapters)
+        })
         alert.addAction(UIAlertAction(title: "Download All Chapters", style: .default) { [weak self] _ in
             self?.download(chapters: readableChapters)
         })
@@ -5896,6 +6006,17 @@ final class LegacyMangaDetailViewController: UITableViewController {
             popover.barButtonItem = downloadButton
         }
         present(alert, animated: true)
+    }
+
+    private func showSpecificChapterDownloadPicker(chapters: [AidokuRunnerLegacyChapter]) {
+        let picker = LegacyChapterDownloadPickerViewController(
+            sourceKey: source.key,
+            mangaKey: manga.key,
+            chapters: chapters
+        ) { [weak self] chapter in
+            self?.download(chapters: [chapter])
+        }
+        navigationController?.pushViewController(picker, animated: true)
     }
 
     private func download(chapters: [AidokuRunnerLegacyChapter]) {
