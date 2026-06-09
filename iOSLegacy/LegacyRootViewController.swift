@@ -6625,9 +6625,21 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         updatePageHUD()
     }
 
+    private func jumpToPage(_ pageIndex: Int, animated: Bool) {
+        guard pages.indices.contains(pageIndex) else { return }
+        tableView.scrollToRow(at: IndexPath(row: pageIndex, section: 0), at: .top, animated: animated)
+        currentPageIndex = pageIndex
+        preloadPages(around: pageIndex, includeCurrent: true)
+        recordHistory(pageIndex: pageIndex, force: true)
+        updatePageHUD()
+    }
+
     private func installOverlayIfNeeded() {
         guard overlayView.superview == nil else { return }
         guard let hostView = navigationController?.view ?? view else { return }
+        overlayView.onPageSelected = { [weak self] pageIndex in
+            self?.jumpToPage(pageIndex, animated: false)
+        }
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         hostView.addSubview(overlayView)
         NSLayoutConstraint.activate([
@@ -7147,9 +7159,21 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         updatePageHUD()
     }
 
+    private func jumpToPage(_ pageIndex: Int, animated: Bool) {
+        guard pages.indices.contains(pageIndex) else { return }
+        scrollTo(pageIndex: pageIndex, animated: animated)
+        currentPageIndex = pageIndex
+        preloadPages(around: pageIndex, includeCurrent: true)
+        recordHistory(pageIndex: pageIndex, force: true)
+        updatePageHUD()
+    }
+
     private func installOverlayIfNeeded() {
         guard overlayView.superview == nil else { return }
         guard let hostView = navigationController?.view ?? view else { return }
+        overlayView.onPageSelected = { [weak self] pageIndex in
+            self?.jumpToPage(pageIndex, animated: false)
+        }
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         hostView.addSubview(overlayView)
         NSLayoutConstraint.activate([
@@ -7313,22 +7337,29 @@ private final class LegacyReaderOverlayView: UIView {
     private let rightZone = UILabel()
     private let modeLabel = UILabel()
     private let pageLabel = UILabel()
+    private let sliderContainer = UIView()
+    private let pageSlider = UISlider()
     private var hideWorkItem: DispatchWorkItem?
+    private var pageCount = 0
+    private var isUpdatingSlider = false
+    var onPageSelected: ((Int) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isUserInteractionEnabled = false
+        isUserInteractionEnabled = true
         backgroundColor = .clear
 
         configureZone(leftZone, text: "Prev", color: UIColor.orange.withAlphaComponent(0.55))
         configureZone(rightZone, text: "Next", color: UIColor.green.withAlphaComponent(0.50))
         configurePill(modeLabel, fontSize: 22)
         configurePill(pageLabel, fontSize: 15)
+        configureSlider()
         pageLabel.alpha = 0.95
 
         addSubview(leftZone)
         addSubview(rightZone)
         addSubview(modeLabel)
+        addSubview(sliderContainer)
         addSubview(pageLabel)
 
         NSLayoutConstraint.activate([
@@ -7349,7 +7380,16 @@ private final class LegacyReaderOverlayView: UIView {
 
             pageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             pageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -28),
-            pageLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 82)
+            pageLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 82),
+
+            sliderContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 26),
+            sliderContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -26),
+            sliderContainer.bottomAnchor.constraint(equalTo: pageLabel.topAnchor, constant: -10),
+            sliderContainer.heightAnchor.constraint(equalToConstant: 38),
+
+            pageSlider.leadingAnchor.constraint(equalTo: sliderContainer.leadingAnchor, constant: 14),
+            pageSlider.trailingAnchor.constraint(equalTo: sliderContainer.trailingAnchor, constant: -14),
+            pageSlider.centerYAnchor.constraint(equalTo: sliderContainer.centerYAnchor)
         ])
         hideGuide(animated: false)
     }
@@ -7359,7 +7399,15 @@ private final class LegacyReaderOverlayView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard sliderContainer.alpha > 0.01, !sliderContainer.isHidden else { return false }
+        let sliderFrame = sliderContainer.frame.insetBy(dx: -8, dy: -12)
+        return sliderFrame.contains(point)
+    }
+
     func updatePage(index: Int?, count: Int) {
+        pageCount = count
+        updateSlider(index: index, count: count)
         guard aidokuLegacyReaderShowsPageNumber(), count > 0, let index = index else {
             pageLabel.text = nil
             pageLabel.alpha = 0
@@ -7400,6 +7448,7 @@ private final class LegacyReaderOverlayView: UIView {
             self.rightZone.alpha = 0
             self.modeLabel.alpha = 0
             self.pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
+            self.sliderContainer.alpha = self.pageCount > 1 ? 0.92 : 0
         }
         if animated {
             UIView.animate(withDuration: 0.25, animations: changes)
@@ -7432,6 +7481,47 @@ private final class LegacyReaderOverlayView: UIView {
         label.numberOfLines = 1
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.layoutMargins = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+    }
+
+    private func configureSlider() {
+        sliderContainer.translatesAutoresizingMaskIntoConstraints = false
+        sliderContainer.backgroundColor = UIColor.black.withAlphaComponent(0.56)
+        sliderContainer.layer.cornerRadius = 10
+        sliderContainer.layer.masksToBounds = true
+        sliderContainer.alpha = 0
+
+        pageSlider.translatesAutoresizingMaskIntoConstraints = false
+        pageSlider.minimumValue = 0
+        pageSlider.maximumValue = 0
+        pageSlider.isContinuous = false
+        pageSlider.minimumTrackTintColor = LegacyPalette.accent
+        pageSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.30)
+        pageSlider.thumbTintColor = UIColor.white
+        pageSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
+        sliderContainer.addSubview(pageSlider)
+    }
+
+    private func updateSlider(index: Int?, count: Int) {
+        isUpdatingSlider = true
+        pageSlider.minimumValue = 0
+        pageSlider.maximumValue = Float(max(count - 1, 0))
+        if let index = index {
+            pageSlider.value = Float(min(max(index, 0), max(count - 1, 0)))
+        } else {
+            pageSlider.value = 0
+        }
+        pageSlider.isEnabled = count > 1
+        sliderContainer.alpha = count > 1 ? 0.92 : 0
+        isUpdatingSlider = false
+    }
+
+    @objc private func sliderValueChanged() {
+        guard !isUpdatingSlider, pageCount > 1 else { return }
+        let pageIndex = min(max(Int(round(pageSlider.value)), 0), pageCount - 1)
+        pageSlider.setValue(Float(pageIndex), animated: false)
+        pageLabel.text = "\(pageIndex + 1) / \(pageCount)"
+        pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
+        onPageSelected?(pageIndex)
     }
 }
 
