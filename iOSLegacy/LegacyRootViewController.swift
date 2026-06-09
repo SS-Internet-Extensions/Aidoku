@@ -1817,6 +1817,12 @@ final class LegacyImageLoader {
         }
     }
 
+    func removeCachedImages(for urls: [URL], source: AidokuRunnerLegacySource? = nil) {
+        for url in urls {
+            removeCachedImage(for: url, source: source)
+        }
+    }
+
     @discardableResult
     func load(
         url: URL,
@@ -1864,6 +1870,53 @@ final class LegacyImageLoader {
             fallbackRequests: legacyFallbackImageRequests(url: url, source: nil),
             completion: completion
         )
+    }
+
+    @discardableResult
+    func loadCover(
+        urls: [URL],
+        source: AidokuRunnerLegacySource,
+        targetHeight: CGFloat,
+        completion: @escaping (UIImage?) -> Void
+    ) -> URLSessionDataTask? {
+        let uniqueURLs = urls.reduce(into: [URL]()) { result, url in
+            if !result.contains(url) {
+                result.append(url)
+            }
+        }
+        guard let firstURL = uniqueURLs.first else {
+            completion(nil)
+            return nil
+        }
+        let cacheKey = firstURL as NSURL
+        if let cached = cache.object(forKey: cacheKey) {
+            completion(cached)
+            return nil
+        }
+        if firstURL.isFileURL {
+            loadLocalFile(url: firstURL, cacheKey: cacheKey, targetHeight: targetHeight, completion: completion)
+            return nil
+        }
+
+        let fallbackRequests = uniqueURLs.flatMap { legacyFallbackImageRequests(url: $0, source: source) }
+        source.runner.getImageRequest(url: firstURL, context: nil) { [weak self] result in
+            let request: URLRequest
+            switch result {
+                case .success(let imageRequest):
+                    request = imageRequest.urlRequest(source: source, fallbackURL: firstURL)
+                case .failure:
+                    request = legacyFallbackImageRequest(url: firstURL, source: source)
+            }
+            self?.load(
+                request: request,
+                cacheKey: cacheKey,
+                targetHeight: targetHeight,
+                forceDownsample: true,
+                fallbackRequests: fallbackRequests.filter { !legacyImageRequestsMatch($0, request) },
+                completion: completion
+            )
+        }
+        return nil
     }
 
     private func loadLocalFile(
@@ -2251,12 +2304,17 @@ final class LegacyLibraryViewController: UITableViewController {
     private func loadCover(for entry: LegacyLibraryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
         guard let source = source(for: entry) else { return }
-        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+        let coverURLs = entry.manga.coverURLCandidates(relativeTo: source.urls.first)
+        guard !coverURLs.isEmpty else {
             repairCover(for: entry, source: source)
             return
         }
         let entryKey = entry.key
-        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self, weak cell] image in
+        LegacyImageLoader.shared.loadCover(
+            urls: coverURLs,
+            source: source,
+            targetHeight: 130
+        ) { [weak self, weak cell] image in
             guard
                 let self = self,
                 let cell = cell,
@@ -2268,7 +2326,7 @@ final class LegacyLibraryViewController: UITableViewController {
             cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
             cell.setNeedsLayout()
             if image == nil {
-                LegacyImageLoader.shared.removeCachedImage(for: coverURL, source: source)
+                LegacyImageLoader.shared.removeCachedImages(for: coverURLs, source: source)
                 self.repairCover(for: entry, source: source)
             } else {
                 self.coverRepairAttempts[entryKey] = nil
@@ -2289,11 +2347,11 @@ final class LegacyLibraryViewController: UITableViewController {
                 self.pendingCoverRepairs.remove(entry.key)
                 guard case .success(let updatedManga) = result else { return }
                 let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
-                guard let newCoverURL = mergedManga.coverURL(relativeTo: source.urls.first) else { return }
+                guard !mergedManga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else { return }
                 if let oldCoverURL = oldCoverURL {
                     LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
                 }
-                LegacyImageLoader.shared.removeCachedImage(for: newCoverURL, source: source)
+                LegacyImageLoader.shared.removeCachedImages(for: mergedManga.coverURLCandidates(relativeTo: source.urls.first), source: source)
                 LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
@@ -2593,11 +2651,16 @@ final class LegacyHistoryViewController: UITableViewController {
     private func loadCover(for entry: LegacyHistoryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
         guard let source = source(for: entry) else { return }
-        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+        let coverURLs = entry.manga.coverURLCandidates(relativeTo: source.urls.first)
+        guard !coverURLs.isEmpty else {
             repairCover(for: entry, source: source)
             return
         }
-        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+        LegacyImageLoader.shared.loadCover(
+            urls: coverURLs,
+            source: source,
+            targetHeight: 130
+        ) { [weak self] image in
             guard
                 let self = self,
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
@@ -2725,11 +2788,16 @@ final class LegacyUpdatesViewController: UITableViewController {
     private func loadCover(for entry: LegacyUpdateEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
         guard let source = sources.first(where: { $0.key == entry.sourceKey }) else { return }
-        guard let coverURL = entry.manga.coverURL(relativeTo: source.urls.first) else {
+        let coverURLs = entry.manga.coverURLCandidates(relativeTo: source.urls.first)
+        guard !coverURLs.isEmpty else {
             repairCover(for: entry, source: source)
             return
         }
-        LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { [weak self] image in
+        LegacyImageLoader.shared.loadCover(
+            urls: coverURLs,
+            source: source,
+            targetHeight: 130
+        ) { [weak self] image in
             guard
                 let self = self,
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
@@ -3778,15 +3846,17 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
 
         let manga = section.entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
-        if let coverURL = manga.coverURL(relativeTo: section.source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, source: section.source, targetHeight: 130) { image in
-                guard
-                    let visibleIndexPath = tableView.indexPath(for: cell),
-                    visibleIndexPath == indexPath
-                else { return }
-                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                cell.setNeedsLayout()
-            }
+        LegacyImageLoader.shared.loadCover(
+            urls: manga.coverURLCandidates(relativeTo: section.source.urls.first),
+            source: section.source,
+            targetHeight: 130
+        ) { image in
+            guard
+                let visibleIndexPath = tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
         }
         cell.textLabel?.text = manga.title
         cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description ?? section.source.name
@@ -4880,8 +4950,11 @@ final class LegacySourceHomeViewController: UITableViewController {
 
     private func loadCover(for manga: AidokuRunnerLegacyManga, into cell: UITableViewCell, at indexPath: IndexPath) {
         cell.imageView?.image = LegacyImageLoader.placeholder()
-        guard let url = manga.coverURL(relativeTo: source.urls.first) else { return }
-        LegacyImageLoader.shared.load(url: url, source: source, targetHeight: 130) { image in
+        LegacyImageLoader.shared.loadCover(
+            urls: manga.coverURLCandidates(relativeTo: source.urls.first),
+            source: source,
+            targetHeight: 130
+        ) { image in
             guard
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
                 visibleIndexPath == indexPath
@@ -5018,15 +5091,17 @@ final class LegacyMangaListViewController: UITableViewController {
 
         let manga = entries[indexPath.row]
         cell.imageView?.image = LegacyImageLoader.placeholder()
-        if let coverURL = manga.coverURL(relativeTo: source.urls.first) {
-            LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 130) { image in
-                guard
-                    let visibleIndexPath = tableView.indexPath(for: cell),
-                    visibleIndexPath == indexPath
-                else { return }
-                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                cell.setNeedsLayout()
-            }
+        LegacyImageLoader.shared.loadCover(
+            urls: manga.coverURLCandidates(relativeTo: source.urls.first),
+            source: source,
+            targetHeight: 130
+        ) { image in
+            guard
+                let visibleIndexPath = tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
         }
         cell.textLabel?.text = manga.title
         cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description
@@ -5783,15 +5858,17 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
         if indexPath.section == 0 {
             cell.imageView?.image = LegacyImageLoader.placeholder()
-            if let coverURL = manga.coverURL(relativeTo: source.urls.first) {
-                LegacyImageLoader.shared.load(url: coverURL, source: source, targetHeight: 180) { image in
-                    guard
-                        let visibleIndexPath = tableView.indexPath(for: cell),
-                        visibleIndexPath == indexPath
-                    else { return }
-                    cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                    cell.setNeedsLayout()
-                }
+            LegacyImageLoader.shared.loadCover(
+                urls: manga.coverURLCandidates(relativeTo: source.urls.first),
+                source: source,
+                targetHeight: 180
+            ) { image in
+                guard
+                    let visibleIndexPath = tableView.indexPath(for: cell),
+                    visibleIndexPath == indexPath
+                else { return }
+                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+                cell.setNeedsLayout()
             }
             cell.textLabel?.text = manga.title
             cell.detailTextLabel?.text = errorMessage ?? manga.description ?? manga.authors?.joined(separator: ", ") ?? "No description."
@@ -6321,7 +6398,9 @@ private func legacyFallbackImageRequests(
     excluding primaryRequest: URLRequest? = nil
 ) -> [URLRequest] {
     var requests: [URLRequest] = []
-    let urls = [url] + legacyHitomiThumbnailFallbackURLs(from: url)
+        let urls = [url]
+            + legacyMangaDexCoverFallbackURLs(from: url)
+            + legacyHitomiThumbnailFallbackURLs(from: url)
     for candidateURL in urls {
         let request = legacyFallbackImageRequest(url: candidateURL, source: source)
         if let primaryRequest = primaryRequest, legacyImageRequestsMatch(request, primaryRequest) {
@@ -6351,6 +6430,50 @@ private func aidokuLegacyIsHitomiImage(url: URL, source: AidokuRunnerLegacySourc
     }
     let host = url.host?.lowercased() ?? ""
     return host.contains("hitomi.la") || host.contains("gold-usergeneratedcontent.net")
+}
+
+private func legacyMangaDexCoverFallbackURLs(from url: URL) -> [URL] {
+    let host = url.host?.lowercased() ?? ""
+    let pathComponents = url.pathComponents
+    guard
+        host.contains("mangadex.org"),
+        let coversIndex = pathComponents.firstIndex(where: { $0.lowercased() == "covers" }),
+        pathComponents.indices.contains(coversIndex + 2)
+    else {
+        return []
+    }
+
+    let mangaID = pathComponents[coversIndex + 1]
+    let fileName = pathComponents[coversIndex + 2]
+    let fileNames = legacyMangaDexCoverFileNameCandidates(from: fileName)
+    var urls: [URL] = []
+    for host in ["uploads.mangadex.org", "mangadex.org"] {
+        for fileName in fileNames {
+            guard let candidateURL = URL(string: "https://\(host)/covers/\(mangaID)/\(fileName)") else { continue }
+            if candidateURL != url, !urls.contains(candidateURL) {
+                urls.append(candidateURL)
+            }
+        }
+    }
+    return urls
+}
+
+private func legacyMangaDexCoverFileNameCandidates(from fileName: String) -> [String] {
+    let trimmed = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [] }
+    let withoutSizeSuffix = trimmed
+        .replacingOccurrences(of: ".512.jpg", with: ".jpg", options: [.caseInsensitive])
+        .replacingOccurrences(of: ".256.jpg", with: ".jpg", options: [.caseInsensitive])
+    var candidates: [String] = []
+    for candidate in [
+        trimmed,
+        withoutSizeSuffix,
+        legacyPath(withoutSizeSuffix, insertingSuffixBeforeExtension: ".512"),
+        legacyPath(withoutSizeSuffix, insertingSuffixBeforeExtension: ".256")
+    ] where !candidates.contains(candidate) {
+        candidates.append(candidate)
+    }
+    return candidates
 }
 
 private func legacyHitomiThumbnailFallbackURLs(from url: URL) -> [URL] {
@@ -6410,6 +6533,13 @@ private func legacyHitomiThumbnailHosts(for currentHost: String) -> [String] {
 private func legacyPath(_ path: String, replacingExtensionWith pathExtension: String) -> String {
     let basePath = (path as NSString).deletingPathExtension
     return basePath + "." + pathExtension
+}
+
+private func legacyPath(_ path: String, insertingSuffixBeforeExtension suffix: String) -> String {
+    let basePath = (path as NSString).deletingPathExtension
+    let pathExtension = (path as NSString).pathExtension
+    guard !pathExtension.isEmpty else { return path + suffix }
+    return basePath + suffix + "." + pathExtension
 }
 
 private enum LegacyReaderFactory {
@@ -7574,7 +7704,7 @@ private final class LegacyReaderOverlayView: UIView {
             leftZone.alpha = 0
             rightZone.alpha = 0
             modeLabel.alpha = 0
-            pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && pageLabel.text != nil ? 0.95 : 0
+            pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() && pageLabel.text != nil ? 0.95 : 0
             return
         }
         modeLabel.text = modeTitle
@@ -7582,7 +7712,7 @@ private final class LegacyReaderOverlayView: UIView {
             self.leftZone.alpha = 1
             self.rightZone.alpha = 1
             self.modeLabel.alpha = 1
-            self.pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
+            self.pageLabel.alpha = !self.controlsHidden && aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
         }
         let workItem = DispatchWorkItem { [weak self] in
             self?.hideGuide(animated: true)
@@ -8559,27 +8689,41 @@ private enum LegacyChapterFormatters {
 
 private extension AidokuRunnerLegacyManga {
     func coverURL(relativeTo baseURL: URL?) -> URL? {
+        return coverURLCandidates(relativeTo: baseURL).first
+    }
+
+    func coverURLCandidates(relativeTo baseURL: URL?) -> [URL] {
         guard let cover = cover?.trimmingCharacters(in: .whitespacesAndNewlines), !cover.isEmpty else {
-            return nil
+            return []
         }
+        var urls: [URL] = []
         for candidate in Self.urlCandidates(from: cover) {
             if let url = URL(string: candidate), url.scheme != nil {
-                return url
+                Self.appendURL(url, to: &urls)
             }
         }
         if let baseURL = baseURL {
             for candidate in Self.urlCandidates(from: cover) {
                 if let url = URL(string: candidate, relativeTo: baseURL)?.absoluteURL {
-                    return url
+                    Self.appendURL(url, to: &urls)
                 }
             }
         }
         for candidate in Self.urlCandidates(from: cover) {
             if let url = URL(string: candidate) {
-                return url
+                Self.appendURL(url, to: &urls)
             }
         }
-        return nil
+        let initialURLs = urls
+        for url in initialURLs {
+            for fallbackURL in legacyMangaDexCoverFallbackURLs(from: url) {
+                Self.appendURL(fallbackURL, to: &urls)
+            }
+        }
+        for url in Self.inferredMangaDexCoverURLs(from: cover, baseURL: baseURL, mangaKey: key) {
+            Self.appendURL(url, to: &urls)
+        }
+        return urls
     }
 
     private static func urlCandidates(from value: String) -> [String] {
@@ -8615,6 +8759,35 @@ private extension AidokuRunnerLegacyManga {
     private static func appendUnique(_ value: String, to values: inout [String]) {
         guard !values.contains(value) else { return }
         values.append(value)
+    }
+
+    private static func appendURL(_ url: URL, to urls: inout [URL]) {
+        guard !urls.contains(url) else { return }
+        urls.append(url)
+    }
+
+    private static func inferredMangaDexCoverURLs(from cover: String, baseURL: URL?, mangaKey: String) -> [URL] {
+        guard looksLikeMangaDex(baseURL: baseURL, mangaKey: mangaKey) else { return [] }
+        let normalized = cover.replacingOccurrences(of: "\\/", with: "/")
+        let fileName = (normalized as NSString).lastPathComponent
+        guard fileName.contains(".") else { return [] }
+
+        var urls: [URL] = []
+        for fileName in legacyMangaDexCoverFileNameCandidates(from: fileName) {
+            guard let url = URL(string: "https://uploads.mangadex.org/covers/\(mangaKey)/\(fileName)") else { continue }
+            appendURL(url, to: &urls)
+        }
+        return urls
+    }
+
+    private static func looksLikeMangaDex(baseURL: URL?, mangaKey: String) -> Bool {
+        if baseURL?.host?.lowercased().contains("mangadex") == true {
+            return true
+        }
+        return mangaKey.range(
+            of: #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#,
+            options: .regularExpression
+        ) != nil
     }
 }
 
