@@ -1898,6 +1898,7 @@ final class LegacyImageLoader {
         targetHeight: CGFloat,
         forceDownsample: Bool,
         fallbackRequests: [URLRequest] = [],
+        retriesRemaining: Int = 1,
         completion: @escaping (UIImage?) -> Void
     ) -> URLSessionDataTask {
         let task = session.dataTask(with: request) { [weak self] data, response, _ in
@@ -1922,8 +1923,26 @@ final class LegacyImageLoader {
                     targetHeight: targetHeight,
                     forceDownsample: forceDownsample,
                     fallbackRequests: remainingFallbackRequests,
+                    retriesRemaining: retriesRemaining,
                     completion: completion
                 )
+                return
+            }
+            if image == nil, retriesRemaining > 0, let self = self {
+                self.session.configuration.urlCache?.removeCachedResponse(for: request)
+                var retryRequest = request
+                retryRequest.cachePolicy = .reloadIgnoringLocalCacheData
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.35) {
+                    self.load(
+                        request: retryRequest,
+                        cacheKey: key,
+                        targetHeight: targetHeight,
+                        forceDownsample: forceDownsample,
+                        fallbackRequests: [],
+                        retriesRemaining: retriesRemaining - 1,
+                        completion: completion
+                    )
+                }
                 return
             }
             if let image = image {
@@ -2259,7 +2278,7 @@ final class LegacyLibraryViewController: UITableViewController {
 
     private func repairCover(for entry: LegacyLibraryEntry, source: AidokuRunnerLegacySource) {
         let attempts = coverRepairAttempts[entry.key] ?? 0
-        guard attempts < 2 else { return }
+        guard attempts < 4 else { return }
         guard !pendingCoverRepairs.contains(entry.key) else { return }
         coverRepairAttempts[entry.key] = attempts + 1
         pendingCoverRepairs.insert(entry.key)
@@ -2285,6 +2304,11 @@ final class LegacyLibraryViewController: UITableViewController {
 
     private func reloadVisibleLibraryEntry(with key: String) {
         guard let row = entries.firstIndex(where: { $0.key == key }) else { return }
+        guard let refreshedEntry = LegacyLibraryStore.shared.entry(sourceKey: entries[row].sourceKey, mangaKey: entries[row].manga.key) else {
+            reloadData()
+            return
+        }
+        entries[row] = refreshedEntry
         let indexPath = IndexPath(row: row, section: 0)
         guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
         tableView.reloadRows(at: [indexPath], with: .none)
