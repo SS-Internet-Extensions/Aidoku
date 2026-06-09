@@ -15,6 +15,15 @@ import avif
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
 private let aidokuLegacyImageDecodeQueue = DispatchQueue(label: "AidokuLegacy.imageDecode", qos: .utility)
+private var aidokuLegacyLastMemoryPressureDate = Date.distantPast
+
+func aidokuLegacyMarkMemoryPressure() {
+    aidokuLegacyLastMemoryPressureDate = Date()
+}
+
+private func aidokuLegacyHasRecentMemoryPressure() -> Bool {
+    return Date().timeIntervalSince(aidokuLegacyLastMemoryPressureDate) < 45
+}
 
 private func aidokuLegacyIsLowMemoryMode() -> Bool {
     if UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages") {
@@ -67,14 +76,23 @@ private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIIma
 private func aidokuLegacyReaderPrefetchCount() -> Int {
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.prefetchPages")
     if aidokuLegacyIsLowMemoryMode() {
-        return max(2, min(storedValue, 2))
+        if aidokuLegacyHasRecentMemoryPressure() {
+            return 0
+        }
+        return max(1, min(storedValue, 1))
     }
     let bounded = min(max(storedValue, 0), 2)
     return bounded
 }
 
 private func aidokuLegacyReaderRetainedPageDelay() -> TimeInterval {
-    return aidokuLegacyIsLowMemoryMode() ? 8 : 15
+    if aidokuLegacyHasRecentMemoryPressure() {
+        return 1.5
+    }
+    if aidokuLegacyIsLowMemoryMode() {
+        return aidokuLegacyReaderUpscaleImages() ? 2.5 : 4
+    }
+    return 15
 }
 
 private func aidokuLegacyReaderShowsPageNumber() -> Bool {
@@ -186,6 +204,7 @@ private final class LegacyReaderImagePipeline {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            aidokuLegacyMarkMemoryPressure()
             self?.clear()
         }
     }
@@ -413,8 +432,8 @@ private final class LegacyReaderImagePipeline {
 
     private func configureCacheLimits() {
         if aidokuLegacyIsLowMemoryMode() {
-            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 4 : 6
-            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 12 * 1024 * 1024 : 6 * 1024 * 1024
+            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 3 : 4
+            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 8 * 1024 * 1024 : 6 * 1024 * 1024
         } else {
             cache.countLimit = 24
             cache.totalCostLimit = 48 * 1024 * 1024
@@ -5566,6 +5585,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private var errorMessage: String?
     private lazy var bookmarkButton = UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
     private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
+    private lazy var languageButton = UIBarButtonItem(title: "Language", style: .plain, target: self, action: #selector(showChapterLanguagePicker))
 
     init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
         self.source = source
@@ -5585,8 +5605,9 @@ final class LegacyMangaDetailViewController: UITableViewController {
         tableView.backgroundColor = LegacyPalette.background
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 96
-        navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton]
+        navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton, languageButton]
         updateBookmarkButton()
+        updateLanguageButton()
         loadDetails()
     }
 
@@ -5757,7 +5778,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 self.isLoading = false
                 switch result {
                     case .success(let updatedManga):
-                        self.manga = self.filteredManga(self.manga.mergedWithUpdate(updatedManga))
+                        self.manga = self.manga.mergedWithUpdate(updatedManga)
                         LegacyLibraryStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
                         LegacyHistoryStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
                         LegacyUpdateStore.shared.updateMangaMetadata(manga: self.manga, source: self.source)
@@ -5766,6 +5787,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                         self.errorMessage = error.localizedDescription
                 }
                 self.updateBookmarkButton()
+                self.updateLanguageButton()
                 self.tableView.reloadData()
             }
         }
@@ -5783,6 +5805,48 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private func updateBookmarkButton() {
         let inLibrary = LegacyLibraryStore.shared.contains(sourceKey: source.key, mangaKey: manga.key)
         bookmarkButton.title = inLibrary ? "Remove" : "Add"
+    }
+
+    private func updateLanguageButton() {
+        let chapters = manga.chapters ?? []
+        let languages = availableChapterLanguages(in: chapters)
+        languageButton.isEnabled = languages.count > 1
+        if let language = activeChapterLanguage(in: chapters) {
+            languageButton.title = language.uppercased()
+        } else {
+            languageButton.title = "Language"
+        }
+    }
+
+    @objc private func showChapterLanguagePicker() {
+        let chapters = manga.chapters ?? []
+        let languages = availableChapterLanguages(in: chapters)
+        guard languages.count > 1 else { return }
+
+        let selectedLanguage = activeChapterLanguage(in: chapters)
+        let alert = UIAlertController(title: "Chapter Language", message: manga.title, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "All Languages", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            UserDefaults.standard.removeObject(forKey: self.chapterLanguageDefaultsKey)
+            self.updateLanguageButton()
+            self.tableView.reloadData()
+        })
+        for language in languages {
+            let count = chapters.filter { $0.normalizedLanguage == language && !$0.locked }.count
+            let suffix = selectedLanguage == language ? " Selected" : ""
+            let title = "\(languageTitle(language)) (\(count))\(suffix)"
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                guard let self = self else { return }
+                UserDefaults.standard.set(language, forKey: self.chapterLanguageDefaultsKey)
+                self.updateLanguageButton()
+                self.tableView.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = languageButton
+        }
+        present(alert, animated: true)
     }
 
     @objc private func showDownloadOptions() {
@@ -5875,13 +5939,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private var displayChapters: [AidokuRunnerLegacyChapter] {
         let chapters = manga.chapters ?? []
-        let selectedLanguages = selectedChapterLanguages()
-        guard selectedLanguages.count == 1, let selectedLanguage = selectedLanguages.first else {
+        guard let language = activeChapterLanguage(in: chapters) else {
             return chapters
         }
-        let filtered = chapters.filter { chapter in
-            chapter.normalizedLanguage == selectedLanguage || chapter.normalizedLanguage == nil
-        }
+        let filtered = chapters.filter { $0.normalizedLanguage == language || $0.normalizedLanguage == nil }
         return filtered.isEmpty ? chapters : filtered
     }
 
@@ -5894,15 +5955,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
         guard grouped.keys.count > 1 else {
             return [ChapterGroup(title: "Chapters", chapters: chapters)]
         }
-        let selectedLanguages = selectedChapterLanguages()
-        let orderedKeys = grouped.keys.sorted { lhs, rhs in
-            let lhsIndex = selectedLanguages.firstIndex(of: lhs) ?? Int.max
-            let rhsIndex = selectedLanguages.firstIndex(of: rhs) ?? Int.max
-            if lhsIndex != rhsIndex {
-                return lhsIndex < rhsIndex
-            }
-            return languageTitle(lhs).localizedCaseInsensitiveCompare(languageTitle(rhs)) == .orderedAscending
-        }
+        let knownKeys = orderedLanguages(grouped.keys.filter { $0 != "unknown" })
+        let orderedKeys = grouped.keys.contains("unknown") ? knownKeys + ["unknown"] : knownKeys
         return orderedKeys.map { key in
             ChapterGroup(title: "Chapters - \(languageTitle(key))", chapters: grouped[key] ?? [])
         }
@@ -5913,29 +5967,85 @@ final class LegacyMangaDetailViewController: UITableViewController {
         return chapters.sorted(by: legacyChapterAscending).first
     }
 
-    private func filteredManga(_ manga: AidokuRunnerLegacyManga) -> AidokuRunnerLegacyManga {
-        let selectedLanguages = selectedChapterLanguages()
-        guard selectedLanguages.count == 1, let selectedLanguage = selectedLanguages.first else {
-            return manga
-        }
-        guard let chapters = manga.chapters else {
-            return manga
-        }
-        let filtered = chapters.filter { chapter in
-            chapter.normalizedLanguage == selectedLanguage || chapter.normalizedLanguage == nil
-        }
-        guard !filtered.isEmpty else {
-            return manga
-        }
-        var copy = manga
-        copy.chapters = filtered
-        return copy
-    }
-
     private func selectedChapterLanguages() -> [String] {
         return (UserDefaults.standard.stringArray(forKey: "\(source.key).languages") ?? [])
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
+    }
+
+    private var chapterLanguageDefaultsKey: String {
+        return "\(source.key).\(manga.key).chapterLanguage"
+    }
+
+    private func activeChapterLanguage(in chapters: [AidokuRunnerLegacyChapter]) -> String? {
+        let languages = availableChapterLanguages(in: chapters)
+        guard !languages.isEmpty else { return nil }
+        let savedLanguage = UserDefaults.standard.string(forKey: chapterLanguageDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if let savedLanguage = savedLanguage, languages.contains(savedLanguage) {
+            return savedLanguage
+        }
+        let selectedLanguages = selectedChapterLanguages()
+        if
+            selectedLanguages.count == 1,
+            let selectedLanguage = selectedLanguages.first,
+            languages.contains(selectedLanguage)
+        {
+            return selectedLanguage
+        }
+        return languages.count == 1 ? languages[0] : nil
+    }
+
+    private func availableChapterLanguages(in chapters: [AidokuRunnerLegacyChapter]) -> [String] {
+        var languages: [String] = []
+        for chapter in chapters {
+            guard let language = chapter.normalizedLanguage else { continue }
+            if !languages.contains(language) {
+                languages.append(language)
+            }
+        }
+        let selectedLanguages = selectedChapterLanguages()
+        if !selectedLanguages.isEmpty {
+            let selected = languages.filter { selectedLanguages.contains($0) }
+            if !selected.isEmpty {
+                languages = selected
+            }
+        }
+        return orderedLanguages(languages)
+    }
+
+    private func orderedLanguages(_ languages: [String]) -> [String] {
+        let preferredLanguages = preferredChapterLanguages()
+        return languages.sorted { lhs, rhs in
+            let lhsIndex = preferredLanguages.firstIndex(of: lhs) ?? Int.max
+            let rhsIndex = preferredLanguages.firstIndex(of: rhs) ?? Int.max
+            if lhsIndex != rhsIndex {
+                return lhsIndex < rhsIndex
+            }
+            return languageTitle(lhs).localizedCaseInsensitiveCompare(languageTitle(rhs)) == .orderedAscending
+        }
+    }
+
+    private func preferredChapterLanguages() -> [String] {
+        var values: [String] = []
+        for identifier in Locale.preferredLanguages {
+            let normalizedIdentifier = identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+            if !values.contains(normalizedIdentifier) {
+                values.append(normalizedIdentifier)
+            }
+            let locale = Locale(identifier: identifier)
+            if
+                let languageCode = locale.languageCode?.lowercased(),
+                !values.contains(languageCode)
+            {
+                values.append(languageCode)
+            }
+        }
+        for language in selectedChapterLanguages() where !values.contains(language) {
+            values.append(language)
+        }
+        return values
     }
 
     private func languageTitle(_ language: String) -> String {

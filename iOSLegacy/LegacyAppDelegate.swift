@@ -30,6 +30,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        aidokuLegacyMarkMemoryPressure()
         NotificationCenter.default.post(name: Notification.Name("AidokuLegacyMemoryTrimRequested"), object: nil)
         aidokuLegacyTrimVolatileCaches()
     }

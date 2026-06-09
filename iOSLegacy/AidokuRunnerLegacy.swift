@@ -200,8 +200,17 @@ final class AidokuRunnerLegacySource {
             appendUnique(languageCode, to: &preferredValues)
         }
 
+        var languagesByNormalizedValue: [String: String] = [:]
+        for language in languages {
+            let normalizedLanguage = language.lowercased()
+            if languagesByNormalizedValue[normalizedLanguage] == nil {
+                languagesByNormalizedValue[normalizedLanguage] = language
+            }
+        }
+
         var result: [String] = []
-        for language in languages where preferredValues.contains(language) {
+        for preferredValue in preferredValues {
+            guard let language = languagesByNormalizedValue[preferredValue.lowercased()] else { continue }
             appendUnique(language, to: &result)
         }
 
