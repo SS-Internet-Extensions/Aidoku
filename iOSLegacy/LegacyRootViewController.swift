@@ -6695,6 +6695,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     @objc private func toggleBars() {
         barsHidden.toggle()
         navigationController?.setNavigationBarHidden(barsHidden, animated: true)
+        overlayView.setControlsHidden(barsHidden, animated: true)
         enforceReaderContainer()
         UIView.animate(withDuration: 0.2, animations: {
             self.setNeedsStatusBarAppearanceUpdate()
@@ -6769,6 +6770,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             overlayView.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
             overlayView.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
         ])
+        overlayView.setControlsHidden(barsHidden, animated: false)
         updatePageHUD()
     }
 
@@ -7232,6 +7234,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     @objc private func toggleBars() {
         barsHidden.toggle()
         navigationController?.setNavigationBarHidden(barsHidden, animated: true)
+        overlayView.setControlsHidden(barsHidden, animated: true)
         enforceReaderContainer()
         UIView.animate(withDuration: 0.2, animations: {
             self.setNeedsStatusBarAppearanceUpdate()
@@ -7303,6 +7306,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             overlayView.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
             overlayView.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
         ])
+        overlayView.setControlsHidden(barsHidden, animated: false)
         updatePageHUD()
     }
 
@@ -7463,6 +7467,7 @@ private final class LegacyReaderOverlayView: UIView {
     private var hideWorkItem: DispatchWorkItem?
     private var pageCount = 0
     private var isUpdatingSlider = false
+    private var controlsHidden = false
     var onPageSelected: ((Int) -> Void)?
 
     override init(frame: CGRect) {
@@ -7521,25 +7526,50 @@ private final class LegacyReaderOverlayView: UIView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard !controlsHidden else { return false }
         guard sliderContainer.alpha > 0.01, !sliderContainer.isHidden else { return false }
         let sliderFrame = sliderContainer.frame.insetBy(dx: -8, dy: -12)
         return sliderFrame.contains(point)
     }
 
+    func setControlsHidden(_ hidden: Bool, animated: Bool) {
+        controlsHidden = hidden
+        if hidden {
+            hideWorkItem?.cancel()
+            hideWorkItem = nil
+        }
+        let changes = {
+            self.leftZone.alpha = 0
+            self.rightZone.alpha = 0
+            self.modeLabel.alpha = 0
+            self.pageLabel.alpha = hidden || !aidokuLegacyReaderShowsPageNumber() || self.pageLabel.text == nil ? 0 : 0.95
+            self.sliderContainer.alpha = hidden || self.pageCount <= 1 ? 0 : 0.92
+        }
+        if animated {
+            UIView.animate(withDuration: 0.18, animations: changes)
+        } else {
+            changes()
+        }
+    }
+
     func updatePage(index: Int?, count: Int) {
         pageCount = count
         updateSlider(index: index, count: count)
-        guard aidokuLegacyReaderShowsPageNumber(), count > 0, let index = index else {
+        guard count > 0, let index = index else {
             pageLabel.text = nil
             pageLabel.alpha = 0
             return
         }
         pageLabel.text = "\(min(max(index + 1, 1), count)) / \(count)"
-        pageLabel.alpha = 0.95
+        pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
     }
 
     func showGuide(modeTitle: String) {
         hideWorkItem?.cancel()
+        guard !controlsHidden else {
+            setControlsHidden(true, animated: false)
+            return
+        }
         guard aidokuLegacyReaderShowsTapZones() else {
             leftZone.alpha = 0
             rightZone.alpha = 0
@@ -7568,8 +7598,8 @@ private final class LegacyReaderOverlayView: UIView {
             self.leftZone.alpha = 0
             self.rightZone.alpha = 0
             self.modeLabel.alpha = 0
-            self.pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
-            self.sliderContainer.alpha = self.pageCount > 1 ? 0.92 : 0
+            self.pageLabel.alpha = !self.controlsHidden && aidokuLegacyReaderShowsPageNumber() && self.pageLabel.text != nil ? 0.95 : 0
+            self.sliderContainer.alpha = !self.controlsHidden && self.pageCount > 1 ? 0.92 : 0
         }
         if animated {
             UIView.animate(withDuration: 0.25, animations: changes)
@@ -7632,7 +7662,7 @@ private final class LegacyReaderOverlayView: UIView {
             pageSlider.value = 0
         }
         pageSlider.isEnabled = count > 1
-        sliderContainer.alpha = count > 1 ? 0.92 : 0
+        sliderContainer.alpha = !controlsHidden && count > 1 ? 0.92 : 0
         isUpdatingSlider = false
     }
 
@@ -7641,7 +7671,7 @@ private final class LegacyReaderOverlayView: UIView {
         let pageIndex = min(max(Int(round(pageSlider.value)), 0), pageCount - 1)
         pageSlider.setValue(Float(pageIndex), animated: false)
         pageLabel.text = "\(pageIndex + 1) / \(pageCount)"
-        pageLabel.alpha = aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
+        pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
         onPageSelected?(pageIndex)
     }
 }
