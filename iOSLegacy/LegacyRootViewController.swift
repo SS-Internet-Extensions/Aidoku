@@ -33,12 +33,12 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
-    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? 1200 : 768
+    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? 1536 : 768
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
     if storedValue > 0 {
-        if aidokuLegacyIsLowMemoryMode(), aidokuLegacyReaderUpscaleImages(), storedValue <= 768 {
+        if aidokuLegacyIsLowMemoryMode(), aidokuLegacyReaderUpscaleImages(), storedValue <= 1200 {
             return limit
         }
         return min(CGFloat(storedValue), limit)
@@ -79,9 +79,9 @@ private func aidokuLegacyReaderPrefetchCount() -> Int {
         if aidokuLegacyHasRecentMemoryPressure() {
             return 0
         }
-        return max(1, min(storedValue, 1))
+        return max(1, min(storedValue, 2))
     }
-    let bounded = min(max(storedValue, 0), 2)
+    let bounded = min(max(storedValue, 0), 3)
     return bounded
 }
 
@@ -174,7 +174,7 @@ private let aidokuLegacyReaderImageSession: URLSession = {
     configuration.requestCachePolicy = .returnCacheDataElseLoad
     configuration.timeoutIntervalForRequest = 25
     configuration.timeoutIntervalForResource = 60
-    configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 1 : 3
+    configuration.httpMaximumConnectionsPerHost = aidokuLegacyIsLowMemoryMode() ? 2 : 3
     configuration.urlCache = URLCache(
         memoryCapacity: aidokuLegacyIsLowMemoryMode() ? 256 * 1024 : 6 * 1024 * 1024,
         diskCapacity: aidokuLegacyIsLowMemoryMode() ? 12 * 1024 * 1024 : 48 * 1024 * 1024,
@@ -432,8 +432,8 @@ private final class LegacyReaderImagePipeline {
 
     private func configureCacheLimits() {
         if aidokuLegacyIsLowMemoryMode() {
-            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 3 : 4
-            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 8 * 1024 * 1024 : 6 * 1024 * 1024
+            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 4 : 5
+            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 16 * 1024 * 1024 : 10 * 1024 * 1024
         } else {
             cache.countLimit = 24
             cache.totalCostLimit = 48 * 1024 * 1024
@@ -7446,6 +7446,8 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
         get { imageView.image }
         set {
             imageView.image = newValue
+            imageView.contentScaleFactor = UIScreen.main.scale
+            imageView.layer.contentsScale = UIScreen.main.scale
             setZoomScale(1, animated: false)
             setNeedsLayout()
         }
@@ -7466,6 +7468,8 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
 
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .black
+        imageView.contentScaleFactor = UIScreen.main.scale
+        imageView.layer.contentsScale = UIScreen.main.scale
         addSubview(imageView)
     }
 
