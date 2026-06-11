@@ -20,6 +20,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: legacy-ios12-release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-14
@@ -119,7 +123,13 @@ jobs:
           TAG="legacy-ios12-latest"
           TITLE="Aidoku Legacy iOS 12 Latest"
           git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
+          if ! git push -f origin "refs/tags/$TAG"; then
+            git fetch --tags --force origin "$TAG"
+            REMOTE_TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$REMOTE_TAG_SHA" != "$GITHUB_SHA" ]; then
+              git push -f origin "refs/tags/$TAG"
+            fi
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$IPA_PATH" --clobber
           else
