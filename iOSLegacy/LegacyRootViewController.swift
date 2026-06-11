@@ -33,7 +33,9 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 }
 
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
-    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? 1536 : 768
+    let nativeScreenLimit = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+    let sharpLowMemoryLimit = min(max(nativeScreenLimit, 1536), 2048)
+    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? sharpLowMemoryLimit : 1024
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
@@ -5666,6 +5668,68 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
     }
 }
 
+private final class LegacyReaderPageActionPresenter {
+    static func present(
+        image: UIImage,
+        pageIndex: Int,
+        from viewController: UIViewController,
+        sourceView: UIView?
+    ) {
+        let alert = UIAlertController(
+            title: "Page \(pageIndex + 1)",
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Copy Image", style: .default) { _ in
+            UIPasteboard.general.image = image
+            viewController.showLegacyReaderAlert(title: "Copied", message: "Page image copied to the clipboard.")
+        })
+        alert.addAction(UIAlertAction(title: "Download Image", style: .default) { _ in
+            UIImageWriteToSavedPhotosAlbum(
+                image,
+                viewController,
+                #selector(UIViewController.legacyReaderImage(_:didFinishSavingWithError:contextInfo:)),
+                nil
+            )
+        })
+        alert.addAction(UIAlertAction(title: "Share Image", style: .default) { _ in
+            let activity = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+            if let popover = activity.popoverPresentationController {
+                popover.sourceView = sourceView ?? viewController.view
+                popover.sourceRect = (sourceView ?? viewController.view).bounds
+            }
+            viewController.present(activity, animated: true)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sourceView ?? viewController.view
+            popover.sourceRect = (sourceView ?? viewController.view).bounds
+        }
+        viewController.present(alert, animated: true)
+    }
+}
+
+private extension UIViewController {
+    @objc func legacyReaderImage(
+        _ image: UIImage,
+        didFinishSavingWithError error: Error?,
+        contextInfo: UnsafeRawPointer
+    ) {
+        if let error = error {
+            showLegacyReaderAlert(title: "Save Failed", message: error.localizedDescription)
+        } else {
+            showLegacyReaderAlert(title: "Saved", message: "Page image saved to Photos.")
+        }
+    }
+
+    func showLegacyReaderAlert(title: String, message: String) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
 final class LegacyChapterDownloadPickerViewController: UITableViewController, UISearchResultsUpdating {
     private let sourceKey: String
     private let mangaKey: String
@@ -6627,6 +6691,12 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         super.viewDidLoad()
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Page",
+            style: .plain,
+            target: self,
+            action: #selector(showCurrentPageActions)
+        )
         navigationController?.navigationBar.isTranslucent = false
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
@@ -6635,6 +6705,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
         tableView.addGestureRecognizer(tapRecognizer)
+        let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handlePageLongPress(_:)))
+        longPressRecognizer.delegate = self
+        tableView.addGestureRecognizer(longPressRecognizer)
         registerAppStateObservers()
         updateReaderMode()
         loadPages()
@@ -6845,6 +6918,69 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             movePage(delta: 1)
         } else {
             toggleBars()
+        }
+    }
+
+    @objc private func handlePageLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began, !pages.isEmpty else { return }
+        let location = recognizer.location(in: tableView)
+        guard
+            let indexPath = tableView.indexPathForRow(at: location),
+            pages.indices.contains(indexPath.row)
+        else { return }
+        showPageActions(pageIndex: indexPath.row, sourceView: tableView.cellForRow(at: indexPath))
+    }
+
+    @objc private func showCurrentPageActions() {
+        guard !pages.isEmpty else { return }
+        let pageIndex = currentPageIndex ?? tableView.indexPathsForVisibleRows?.first?.row ?? initialPageIndex
+        guard pages.indices.contains(pageIndex) else { return }
+        let sourceView = tableView.cellForRow(at: IndexPath(row: pageIndex, section: 0)) ?? view
+        showPageActions(pageIndex: pageIndex, sourceView: sourceView)
+    }
+
+    private func showPageActions(pageIndex: Int, sourceView: UIView?) {
+        guard pages.indices.contains(pageIndex) else { return }
+        let visibleImage = (tableView.cellForRow(at: IndexPath(row: pageIndex, section: 0)) as? LegacyPageImageCell)?.currentImage
+        resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
+            guard let self = self else { return }
+            guard let image = image else {
+                self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                return
+            }
+            LegacyReaderPageActionPresenter.present(
+                image: image,
+                pageIndex: pageIndex,
+                from: self,
+                sourceView: sourceView ?? self.view
+            )
+        }
+    }
+
+    private func resolvePageActionImage(
+        page: AidokuRunnerLegacyPage,
+        visibleImage: UIImage?,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        if let visibleImage = visibleImage {
+            completion(visibleImage)
+            return
+        }
+        switch page.content {
+            case .url(let url, let context):
+                LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source, completion: completion)
+            case .image(let data):
+                aidokuLegacyImageDecodeQueue.async {
+                    let image = autoreleasepool {
+                        LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: aidokuLegacyReaderMaxPixelHeight())
+                            .map(aidokuLegacyPrepareReaderImageForDisplay)
+                    }
+                    DispatchQueue.main.async {
+                        completion(image)
+                    }
+                }
+            case .text(_), .zipFile(_, _):
+                completion(nil)
         }
     }
 
@@ -7102,6 +7238,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         super.viewDidLoad()
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Page",
+            style: .plain,
+            target: self,
+            action: #selector(showCurrentPageActions)
+        )
         navigationController?.navigationBar.isTranslucent = false
         view.backgroundColor = UIColor.black
 
@@ -7138,6 +7280,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
         collectionView.addGestureRecognizer(tapRecognizer)
+        let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handlePageLongPress(_:)))
+        longPressRecognizer.delegate = self
+        collectionView.addGestureRecognizer(longPressRecognizer)
 
         registerAppStateObservers()
         loadPages()
@@ -7381,6 +7526,73 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             movePage(delta: 1)
         } else {
             toggleBars()
+        }
+    }
+
+    @objc private func handlePageLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began, !pages.isEmpty else { return }
+        let location = recognizer.location(in: collectionView)
+        guard
+            let indexPath = collectionView.indexPathForItem(at: location),
+            pages.indices.contains(pageIndex(forVisualIndex: indexPath.item))
+        else { return }
+        showPageActions(
+            pageIndex: pageIndex(forVisualIndex: indexPath.item),
+            sourceView: collectionView.cellForItem(at: indexPath)
+        )
+    }
+
+    @objc private func showCurrentPageActions() {
+        guard !pages.isEmpty else { return }
+        let pageIndex = currentPageIndex ?? initialPageIndex
+        guard pages.indices.contains(pageIndex) else { return }
+        let indexPath = IndexPath(item: visualIndex(forPageIndex: pageIndex), section: 0)
+        showPageActions(pageIndex: pageIndex, sourceView: collectionView.cellForItem(at: indexPath) ?? view)
+    }
+
+    private func showPageActions(pageIndex: Int, sourceView: UIView?) {
+        guard pages.indices.contains(pageIndex) else { return }
+        let indexPath = IndexPath(item: visualIndex(forPageIndex: pageIndex), section: 0)
+        let visibleImage = (collectionView.cellForItem(at: indexPath) as? LegacyPagedImageCell)?.currentImage
+        resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
+            guard let self = self else { return }
+            guard let image = image else {
+                self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                return
+            }
+            LegacyReaderPageActionPresenter.present(
+                image: image,
+                pageIndex: pageIndex,
+                from: self,
+                sourceView: sourceView ?? self.view
+            )
+        }
+    }
+
+    private func resolvePageActionImage(
+        page: AidokuRunnerLegacyPage,
+        visibleImage: UIImage?,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        if let visibleImage = visibleImage {
+            completion(visibleImage)
+            return
+        }
+        switch page.content {
+            case .url(let url, let context):
+                LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source, completion: completion)
+            case .image(let data):
+                aidokuLegacyImageDecodeQueue.async {
+                    let image = autoreleasepool {
+                        LegacyImageLoader.shared.makeImage(from: data, maxPixelHeight: aidokuLegacyReaderMaxPixelHeight())
+                            .map(aidokuLegacyPrepareReaderImageForDisplay)
+                    }
+                    DispatchQueue.main.async {
+                        completion(image)
+                    }
+                }
+            case .text(_), .zipFile(_, _):
+                completion(nil)
         }
     }
 
@@ -7819,6 +8031,7 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
             imageView.image = newValue
             imageView.contentScaleFactor = UIScreen.main.scale
             imageView.layer.contentsScale = UIScreen.main.scale
+            imageView.layer.magnificationFilter = .nearest
             setZoomScale(1, animated: false)
             setNeedsLayout()
         }
@@ -7841,6 +8054,7 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
         imageView.backgroundColor = .black
         imageView.contentScaleFactor = UIScreen.main.scale
         imageView.layer.contentsScale = UIScreen.main.scale
+        imageView.layer.magnificationFilter = .nearest
         addSubview(imageView)
     }
 
@@ -7937,6 +8151,10 @@ private final class LegacyPageImageCell: UITableViewCell {
 
     var currentLoadID: UUID {
         return representedLoadID
+    }
+
+    var currentImage: UIImage? {
+        return pageImageView.image
     }
 
     func releaseDecodedImage() {
@@ -8306,6 +8524,10 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 
     var currentLoadID: UUID {
         return representedLoadID
+    }
+
+    var currentImage: UIImage? {
+        return pageImageView.image
     }
 
     func releaseDecodedImage() {
