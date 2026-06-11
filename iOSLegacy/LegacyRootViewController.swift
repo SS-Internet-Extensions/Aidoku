@@ -2349,7 +2349,10 @@ final class LegacyLibraryViewController: UITableViewController {
                 self.pendingCoverRepairs.remove(entry.key)
                 guard case .success(let updatedManga) = result else { return }
                 let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
-                guard !mergedManga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else { return }
+                guard !mergedManga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else {
+                    self.repairCoverWithAlternateCovers(for: entry, source: source, oldCoverURL: oldCoverURL)
+                    return
+                }
                 if let oldCoverURL = oldCoverURL {
                     LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
                 }
@@ -2357,6 +2360,35 @@ final class LegacyLibraryViewController: UITableViewController {
                 LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                self.reloadVisibleLibraryEntry(with: entry.key)
+            }
+        }
+    }
+
+    private func repairCoverWithAlternateCovers(
+        for entry: LegacyLibraryEntry,
+        source: AidokuRunnerLegacySource,
+        oldCoverURL: URL?
+    ) {
+        guard source.runner.features.providesAlternateCovers else { return }
+        source.runner.getAlternateCovers(manga: entry.manga) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard case .success(let covers) = result else { return }
+                let cover = covers
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+                guard let cover = cover else { return }
+                var manga = entry.manga
+                manga.cover = cover
+                guard !manga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else { return }
+                if let oldCoverURL = oldCoverURL {
+                    LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
+                }
+                LegacyImageLoader.shared.removeCachedImages(for: manga.coverURLCandidates(relativeTo: source.urls.first), source: source)
+                LegacyLibraryStore.shared.updateMangaMetadata(manga: manga, source: source)
+                LegacyHistoryStore.shared.updateMangaMetadata(manga: manga, source: source)
+                LegacyUpdateStore.shared.updateMangaMetadata(manga: manga, source: source)
                 self.reloadVisibleLibraryEntry(with: entry.key)
             }
         }

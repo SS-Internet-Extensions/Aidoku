@@ -361,6 +361,63 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         }
     }
 
+    func getPageDescription(
+        page: AidokuRunnerLegacyPage,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.providesPageDescriptions else {
+                return page.description
+            }
+            let function = try self.module.findFunction(name: "get_page_description")
+            let encodedPage = try EncodedLegacyPageCodable(legacy: page, store: self.store)
+            defer {
+                if let pointer = encodedPage.imagePointer {
+                    self.store.remove(at: pointer)
+                }
+            }
+            let pagePointer = try self.store.storeEncoded(encodedPage.page)
+            defer { self.store.remove(at: pagePointer) }
+
+            let result: Int32 = try function.call(pagePointer)
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode(String.self, from: data)
+        }
+    }
+
+    func getAlternateCovers(
+        manga: AidokuRunnerLegacyManga,
+        completion: @escaping (Result<[String], Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.providesAlternateCovers else {
+                return []
+            }
+            let function = try self.module.findFunction(name: "get_alternate_covers")
+            let mangaPointer = try self.store.storeEncoded(Manga(legacy: manga, sourceKey: self.sourceKey))
+            defer { self.store.remove(at: mangaPointer) }
+
+            let result: Int32 = try function.call(mangaPointer)
+            let data = try self.handleResult(result: result)
+            return try PostcardDecoder().decode([String].self, from: data)
+        }
+    }
+
+    func getBaseUrl(
+        completion: @escaping (Result<URL?, Error>) -> Void
+    ) {
+        run(completion: completion) {
+            guard self.features.providesBaseUrl else {
+                return nil
+            }
+            let function = try self.module.findFunction(name: "get_base_url")
+            let result: Int32 = try function.call()
+            let data = try self.handleResult(result: result)
+            let value = try PostcardDecoder().decode(String.self, from: data)
+            return URL(string: value)
+        }
+    }
+
     func handleNotification(
         notification: String,
         completion: @escaping (Result<Void, Error>) -> Void
@@ -675,5 +732,37 @@ private extension Page {
                 }
                 return nil
         }
+    }
+}
+
+private struct EncodedLegacyPageCodable {
+    let page: PageCodable
+    let imagePointer: Int32?
+
+    init(legacy: AidokuRunnerLegacyPage, store: GlobalStore) throws {
+        let content: PageContentCodable
+        let imagePointer: Int32?
+        switch legacy.content {
+            case .url(let url, let context):
+                content = .url(url: url, context: context)
+                imagePointer = nil
+            case .text(let string):
+                content = .text(string)
+                imagePointer = nil
+            case .zipFile(let url, let filePath):
+                content = .zipFile(url: url, filePath: filePath)
+                imagePointer = nil
+            case .image(let data):
+                let pointer = store.store(data)
+                content = .image(pointer)
+                imagePointer = pointer
+        }
+        self.page = PageCodable(
+            content: content,
+            thumbnail: nil,
+            hasDescription: legacy.hasDescription,
+            description: legacy.description
+        )
+        self.imagePointer = imagePointer
     }
 }

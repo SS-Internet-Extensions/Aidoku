@@ -817,6 +817,20 @@ protocol AidokuRunnerLegacyRunner {
         completion: @escaping (Result<UIImage?, Error>) -> Void
     )
 
+    func getPageDescription(
+        page: AidokuRunnerLegacyPage,
+        completion: @escaping (Result<String?, Error>) -> Void
+    )
+
+    func getAlternateCovers(
+        manga: AidokuRunnerLegacyManga,
+        completion: @escaping (Result<[String], Error>) -> Void
+    )
+
+    func getBaseUrl(
+        completion: @escaping (Result<URL?, Error>) -> Void
+    )
+
     func handleNotification(
         notification: String,
         completion: @escaping (Result<Void, Error>) -> Void
@@ -929,6 +943,26 @@ final class AidokuRunnerLegacyUnavailableRunner: AidokuRunnerLegacyRunner {
         completion: @escaping (Result<UIImage?, Error>) -> Void
     ) {
         completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func getPageDescription(
+        page: AidokuRunnerLegacyPage,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
+        completion(.failure(AidokuRunnerLegacyError.backendUnavailable))
+    }
+
+    func getAlternateCovers(
+        manga: AidokuRunnerLegacyManga,
+        completion: @escaping (Result<[String], Error>) -> Void
+    ) {
+        completion(.success([]))
+    }
+
+    func getBaseUrl(
+        completion: @escaping (Result<URL?, Error>) -> Void
+    ) {
+        completion(.success(nil))
     }
 
     func handleNotification(

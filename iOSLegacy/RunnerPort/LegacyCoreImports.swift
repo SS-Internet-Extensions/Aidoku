@@ -6,8 +6,10 @@
 //
 
 import Foundation
+import CoreText
 import JavaScriptCore
 import SwiftSoup
+import UIKit
 import WebKit
 import Wasm3Legacy
 
@@ -629,11 +631,38 @@ struct Canvas: SourceLibrary {
         b: Float32,
         a: Float32
     ) -> Int32 {
-        return Result.invalidPath.rawValue
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        guard let path = LegacyCanvasPath.decode(memory: memory, pointer: pathPtr) else {
+            return Result.invalidPath.rawValue
+        }
+
+        path.fill(
+            in: context,
+            color: UIColor(
+                red: CGFloat(r),
+                green: CGFloat(g),
+                blue: CGFloat(b),
+                alpha: CGFloat(a)
+            ).cgColor
+        )
+        return Result.success.rawValue
     }
 
     func stroke(memory: Memory, contextPtr: Int32, pathPtr: Int32, stylePtr: Int32) -> Int32 {
-        return Result.invalidPath.rawValue
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        guard let path = LegacyCanvasPath.decode(memory: memory, pointer: pathPtr) else {
+            return Result.invalidPath.rawValue
+        }
+        guard let style = LegacyCanvasStrokeStyle.decode(memory: memory, pointer: stylePtr) else {
+            return Result.invalidStyle.rawValue
+        }
+
+        path.stroke(in: context, style: style)
+        return Result.success.rawValue
     }
 
     func drawText(
@@ -650,7 +679,44 @@ struct Canvas: SourceLibrary {
         b: Float32,
         a: Float32
     ) -> Int32 {
-        return Result.invalidFont.rawValue
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        guard let font = store.fetch(from: fontPtr) as? UIFont else {
+            return Result.invalidFont.rawValue
+        }
+        guard
+            textPtr >= 0,
+            textLen >= 0,
+            let string = try? memory.readString(offset: UInt32(textPtr), length: UInt32(textLen))
+        else {
+            return Result.invalidString.rawValue
+        }
+
+        context.saveGState()
+        context.translateBy(x: 0, y: CGFloat(context.height))
+        context.scaleBy(x: 1, y: -1)
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: UIColor(
+                red: CGFloat(r),
+                green: CGFloat(g),
+                blue: CGFloat(b),
+                alpha: CGFloat(a)
+            ),
+            .font: font.withSize(CGFloat(size))
+        ]
+        let attributedString = NSAttributedString(string: string, attributes: attributes)
+        let line = CTLineCreateWithAttributedString(attributedString)
+        let bounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(
+            x: CGFloat(x),
+            y: CGFloat(context.height) - CGFloat(y) - bounds.height
+        )
+        CTLineDraw(line, context)
+
+        context.restoreGState()
+        return Result.success.rawValue
     }
 
     func getImage(contextPtr: Int32) -> Int32 {
@@ -678,11 +744,37 @@ struct Canvas: SourceLibrary {
     }
 
     func systemFont(weight: Int32) -> Int32 {
-        return store.store(UIFont.systemFont(ofSize: UIFont.systemFontSize))
+        let clampedWeight = UInt8(max(0, min(Int(weight), Int(UInt8.max))))
+        let fontWeight = LegacyCanvasFontWeight(rawValue: clampedWeight) ?? .regular
+        return store.store(UIFont.systemFont(ofSize: UIFont.systemFontSize, weight: fontWeight.uiFontWeight))
     }
 
     func loadFont(memory: Memory, urlPtr: Int32, urlLen: Int32) -> Int32 {
-        return Result.fontLoadFailed.rawValue
+        guard
+            urlPtr >= 0,
+            urlLen >= 0,
+            let urlString = try? memory.readString(offset: UInt32(urlPtr), length: UInt32(urlLen)),
+            let url = URL(string: urlString)
+        else {
+            return Result.invalidString.rawValue
+        }
+        guard
+            let dataProvider = CGDataProvider(url: url as CFURL),
+            let font = CGFont(dataProvider)
+        else {
+            return Result.fontLoadFailed.rawValue
+        }
+
+        CTFontManagerRegisterGraphicsFont(font, nil)
+
+        guard
+            let name = font.postScriptName as? String,
+            let uiFont = UIFont(name: name, size: UIFont.systemFontSize)
+        else {
+            return Result.fontLoadFailed.rawValue
+        }
+
+        return store.store(uiFont)
     }
 
     func newImage(memory: Memory, dataPtr: Int32, dataLen: Int32) -> Int32 {
@@ -730,6 +822,251 @@ private final class LegacyCanvasContext {
     init(_ context: CGContext) {
         self.context = context
         context.saveGState()
+    }
+}
+
+private struct LegacyCanvasPoint: Decodable {
+    let x: Float32
+    let y: Float32
+
+    var cgPoint: CGPoint {
+        CGPoint(x: CGFloat(x), y: CGFloat(y))
+    }
+}
+
+private enum LegacyCanvasPathOp {
+    case moveTo(LegacyCanvasPoint)
+    case lineTo(LegacyCanvasPoint)
+    case quadTo(LegacyCanvasPoint, LegacyCanvasPoint)
+    case cubicTo(LegacyCanvasPoint, LegacyCanvasPoint, LegacyCanvasPoint)
+    case arc(LegacyCanvasPoint, Float32, Float32, Float32)
+    case close
+}
+
+extension LegacyCanvasPathOp: Decodable {
+    private enum CodingKeys: CodingKey {
+        case type
+        case moveTo
+        case lineTo
+        case quadTo
+        case cubicTo
+        case arc
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(UInt8.self, forKey: .type)
+
+        switch type {
+        case 0:
+            self = .moveTo(try container.decode(LegacyCanvasPoint.self, forKey: .moveTo))
+        case 1:
+            self = .lineTo(try container.decode(LegacyCanvasPoint.self, forKey: .lineTo))
+        case 2:
+            let first = try container.decode(LegacyCanvasPoint.self, forKey: .quadTo)
+            let second = try container.decode(LegacyCanvasPoint.self, forKey: .quadTo)
+            self = .quadTo(first, second)
+        case 3:
+            let first = try container.decode(LegacyCanvasPoint.self, forKey: .cubicTo)
+            let second = try container.decode(LegacyCanvasPoint.self, forKey: .cubicTo)
+            let third = try container.decode(LegacyCanvasPoint.self, forKey: .cubicTo)
+            self = .cubicTo(first, second, third)
+        case 4:
+            let center = try container.decode(LegacyCanvasPoint.self, forKey: .arc)
+            let radius = try container.decode(Float32.self, forKey: .arc)
+            let startAngle = try container.decode(Float32.self, forKey: .arc)
+            let sweepAngle = try container.decode(Float32.self, forKey: .arc)
+            self = .arc(center, radius, startAngle, sweepAngle)
+        case 5:
+            self = .close
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Invalid canvas path op \(type)"
+            )
+        }
+    }
+}
+
+private struct LegacyCanvasPath: Decodable {
+    let ops: [LegacyCanvasPathOp]
+
+    static func decode(memory: Memory, pointer: Int32) -> LegacyCanvasPath? {
+        guard let data = LegacyCanvasPostcardData.read(memory: memory, pointer: pointer) else { return nil }
+        return try? PostcardDecoder().decode(LegacyCanvasPath.self, from: data)
+    }
+
+    private func draw(in context: CGContext) {
+        var pathOpen = false
+        for op in ops {
+            if !pathOpen {
+                context.beginPath()
+                pathOpen = true
+            }
+            switch op {
+            case .moveTo(let point):
+                context.move(to: point.cgPoint)
+            case .lineTo(let point):
+                context.addLine(to: point.cgPoint)
+            case .quadTo(let point, let control):
+                context.addQuadCurve(to: point.cgPoint, control: control.cgPoint)
+            case .cubicTo(let point, let control1, let control2):
+                context.addCurve(to: point.cgPoint, control1: control1.cgPoint, control2: control2.cgPoint)
+            case .arc(let center, let radius, let startAngle, let sweepAngle):
+                context.addArc(
+                    center: center.cgPoint,
+                    radius: CGFloat(radius),
+                    startAngle: CGFloat(startAngle),
+                    endAngle: CGFloat(abs(sweepAngle)),
+                    clockwise: sweepAngle >= 0
+                )
+            case .close:
+                context.closePath()
+                pathOpen = false
+            }
+        }
+    }
+
+    func fill(in context: CGContext, color: CGColor) {
+        context.saveGState()
+        draw(in: context)
+        context.setFillColor(color)
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    func stroke(in context: CGContext, style: LegacyCanvasStrokeStyle) {
+        context.saveGState()
+        draw(in: context)
+        style.apply(to: context)
+        context.strokePath()
+        context.restoreGState()
+    }
+}
+
+private struct LegacyCanvasColor: Decodable {
+    let red: Float32
+    let green: Float32
+    let blue: Float32
+    let alpha: Float32
+
+    var cgColor: CGColor {
+        UIColor(
+            red: CGFloat(red),
+            green: CGFloat(green),
+            blue: CGFloat(blue),
+            alpha: CGFloat(alpha)
+        ).cgColor
+    }
+}
+
+private enum LegacyCanvasLineCap: UInt8, Decodable {
+    case round = 0
+    case square = 1
+    case butt = 2
+
+    var cgLineCap: CGLineCap {
+        switch self {
+        case .round:
+            return .round
+        case .square:
+            return .square
+        case .butt:
+            return .butt
+        }
+    }
+}
+
+private enum LegacyCanvasLineJoin: UInt8, Decodable {
+    case round = 0
+    case bevel = 1
+    case miter = 2
+
+    var cgLineJoin: CGLineJoin {
+        switch self {
+        case .round:
+            return .round
+        case .bevel:
+            return .bevel
+        case .miter:
+            return .miter
+        }
+    }
+}
+
+private struct LegacyCanvasStrokeStyle: Decodable {
+    let color: LegacyCanvasColor
+    let width: Float32
+    let cap: LegacyCanvasLineCap
+    let join: LegacyCanvasLineJoin
+    let miterLimit: Float32
+    let dashArray: [Float32]
+    let dashOffset: Float32
+
+    static func decode(memory: Memory, pointer: Int32) -> LegacyCanvasStrokeStyle? {
+        guard let data = LegacyCanvasPostcardData.read(memory: memory, pointer: pointer) else { return nil }
+        return try? PostcardDecoder().decode(LegacyCanvasStrokeStyle.self, from: data)
+    }
+
+    func apply(to context: CGContext) {
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(CGFloat(width))
+        context.setLineCap(cap.cgLineCap)
+        context.setLineJoin(join.cgLineJoin)
+        context.setMiterLimit(CGFloat(miterLimit))
+        if !dashArray.isEmpty {
+            context.setLineDash(phase: CGFloat(dashOffset), lengths: dashArray.map { CGFloat($0) })
+        }
+    }
+}
+
+private enum LegacyCanvasFontWeight: UInt8 {
+    case ultraLight = 0
+    case thin
+    case light
+    case regular
+    case medium
+    case semibold
+    case bold
+    case heavy
+    case black
+
+    var uiFontWeight: UIFont.Weight {
+        switch self {
+        case .ultraLight:
+            return .ultraLight
+        case .thin:
+            return .thin
+        case .light:
+            return .light
+        case .regular:
+            return .regular
+        case .medium:
+            return .medium
+        case .semibold:
+            return .semibold
+        case .bold:
+            return .bold
+        case .heavy:
+            return .heavy
+        case .black:
+            return .black
+        }
+    }
+}
+
+private enum LegacyCanvasPostcardData {
+    static func read(memory: Memory, pointer: Int32) -> Data? {
+        guard pointer >= 0 else { return nil }
+        let offset = UInt32(pointer)
+        guard
+            let length: UInt32 = try? memory.readValues(offset: offset, length: 1)[0],
+            length >= 8
+        else {
+            return nil
+        }
+        return try? memory.readData(offset: offset + 8, length: length - 8)
     }
 }
 
