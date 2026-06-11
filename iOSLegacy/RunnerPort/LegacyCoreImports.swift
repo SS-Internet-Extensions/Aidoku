@@ -6,7 +6,9 @@
 //
 
 import Foundation
+import JavaScriptCore
 import SwiftSoup
+import WebKit
 import Wasm3Legacy
 
 struct Env: SourceLibrary {
@@ -55,8 +57,11 @@ struct Std: SourceLibrary {
 
     let module: Module
     var store: GlobalStore
+    let printHandler: ((String) -> Void)?
 
     func link() throws {
+        try? module.linkFunction(name: "abort", namespace: Self.namespace, function: abort)
+        try? module.linkFunction(name: "print", namespace: Self.namespace, function: stdPrint)
         try? module.linkFunction(name: "destroy", namespace: Self.namespace, function: destroy)
         try? module.linkFunction(name: "buffer_len", namespace: Self.namespace, function: bufferLength)
         try? module.linkFunction(name: "read_buffer", namespace: Self.namespace, function: readBuffer)
@@ -72,6 +77,16 @@ struct Std: SourceLibrary {
         case failedMemoryWrite = -3
         case invalidString = -4
         case invalidDateString = -5
+    }
+
+    func abort() {
+        printHandler?("Source aborted")
+    }
+
+    func stdPrint(memory: Memory, offset: Int32, length: Int32) {
+        guard offset >= 0, length >= 0 else { return }
+        let string = try? memory.readString(offset: UInt32(offset), length: UInt32(length))
+        printHandler?(string ?? "")
     }
 
     func destroy(descriptor: Int32) {
@@ -256,6 +271,465 @@ struct Defaults: SourceLibrary {
         } catch {
             return Result.failedDecoding.rawValue
         }
+    }
+}
+
+struct JavaScript: SourceLibrary {
+    static let namespace = "js"
+
+    let module: Module
+    let store: GlobalStore
+
+    func link() throws {
+        try? module.linkFunction(name: "context_create", namespace: Self.namespace, function: contextCreate)
+        try? module.linkFunction(name: "context_eval", namespace: Self.namespace, function: contextEval)
+        try? module.linkFunction(name: "context_get", namespace: Self.namespace, function: contextGet)
+        try? module.linkFunction(name: "webview_create", namespace: Self.namespace, function: webViewCreate)
+        try? module.linkFunction(name: "webview_load", namespace: Self.namespace, function: webViewLoad)
+        try? module.linkFunction(name: "webview_load_html", namespace: Self.namespace, function: webViewLoadHtml)
+        try? module.linkFunction(name: "webview_wait_for_load", namespace: Self.namespace, function: webViewWaitForLoad)
+        try? module.linkFunction(name: "webview_eval", namespace: Self.namespace, function: webViewEval)
+    }
+
+    enum Result: Int32 {
+        case success = 0
+        case missingResult = -1
+        case invalidContext = -2
+        case invalidString = -3
+        case invalidHandler = -4
+        case invalidRequest = -5
+    }
+
+    func contextCreate() -> Int32 {
+        guard let context = JSContext() else {
+            return Result.missingResult.rawValue
+        }
+        return store.store(context)
+    }
+
+    func contextEval(memory: Memory, descriptor: Int32, stringPointer: Int32, length: Int32) -> Int32 {
+        guard let context = store.fetch(from: descriptor) as? JSContext else {
+            return Result.invalidContext.rawValue
+        }
+        guard
+            stringPointer >= 0,
+            length > 0,
+            let jsString = try? memory.readString(offset: UInt32(stringPointer), length: UInt32(length))
+        else {
+            return Result.invalidString.rawValue
+        }
+        guard let result = context.evaluateScript(jsString)?.toString() else {
+            return Result.missingResult.rawValue
+        }
+        return store.store(result)
+    }
+
+    func contextGet(memory: Memory, descriptor: Int32, stringPointer: Int32, length: Int32) -> Int32 {
+        guard let context = store.fetch(from: descriptor) as? JSContext else {
+            return Result.invalidContext.rawValue
+        }
+        guard
+            stringPointer >= 0,
+            length > 0,
+            let jsString = try? memory.readString(offset: UInt32(stringPointer), length: UInt32(length))
+        else {
+            return Result.invalidString.rawValue
+        }
+        guard let result = context.objectForKeyedSubscript(jsString)?.toString() else {
+            return Result.missingResult.rawValue
+        }
+        return store.store(result)
+    }
+
+    func webViewCreate() -> Int32 {
+        let handler = aidokuLegacyRunOnMainThread {
+            LegacyWasmWebViewHandler(webView: WKWebView())
+        }
+        return store.store(handler)
+    }
+
+    func webViewLoad(descriptor: Int32, requestDescriptor: Int32) -> Int32 {
+        guard let handler = store.fetch(from: descriptor) as? LegacyWasmWebViewHandler else {
+            return Result.invalidHandler.rawValue
+        }
+        guard
+            let request = store.fetch(from: requestDescriptor) as? NetRequest,
+            let urlRequest = request.toUrlRequest()
+        else {
+            return Result.invalidRequest.rawValue
+        }
+        aidokuLegacyRunOnMainThread {
+            _ = handler.webView.load(urlRequest)
+        }
+        return Result.success.rawValue
+    }
+
+    func webViewLoadHtml(
+        memory: Memory,
+        descriptor: Int32,
+        stringPointer: Int32,
+        length: Int32,
+        urlStringPointer: Int32,
+        urlLength: Int32
+    ) -> Int32 {
+        guard let handler = store.fetch(from: descriptor) as? LegacyWasmWebViewHandler else {
+            return Result.invalidHandler.rawValue
+        }
+        guard
+            stringPointer >= 0,
+            length > 0,
+            let htmlString = try? memory.readString(offset: UInt32(stringPointer), length: UInt32(length))
+        else {
+            return Result.invalidString.rawValue
+        }
+        let url: URL?
+        if
+            urlStringPointer >= 0,
+            urlLength > 0,
+            let urlString = try? memory.readString(offset: UInt32(urlStringPointer), length: UInt32(urlLength))
+        {
+            url = URL(string: urlString)
+        } else {
+            url = nil
+        }
+        aidokuLegacyRunOnMainThread {
+            _ = handler.webView.loadHTMLString(htmlString, baseURL: url)
+        }
+        return Result.success.rawValue
+    }
+
+    func webViewWaitForLoad(descriptor: Int32) -> Int32 {
+        guard let handler = store.fetch(from: descriptor) as? LegacyWasmWebViewHandler else {
+            return Result.invalidHandler.rawValue
+        }
+        handler.waitForLoad()
+        return Result.success.rawValue
+    }
+
+    func webViewEval(memory: Memory, descriptor: Int32, stringPointer: Int32, length: Int32) -> Int32 {
+        guard let handler = store.fetch(from: descriptor) as? LegacyWasmWebViewHandler else {
+            return Result.invalidHandler.rawValue
+        }
+        guard
+            stringPointer >= 0,
+            length > 0,
+            let jsString = try? memory.readString(offset: UInt32(stringPointer), length: UInt32(length))
+        else {
+            return Result.invalidString.rawValue
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var resultString: String?
+        DispatchQueue.main.async {
+            handler.webView.evaluateJavaScript(jsString) { result, _ in
+                if let result = result {
+                    resultString = "\(result)"
+                }
+                semaphore.signal()
+            }
+        }
+        semaphore.wait()
+        guard let resultString = resultString else {
+            return Result.missingResult.rawValue
+        }
+        return store.store(resultString)
+    }
+}
+
+private func aidokuLegacyRunOnMainThread<T>(_ block: @escaping () -> T) -> T {
+    if Thread.isMainThread {
+        return block()
+    }
+    var result: T!
+    DispatchQueue.main.sync {
+        result = block()
+    }
+    return result
+}
+
+private final class LegacyWasmWebViewHandler: NSObject, WKNavigationDelegate {
+    let webView: WKWebView
+
+    private var loadSemaphore = DispatchSemaphore(value: 0)
+
+    init(webView: WKWebView) {
+        self.webView = webView
+        super.init()
+        webView.navigationDelegate = self
+    }
+
+    func waitForLoad() {
+        loadSemaphore.wait()
+        loadSemaphore = DispatchSemaphore(value: 0)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loadSemaphore.signal()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        loadSemaphore.signal()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        loadSemaphore.signal()
+    }
+}
+
+struct Canvas: SourceLibrary {
+    static let namespace = "canvas"
+
+    let module: Module
+    let store: GlobalStore
+
+    func link() throws {
+        try? module.linkFunction(name: "new_context", namespace: Self.namespace, function: newContext)
+        try? module.linkFunction(name: "set_transform", namespace: Self.namespace, function: setTransform)
+        try? module.linkFunction(name: "draw_image", namespace: Self.namespace, function: drawImage)
+        try? module.linkFunction(name: "copy_image", namespace: Self.namespace, function: copyImage)
+        try? module.linkFunction(name: "fill", namespace: Self.namespace, function: fill)
+        try? module.linkFunction(name: "stroke", namespace: Self.namespace, function: stroke)
+        try? module.linkFunction(name: "draw_text", namespace: Self.namespace, function: drawText)
+        try? module.linkFunction(name: "get_image", namespace: Self.namespace, function: getImage)
+        try? module.linkFunction(name: "new_font", namespace: Self.namespace, function: newFont)
+        try? module.linkFunction(name: "system_font", namespace: Self.namespace, function: systemFont)
+        try? module.linkFunction(name: "load_font", namespace: Self.namespace, function: loadFont)
+        try? module.linkFunction(name: "new_image", namespace: Self.namespace, function: newImage)
+        try? module.linkFunction(name: "get_image_data", namespace: Self.namespace, function: getImageData)
+        try? module.linkFunction(name: "get_image_width", namespace: Self.namespace, function: getImageWidth)
+        try? module.linkFunction(name: "get_image_height", namespace: Self.namespace, function: getImageHeight)
+    }
+
+    enum Result: Int32 {
+        case success = 0
+        case invalidContext = -1
+        case invalidImagePointer = -2
+        case invalidImage = -3
+        case invalidSrcRect = -4
+        case invalidResult = -5
+        case invalidBounds = -6
+        case invalidPath = -7
+        case invalidStyle = -8
+        case invalidString = -9
+        case invalidFont = -10
+        case invalidData = -11
+        case fontLoadFailed = -12
+    }
+
+    func newContext(width: Float32, height: Float32) -> Int32 {
+        guard width > 0, height > 0, width <= 8192, height <= 8192 else {
+            return Result.invalidBounds.rawValue
+        }
+        UIGraphicsBeginImageContextWithOptions(CGSize(width: CGFloat(width), height: CGFloat(height)), false, 1)
+        guard let context = UIGraphicsGetCurrentContext() else {
+            UIGraphicsEndImageContext()
+            return Result.invalidContext.rawValue
+        }
+        return store.store(LegacyCanvasContext(context))
+    }
+
+    func setTransform(
+        contextPtr: Int32,
+        translateX: Float32,
+        translateY: Float32,
+        scaleX: Float32,
+        scaleY: Float32,
+        rotateAngle: Float32
+    ) -> Int32 {
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        context.restoreGState()
+        context.saveGState()
+        context.translateBy(x: CGFloat(translateX), y: CGFloat(translateY))
+        context.scaleBy(x: CGFloat(scaleX), y: CGFloat(scaleY))
+        context.rotate(by: CGFloat(rotateAngle))
+        return Result.success.rawValue
+    }
+
+    func drawImage(
+        contextPtr: Int32,
+        imagePtr: Int32,
+        dstX: Float32,
+        dstY: Float32,
+        dstWidth: Float32,
+        dstHeight: Float32
+    ) -> Int32 {
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        guard let cgImage = store.fetchImage(from: imagePtr)?.cgImage else {
+            return Result.invalidImagePointer.rawValue
+        }
+        context.saveGState()
+        context.translateBy(x: 0, y: CGFloat(context.height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(
+            cgImage,
+            in: CGRect(
+                x: CGFloat(dstX),
+                y: CGFloat(context.height) - CGFloat(dstY) - CGFloat(dstHeight),
+                width: CGFloat(dstWidth),
+                height: CGFloat(dstHeight)
+            )
+        )
+        context.restoreGState()
+        return Result.success.rawValue
+    }
+
+    func copyImage(
+        contextPtr: Int32,
+        imagePtr: Int32,
+        srcX: Float32,
+        srcY: Float32,
+        srcWidth: Float32,
+        srcHeight: Float32,
+        dstX: Float32,
+        dstY: Float32,
+        dstWidth: Float32,
+        dstHeight: Float32
+    ) -> Int32 {
+        guard let context = (store.fetch(from: contextPtr) as? LegacyCanvasContext)?.context else {
+            return Result.invalidContext.rawValue
+        }
+        guard let cgImage = store.fetchImage(from: imagePtr)?.cgImage else {
+            return Result.invalidImagePointer.rawValue
+        }
+        let sourceRect = CGRect(
+            x: CGFloat(srcX),
+            y: CGFloat(srcY),
+            width: CGFloat(srcWidth),
+            height: CGFloat(srcHeight)
+        )
+        guard let sourceImage = cgImage.cropping(to: sourceRect) else {
+            return Result.invalidSrcRect.rawValue
+        }
+        context.saveGState()
+        context.translateBy(x: 0, y: CGFloat(context.height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(
+            sourceImage,
+            in: CGRect(
+                x: CGFloat(dstX),
+                y: CGFloat(context.height) - CGFloat(dstY) - CGFloat(dstHeight),
+                width: CGFloat(dstWidth),
+                height: CGFloat(dstHeight)
+            )
+        )
+        context.restoreGState()
+        return Result.success.rawValue
+    }
+
+    func fill(
+        memory: Memory,
+        contextPtr: Int32,
+        pathPtr: Int32,
+        r: Float32,
+        g: Float32,
+        b: Float32,
+        a: Float32
+    ) -> Int32 {
+        return Result.invalidPath.rawValue
+    }
+
+    func stroke(memory: Memory, contextPtr: Int32, pathPtr: Int32, stylePtr: Int32) -> Int32 {
+        return Result.invalidPath.rawValue
+    }
+
+    func drawText(
+        memory: Memory,
+        contextPtr: Int32,
+        textPtr: Int32,
+        textLen: Int32,
+        size: Float32,
+        x: Float32,
+        y: Float32,
+        fontPtr: Int32,
+        r: Float32,
+        g: Float32,
+        b: Float32,
+        a: Float32
+    ) -> Int32 {
+        return Result.invalidFont.rawValue
+    }
+
+    func getImage(contextPtr: Int32) -> Int32 {
+        guard store.fetch(from: contextPtr) is LegacyCanvasContext else {
+            return Result.invalidContext.rawValue
+        }
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        guard let image = image else {
+            return Result.invalidResult.rawValue
+        }
+        return store.store(image)
+    }
+
+    func newFont(memory: Memory, namePtr: Int32, nameLen: Int32) -> Int32 {
+        guard
+            namePtr >= 0,
+            nameLen >= 0,
+            let name = try? memory.readString(offset: UInt32(namePtr), length: UInt32(nameLen)),
+            let font = UIFont(name: name, size: UIFont.systemFontSize)
+        else {
+            return Result.invalidFont.rawValue
+        }
+        return store.store(font)
+    }
+
+    func systemFont(weight: Int32) -> Int32 {
+        return store.store(UIFont.systemFont(ofSize: UIFont.systemFontSize))
+    }
+
+    func loadFont(memory: Memory, urlPtr: Int32, urlLen: Int32) -> Int32 {
+        return Result.fontLoadFailed.rawValue
+    }
+
+    func newImage(memory: Memory, dataPtr: Int32, dataLen: Int32) -> Int32 {
+        guard
+            dataPtr >= 0,
+            dataLen >= 0,
+            let data = try? memory.readData(offset: UInt32(dataPtr), length: UInt32(dataLen))
+        else {
+            return Result.invalidData.rawValue
+        }
+        guard let image = UIImage(data: data) else {
+            return Result.invalidImage.rawValue
+        }
+        return store.store(image)
+    }
+
+    func getImageData(imagePtr: Int32) -> Int32 {
+        if let data = store.fetch(from: imagePtr) as? Data {
+            return store.store(data)
+        }
+        guard let data = store.fetchImage(from: imagePtr)?.pngData() else {
+            return Result.invalidImagePointer.rawValue
+        }
+        return store.store(data)
+    }
+
+    func getImageWidth(imagePtr: Int32) -> Float32 {
+        guard let image = store.fetchImage(from: imagePtr) else {
+            return Float32(Result.invalidImagePointer.rawValue)
+        }
+        return Float32(image.size.width)
+    }
+
+    func getImageHeight(imagePtr: Int32) -> Float32 {
+        guard let image = store.fetchImage(from: imagePtr) else {
+            return Float32(Result.invalidImagePointer.rawValue)
+        }
+        return Float32(image.size.height)
+    }
+}
+
+private final class LegacyCanvasContext {
+    let context: CGContext
+
+    init(_ context: CGContext) {
+        self.context = context
+        context.saveGState()
     }
 }
 

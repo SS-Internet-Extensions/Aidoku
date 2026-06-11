@@ -41,10 +41,16 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             partialResultHandler: partialResultHandler,
             printHandler: { print("[AidokuLegacy WASM] \($0)") }
         ).link()
-        try Std(module: module, store: store).link()
+        try Std(
+            module: module,
+            store: store,
+            printHandler: { print("[AidokuLegacy WASM] \($0)") }
+        ).link()
         try Defaults(module: module, store: store, defaultNamespace: info.info.id).link()
         try Net(module: module, store: store).link()
         try Html(module: module, store: store).link()
+        try JavaScript(module: module, store: store).link()
+        try Canvas(module: module, store: store).link()
 
         features = AidokuRunnerLegacySourceFeatures(
             providesListings: (try? module.findFunction(name: "get_manga_list")) != nil,

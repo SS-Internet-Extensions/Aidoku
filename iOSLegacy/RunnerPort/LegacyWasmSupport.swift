@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 import Wasm3Legacy
 
 protocol SourceLibrary {
@@ -54,6 +55,16 @@ final class GlobalStore {
 
     func fetch(from descriptor: Int32) -> Any? {
         return storage[descriptor]
+    }
+
+    func fetchImage(from descriptor: Int32) -> UIImage? {
+        if let image = fetch(from: descriptor) as? UIImage {
+            return image
+        }
+        if let data = fetch(from: descriptor) as? Data {
+            return UIImage(data: data)
+        }
+        return nil
     }
 
     func set(at descriptor: Int32, item: Any) {
