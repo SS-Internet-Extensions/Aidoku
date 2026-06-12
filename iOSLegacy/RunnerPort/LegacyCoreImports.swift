@@ -1079,6 +1079,7 @@ struct Net: SourceLibrary {
     func link() throws {
         try? module.linkFunction(name: "init", namespace: Self.namespace, function: initialize)
         try? module.linkFunction(name: "send", namespace: Self.namespace, function: send)
+        try? module.linkFunction(name: "close", namespace: Self.namespace, function: close)
         try? module.linkFunction(name: "send_all", namespace: Self.namespace, function: sendAll)
         try? module.linkFunction(name: "set_url", namespace: Self.namespace, function: setUrl)
         try? module.linkFunction(name: "set_header", namespace: Self.namespace, function: setHeader)
@@ -1092,6 +1093,7 @@ struct Net: SourceLibrary {
         try? module.linkFunction(name: "get_header", namespace: Self.namespace, function: getHeader)
         try? module.linkFunction(name: "html", namespace: Self.namespace, function: dataToHtml)
         try? module.linkFunction(name: "set_rate_limit", namespace: Self.namespace, function: setRateLimit)
+        try? module.linkFunction(name: "set_rate_limit_period", namespace: Self.namespace, function: setRateLimitPeriod)
     }
 
     enum Result: Int32 {
@@ -1159,6 +1161,11 @@ struct Net: SourceLibrary {
         }
         try? memory.write(values: errors, offset: UInt32(descriptors))
         return errors.contains { $0 != Result.success.rawValue } ? Result.requestError.rawValue : Result.success.rawValue
+    }
+
+    func close(descriptor: Int32) {
+        guard descriptor >= 0 else { return }
+        store.remove(at: descriptor)
     }
 
     func setUrl(memory: Memory, descriptor: Int32, value: Int32, length: Int32) -> Int32 {
@@ -1318,7 +1325,11 @@ struct Net: SourceLibrary {
         }
     }
 
-    func setRateLimit(permits _: Int32, period _: Int32, unit _: Int32) {
+    func setRateLimit(limit _: Int32) {
+        // Rate limiting is ignored in the legacy personal-use runner.
+    }
+
+    func setRateLimitPeriod(period _: Int32) {
         // Rate limiting is ignored in the legacy personal-use runner.
     }
 }

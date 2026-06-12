@@ -168,6 +168,14 @@ struct NetRequest {
                 forHTTPHeaderField: "User-Agent"
             )
         }
+        let cookieHeaders = HTTPCookie.requestHeaderFields(with: HTTPCookieStorage.shared.cookies(for: url) ?? [])
+        for (key, value) in cookieHeaders {
+            if key == "Cookie", let existing = request.value(forHTTPHeaderField: "Cookie"), !existing.isEmpty {
+                request.setValue(value + "; " + existing, forHTTPHeaderField: key)
+            } else {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
         return request
     }
 }

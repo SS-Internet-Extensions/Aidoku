@@ -171,6 +171,53 @@ private func aidokuLegacyRemoveTemporaryPageDirectories(_ directories: [URL]) {
     }
 }
 
+private func aidokuLegacyUsablePageDescription(_ description: String?) -> String? {
+    guard let description = description else { return nil }
+    return description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description
+}
+
+private func aidokuLegacyResolvePageDescription(
+    for page: AidokuRunnerLegacyPage,
+    runner: AidokuRunnerLegacyRunner,
+    completion: @escaping (String?) -> Void
+) {
+    if let description = aidokuLegacyUsablePageDescription(page.description) {
+        completion(description)
+        return
+    }
+    guard page.hasDescription else {
+        completion(nil)
+        return
+    }
+    runner.getPageDescription(page: page) { result in
+        if case .success(let description) = result {
+            completion(aidokuLegacyUsablePageDescription(description))
+        } else {
+            completion(nil)
+        }
+    }
+}
+
+private func aidokuLegacyChapterWebURL(_ chapter: AidokuRunnerLegacyChapter) -> URL? {
+    guard
+        let url = chapter.url,
+        let scheme = url.scheme?.lowercased(),
+        scheme == "http" || scheme == "https"
+    else {
+        return nil
+    }
+    return url
+}
+
+private func aidokuLegacyOpenWebPage(url: URL, title: String, from viewController: UIViewController) {
+    let webViewController = LegacySourceWebViewController(url: url, title: title)
+    if let navigationController = viewController.navigationController {
+        navigationController.pushViewController(webViewController, animated: true)
+    } else {
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+}
+
 private let aidokuLegacyReaderImageSession: URLSession = {
     let configuration = URLSessionConfiguration.default
     configuration.requestCachePolicy = .returnCacheDataElseLoad
@@ -1451,57 +1498,81 @@ final class LegacyDownloadManager {
         autoreleasepool {
             let page = pages[index]
             progress(index + 1, pages.count)
-            switch page.content {
-                case .image(let data):
-                    do {
-                        try writer.writeImageData(data, index: index, description: page.description)
-                        self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
-                    } catch {
-                        writer.cancel()
-                        completion(.failure(error))
-                    }
-                case .text(let text):
-                    writer.writeText(text, description: page.description)
-                    self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
-                case .zipFile(_, _):
-                    writer.writeText("ZIP pages are not supported in the legacy downloader yet.", description: page.description)
-                    self.downloadPage(pages: pages, index: index + 1, source: source, writer: writer, progress: progress, completion: completion)
-                case .url(let url, let context):
-                    if url.isFileURL {
-                        self.fetchDownloadedPage(
-                            request: .localFile(url),
-                            context: context,
-                            source: source,
-                            pageDescription: page.description,
-                            pageIndex: index,
-                            pages: pages,
-                            writer: writer,
-                            progress: progress,
-                            completion: completion
-                        )
-                        return
-                    }
-                    source.runner.getImageRequest(url: url, context: context) { result in
-                        let pageRequest: URLRequest
-                        switch result {
-                            case .success(let imageRequest):
-                                pageRequest = imageRequest.urlRequest(source: source, fallbackURL: url)
-                            case .failure:
-                                pageRequest = legacyFallbackImageRequest(url: url, source: source)
-                        }
-                        self.fetchDownloadedPage(
-                            request: .request(pageRequest),
-                            context: context,
-                            source: source,
-                            pageDescription: page.description,
-                            pageIndex: index,
-                            pages: pages,
-                            writer: writer,
-                            progress: progress,
-                            completion: completion
-                        )
-                    }
+            aidokuLegacyResolvePageDescription(for: page, runner: source.runner) { pageDescription in
+                self.downloadResolvedPage(
+                    page,
+                    pageDescription: pageDescription,
+                    pageIndex: index,
+                    pages: pages,
+                    source: source,
+                    writer: writer,
+                    progress: progress,
+                    completion: completion
+                )
             }
+        }
+    }
+
+    private func downloadResolvedPage(
+        _ page: AidokuRunnerLegacyPage,
+        pageDescription: String?,
+        pageIndex: Int,
+        pages: [AidokuRunnerLegacyPage],
+        source: AidokuRunnerLegacySource,
+        writer: LegacyDownloadStore.LegacyDownloadWriter,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Result<LegacyDownloadedChapter, Error>) -> Void
+    ) {
+        switch page.content {
+            case .image(let data):
+                do {
+                    try writer.writeImageData(data, index: pageIndex, description: pageDescription)
+                    self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
+                } catch {
+                    writer.cancel()
+                    completion(.failure(error))
+                }
+            case .text(let text):
+                writer.writeText(text, description: pageDescription)
+                self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
+            case .zipFile(_, _):
+                writer.writeText("ZIP pages are not supported in the legacy downloader yet.", description: pageDescription)
+                self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
+            case .url(let url, let context):
+                if url.isFileURL {
+                    self.fetchDownloadedPage(
+                        request: .localFile(url),
+                        context: context,
+                        source: source,
+                        pageDescription: pageDescription,
+                        pageIndex: pageIndex,
+                        pages: pages,
+                        writer: writer,
+                        progress: progress,
+                        completion: completion
+                    )
+                    return
+                }
+                source.runner.getImageRequest(url: url, context: context) { result in
+                    let pageRequest: URLRequest
+                    switch result {
+                        case .success(let imageRequest):
+                            pageRequest = imageRequest.urlRequest(source: source, fallbackURL: url)
+                        case .failure:
+                            pageRequest = legacyFallbackImageRequest(url: url, source: source)
+                    }
+                    self.fetchDownloadedPage(
+                        request: .request(pageRequest),
+                        context: context,
+                        source: source,
+                        pageDescription: pageDescription,
+                        pageIndex: pageIndex,
+                        pages: pages,
+                        writer: writer,
+                        progress: progress,
+                        completion: completion
+                    )
+                }
         }
     }
 
@@ -4089,9 +4160,28 @@ final class LegacySourceMenuViewController: UITableViewController {
             case .listing(let listing):
                 navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: listing), animated: true)
             case .website(let url):
-                navigationController?.pushViewController(LegacySourceWebViewController(url: url, title: source.name), animated: true)
+                openWebsite(fallbackURL: url)
             case .message:
                 return
+        }
+    }
+
+    private func openWebsite(fallbackURL: URL) {
+        guard source.runner.features.providesBaseUrl else {
+            navigationController?.pushViewController(LegacySourceWebViewController(url: fallbackURL, title: source.name), animated: true)
+            return
+        }
+        source.runner.getBaseUrl { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let url: URL
+                if case .success(let baseURL?) = result {
+                    url = baseURL
+                } else {
+                    url = fallbackURL
+                }
+                self.navigationController?.pushViewController(LegacySourceWebViewController(url: url, title: self.source.name), animated: true)
+            }
         }
     }
 
@@ -5702,36 +5792,45 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
 
 private final class LegacyReaderPageActionPresenter {
     static func present(
-        image: UIImage,
+        image: UIImage?,
+        pageDescription: String?,
         pageIndex: Int,
         from viewController: UIViewController,
         sourceView: UIView?
     ) {
         let alert = UIAlertController(
             title: "Page \(pageIndex + 1)",
-            message: nil,
+            message: pageDescription,
             preferredStyle: .actionSheet
         )
-        alert.addAction(UIAlertAction(title: "Copy Image", style: .default) { _ in
-            UIPasteboard.general.image = image
-            viewController.showLegacyReaderAlert(title: "Copied", message: "Page image copied to the clipboard.")
-        })
-        alert.addAction(UIAlertAction(title: "Download Image", style: .default) { _ in
-            UIImageWriteToSavedPhotosAlbum(
-                image,
-                viewController,
-                #selector(UIViewController.legacyReaderImage(_:didFinishSavingWithError:contextInfo:)),
-                nil
-            )
-        })
-        alert.addAction(UIAlertAction(title: "Share Image", style: .default) { _ in
-            let activity = UIActivityViewController(activityItems: [image], applicationActivities: nil)
-            if let popover = activity.popoverPresentationController {
-                popover.sourceView = sourceView ?? viewController.view
-                popover.sourceRect = (sourceView ?? viewController.view).bounds
-            }
-            viewController.present(activity, animated: true)
-        })
+        if let pageDescription = pageDescription {
+            alert.addAction(UIAlertAction(title: "Copy Description", style: .default) { _ in
+                UIPasteboard.general.string = pageDescription
+                viewController.showLegacyReaderAlert(title: "Copied", message: "Page description copied to the clipboard.")
+            })
+        }
+        if let image = image {
+            alert.addAction(UIAlertAction(title: "Copy Image", style: .default) { _ in
+                UIPasteboard.general.image = image
+                viewController.showLegacyReaderAlert(title: "Copied", message: "Page image copied to the clipboard.")
+            })
+            alert.addAction(UIAlertAction(title: "Download Image", style: .default) { _ in
+                UIImageWriteToSavedPhotosAlbum(
+                    image,
+                    viewController,
+                    #selector(UIViewController.legacyReaderImage(_:didFinishSavingWithError:contextInfo:)),
+                    nil
+                )
+            })
+            alert.addAction(UIAlertAction(title: "Share Image", style: .default) { _ in
+                let activity = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+                if let popover = activity.popoverPresentationController {
+                    popover.sourceView = sourceView ?? viewController.view
+                    popover.sourceRect = (sourceView ?? viewController.view).bounds
+                }
+                viewController.present(activity, animated: true)
+            })
+        }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.sourceView = sourceView ?? viewController.view
@@ -5913,6 +6012,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
         loadDetails()
     }
 
+    private var currentCoverURLs: [URL] {
+        return manga.coverURLCandidates(relativeTo: source.urls.first)
+    }
+
     override func numberOfSections(in tableView: UITableView) -> Int {
         return 2 + max(1, chapterGroups.count)
     }
@@ -5955,7 +6058,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
         if indexPath.section == 0 {
             cell.imageView?.image = LegacyImageLoader.placeholder()
             LegacyImageLoader.shared.loadCover(
-                urls: manga.coverURLCandidates(relativeTo: source.urls.first),
+                urls: currentCoverURLs,
                 source: source,
                 targetHeight: 180
             ) { image in
@@ -5968,7 +6071,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
             }
             cell.textLabel?.text = manga.title
             cell.detailTextLabel?.text = errorMessage ?? manga.description ?? manga.authors?.joined(separator: ", ") ?? "No description."
-            cell.accessoryType = .none
+            cell.accessoryType = source.runner.features.providesAlternateCovers ? .disclosureIndicator : .none
+            cell.selectionStyle = source.runner.features.providesAlternateCovers ? .default : .none
             return cell
         }
 
@@ -6020,6 +6124,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == 0 {
+            showAlternateCoverPicker(from: tableView.cellForRow(at: indexPath))
+            return
+        }
         if indexPath.section == 1 {
             let actions = readingActions
             guard actions.indices.contains(indexPath.row) else { return }
@@ -6044,6 +6152,56 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return
         }
         pushReader(chapter: chapter)
+    }
+
+    private func showAlternateCoverPicker(from sourceView: UIView?) {
+        guard source.runner.features.providesAlternateCovers else { return }
+        source.runner.getAlternateCovers(manga: manga) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard case .success(let covers) = result else {
+                    self.showAlert(title: "Covers Unavailable", message: "This source did not return alternate covers.")
+                    return
+                }
+                let coverValues = covers
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .reduce(into: [String]()) { result, cover in
+                        if !result.contains(cover) {
+                            result.append(cover)
+                        }
+                    }
+                guard !coverValues.isEmpty else {
+                    self.showAlert(title: "No Covers", message: "No alternate covers are available for this manga.")
+                    return
+                }
+
+                let alert = UIAlertController(title: "Select Cover", message: self.manga.title, preferredStyle: .actionSheet)
+                for (index, cover) in coverValues.enumerated() {
+                    let title = cover == self.manga.cover ? "Current Cover" : "Cover \(index + 1)"
+                    alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                        self?.applyAlternateCover(cover)
+                    })
+                }
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                if let popover = alert.popoverPresentationController {
+                    popover.sourceView = sourceView ?? self.view
+                    popover.sourceRect = (sourceView ?? self.view).bounds
+                }
+                self.present(alert, animated: true)
+            }
+        }
+    }
+
+    private func applyAlternateCover(_ cover: String) {
+        let oldCoverURLs = currentCoverURLs
+        manga.cover = cover
+        let newCoverURLs = currentCoverURLs
+        LegacyImageLoader.shared.removeCachedImages(for: oldCoverURLs + newCoverURLs, source: source)
+        LegacyLibraryStore.shared.updateMangaMetadata(manga: manga, source: source)
+        LegacyHistoryStore.shared.updateMangaMetadata(manga: manga, source: source)
+        LegacyUpdateStore.shared.updateMangaMetadata(manga: manga, source: source)
+        tableView.reloadSections(IndexSet(integer: 0), with: .automatic)
     }
 
     override func tableView(
@@ -6723,12 +6881,20 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         super.viewDidLoad()
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
+        let pageButton = UIBarButtonItem(
             title: "Page",
             style: .plain,
             target: self,
             action: #selector(showCurrentPageActions)
         )
+        if aidokuLegacyChapterWebURL(chapter) != nil {
+            navigationItem.rightBarButtonItems = [
+                pageButton,
+                UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
+            ]
+        } else {
+            navigationItem.rightBarButtonItem = pageButton
+        }
         navigationController?.navigationBar.isTranslucent = false
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
@@ -6971,21 +7137,50 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         showPageActions(pageIndex: pageIndex, sourceView: sourceView)
     }
 
+    @objc private func openChapterWebPage() {
+        guard let url = aidokuLegacyChapterWebURL(chapter) else { return }
+        aidokuLegacyOpenWebPage(url: url, title: chapter.legacyFormattedTitle, from: self)
+    }
+
     private func showPageActions(pageIndex: Int, sourceView: UIView?) {
         guard pages.indices.contains(pageIndex) else { return }
         let visibleImage = (tableView.cellForRow(at: IndexPath(row: pageIndex, section: 0)) as? LegacyPageImageCell)?.currentImage
         resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
             guard let self = self else { return }
-            guard let image = image else {
-                self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
-                return
+            self.resolvePageDescription(pageIndex: pageIndex) { [weak self] pageDescription in
+                guard let self = self else { return }
+                guard image != nil || pageDescription != nil else {
+                    self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                    return
+                }
+                LegacyReaderPageActionPresenter.present(
+                    image: image,
+                    pageDescription: pageDescription,
+                    pageIndex: pageIndex,
+                    from: self,
+                    sourceView: sourceView ?? self.view
+                )
             }
-            LegacyReaderPageActionPresenter.present(
-                image: image,
-                pageIndex: pageIndex,
-                from: self,
-                sourceView: sourceView ?? self.view
-            )
+        }
+    }
+
+    private func resolvePageDescription(
+        pageIndex: Int,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard pages.indices.contains(pageIndex) else {
+            completion(nil)
+            return
+        }
+        aidokuLegacyResolvePageDescription(for: pages[pageIndex], runner: source.runner) { [weak self] description in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let description = description, self.pages.indices.contains(pageIndex) {
+                    self.pages[pageIndex].description = description
+                    self.pages[pageIndex].hasDescription = true
+                }
+                completion(description)
+            }
         }
     }
 
@@ -7270,12 +7465,20 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         super.viewDidLoad()
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
+        let pageButton = UIBarButtonItem(
             title: "Page",
             style: .plain,
             target: self,
             action: #selector(showCurrentPageActions)
         )
+        if aidokuLegacyChapterWebURL(chapter) != nil {
+            navigationItem.rightBarButtonItems = [
+                pageButton,
+                UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
+            ]
+        } else {
+            navigationItem.rightBarButtonItem = pageButton
+        }
         navigationController?.navigationBar.isTranslucent = false
         view.backgroundColor = UIColor.black
 
@@ -7582,22 +7785,51 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         showPageActions(pageIndex: pageIndex, sourceView: collectionView.cellForItem(at: indexPath) ?? view)
     }
 
+    @objc private func openChapterWebPage() {
+        guard let url = aidokuLegacyChapterWebURL(chapter) else { return }
+        aidokuLegacyOpenWebPage(url: url, title: chapter.legacyFormattedTitle, from: self)
+    }
+
     private func showPageActions(pageIndex: Int, sourceView: UIView?) {
         guard pages.indices.contains(pageIndex) else { return }
         let indexPath = IndexPath(item: visualIndex(forPageIndex: pageIndex), section: 0)
         let visibleImage = (collectionView.cellForItem(at: indexPath) as? LegacyPagedImageCell)?.currentImage
         resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
             guard let self = self else { return }
-            guard let image = image else {
-                self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
-                return
+            self.resolvePageDescription(pageIndex: pageIndex) { [weak self] pageDescription in
+                guard let self = self else { return }
+                guard image != nil || pageDescription != nil else {
+                    self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                    return
+                }
+                LegacyReaderPageActionPresenter.present(
+                    image: image,
+                    pageDescription: pageDescription,
+                    pageIndex: pageIndex,
+                    from: self,
+                    sourceView: sourceView ?? self.view
+                )
             }
-            LegacyReaderPageActionPresenter.present(
-                image: image,
-                pageIndex: pageIndex,
-                from: self,
-                sourceView: sourceView ?? self.view
-            )
+        }
+    }
+
+    private func resolvePageDescription(
+        pageIndex: Int,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard pages.indices.contains(pageIndex) else {
+            completion(nil)
+            return
+        }
+        aidokuLegacyResolvePageDescription(for: pages[pageIndex], runner: source.runner) { [weak self] description in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let description = description, self.pages.indices.contains(pageIndex) {
+                    self.pages[pageIndex].description = description
+                    self.pages[pageIndex].hasDescription = true
+                }
+                completion(description)
+            }
         }
     }
 
