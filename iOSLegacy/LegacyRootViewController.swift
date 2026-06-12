@@ -8675,10 +8675,14 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
 
 private final class LegacyPageImageCell: UITableViewCell {
     private let pageImageView = LegacyZoomableImageView()
+    private let messageStack = UIStackView()
     private let pageLabel = UILabel()
+    private let reloadButton = UIButton(type: .system)
     private var heightConstraint: NSLayoutConstraint!
     private var task: URLSessionDataTask?
     private var representedLoadID = UUID()
+    private var representedPage: AidokuRunnerLegacyPage?
+    private var representedSource: AidokuRunnerLegacySource?
     private var availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
     private var fitsViewport = false
     var onHeightChange: (() -> Void)?
@@ -8694,8 +8698,15 @@ private final class LegacyPageImageCell: UITableViewCell {
         pageLabel.textColor = UIColor.white
         pageLabel.textAlignment = .center
         pageLabel.numberOfLines = 0
+        messageStack.translatesAutoresizingMaskIntoConstraints = false
+        messageStack.axis = .vertical
+        messageStack.alignment = .center
+        messageStack.spacing = 12
+        configureReloadButton()
         contentView.addSubview(pageImageView)
-        contentView.addSubview(pageLabel)
+        contentView.addSubview(messageStack)
+        messageStack.addArrangedSubview(pageLabel)
+        messageStack.addArrangedSubview(reloadButton)
         heightConstraint = pageImageView.heightAnchor.constraint(equalToConstant: 420)
         NSLayoutConstraint.activate([
             pageImageView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -8703,10 +8714,13 @@ private final class LegacyPageImageCell: UITableViewCell {
             pageImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             heightConstraint,
             pageImageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            pageLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
-            pageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            pageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            pageLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24)
+            messageStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            messageStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            messageStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            messageStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+            pageLabel.widthAnchor.constraint(equalTo: messageStack.widthAnchor),
+            reloadButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 112),
+            reloadButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)
         ])
     }
 
@@ -8719,6 +8733,9 @@ private final class LegacyPageImageCell: UITableViewCell {
         super.prepareForReuse()
         releaseDecodedImage()
         pageLabel.text = nil
+        reloadButton.isHidden = true
+        representedPage = nil
+        representedSource = nil
         pageImageView.isHidden = false
         availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
         fitsViewport = false
@@ -8754,6 +8771,8 @@ private final class LegacyPageImageCell: UITableViewCell {
     ) {
         let loadID = UUID()
         representedLoadID = loadID
+        representedPage = page
+        representedSource = source
         self.availableSize = availableSize
         self.fitsViewport = fitsViewport
         task?.cancel()
@@ -8761,6 +8780,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         pageImageView.image = nil
         pageImageView.isHidden = false
         pageLabel.text = nil
+        reloadButton.isHidden = true
         heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         switch page.content {
             case .url(let url, let context):
@@ -8811,6 +8831,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest] = [],
         retriesRemaining: Int = 1
     ) {
         task?.cancel()
@@ -8825,6 +8846,7 @@ private final class LegacyPageImageCell: UITableViewCell {
                         context: context,
                         source: source,
                         loadID: loadID,
+                        fallbackRequests: fallbackRequests,
                         retriesRemaining: retriesRemaining
                     )
                 }
@@ -8852,6 +8874,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest],
         retriesRemaining: Int
     ) {
         let httpResponse = response as? HTTPURLResponse
@@ -8866,6 +8889,7 @@ private final class LegacyPageImageCell: UITableViewCell {
                         context: context,
                         source: source,
                         loadID: loadID,
+                        fallbackRequests: fallbackRequests,
                         retriesRemaining: retriesRemaining - 1
                     )
                 }
@@ -8873,10 +8897,16 @@ private final class LegacyPageImageCell: UITableViewCell {
             return
         }
         guard let data = data, !data.isEmpty else {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
             return
         }
         if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
             return
         }
@@ -8891,6 +8921,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest],
         retriesRemaining: Int
     ) {
         guard representedLoadID == loadID else { return }
@@ -8904,16 +8935,23 @@ private final class LegacyPageImageCell: UITableViewCell {
                     context: context,
                     source: source,
                     loadID: loadID,
+                    fallbackRequests: fallbackRequests,
                     retriesRemaining: retriesRemaining - 1
                 )
             }
             return
         }
         guard let data = data, !data.isEmpty else {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
             return
         }
         if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
             return
         }
@@ -8951,6 +8989,7 @@ private final class LegacyPageImageCell: UITableViewCell {
             self.pageImageView.isHidden = true
             self.heightConstraint.constant = 180
             self.pageLabel.text = message
+            self.reloadButton.isHidden = false
             self.onHeightChange?()
         }
     }
@@ -8995,6 +9034,7 @@ private final class LegacyPageImageCell: UITableViewCell {
     private func setImage(_ image: UIImage, loadID: UUID) {
         guard representedLoadID == loadID else { return }
         pageLabel.text = nil
+        reloadButton.isHidden = true
         pageImageView.isHidden = false
         pageImageView.image = image
         if fitsViewport {
@@ -9007,6 +9047,94 @@ private final class LegacyPageImageCell: UITableViewCell {
             heightConstraint.constant = targetHeight
         }
         onHeightChange?()
+    }
+
+    private func configureReloadButton() {
+        reloadButton.setTitle("Reload", for: .normal)
+        reloadButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
+        reloadButton.tintColor = UIColor.white
+        reloadButton.backgroundColor = LegacyPalette.accent
+        reloadButton.layer.cornerRadius = 8
+        reloadButton.layer.masksToBounds = true
+        reloadButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+        reloadButton.isHidden = true
+        reloadButton.addTarget(self, action: #selector(reloadCurrentPage), for: .touchUpInside)
+    }
+
+    private func loadFallback(
+        _ fallbackRequests: [URLRequest],
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID
+    ) -> Bool {
+        guard let request = fallbackRequests.first else { return false }
+        load(
+            request: request,
+            context: context,
+            source: source,
+            loadID: loadID,
+            fallbackRequests: Array(fallbackRequests.dropFirst()),
+            retriesRemaining: 1
+        )
+        return true
+    }
+
+    @objc private func reloadCurrentPage() {
+        guard let page = representedPage, let source = representedSource else { return }
+        let loadID = UUID()
+        representedLoadID = loadID
+        task?.cancel()
+        task = nil
+        pageImageView.image = nil
+        pageImageView.isHidden = false
+        pageLabel.text = "Loading..."
+        reloadButton.isHidden = true
+        heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
+        onHeightChange?()
+
+        switch page.content {
+            case .url(let url, let context):
+                if url.isFileURL {
+                    loadLocalImage(url: url, loadID: loadID)
+                    return
+                }
+                source.runner.getImageRequest(url: url, context: context) { [weak self] result in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    let request: URLRequest
+                    switch result {
+                        case .success(let imageRequest):
+                            request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                        case .failure:
+                            request = legacyFallbackImageRequest(url: url, source: source)
+                    }
+                    let reloadRequest = self.reloading(request)
+                    let fallbackRequests = legacyFallbackImageRequests(url: url, source: source, excluding: reloadRequest)
+                        .map(self.reloading)
+                    self.load(
+                        request: reloadRequest,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        fallbackRequests: fallbackRequests,
+                        retriesRemaining: 1
+                    )
+                }
+            case .image(let data):
+                setImage(from: data, loadID: loadID)
+            case .text(let text):
+                pageImageView.isHidden = true
+                heightConstraint.constant = 180
+                pageLabel.text = text
+                onHeightChange?()
+            case .zipFile(_, _):
+                showFailure("ZIP pages are not supported in the legacy reader yet.", loadID: loadID)
+        }
+    }
+
+    private func reloading(_ request: URLRequest) -> URLRequest {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        return request
     }
 
     private func loadFailureMessage(error: Error?, response: HTTPURLResponse?) -> String {
@@ -9059,9 +9187,13 @@ private final class LegacyPageImageCell: UITableViewCell {
 
 private final class LegacyPagedImageCell: UICollectionViewCell {
     private let pageImageView = LegacyZoomableImageView()
+    private let messageStack = UIStackView()
     private let pageLabel = UILabel()
+    private let reloadButton = UIButton(type: .system)
     private var task: URLSessionDataTask?
     private var representedLoadID = UUID()
+    private var representedPage: AidokuRunnerLegacyPage?
+    private var representedSource: AidokuRunnerLegacySource?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -9074,16 +9206,28 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         pageLabel.textColor = UIColor.white
         pageLabel.textAlignment = .center
         pageLabel.numberOfLines = 0
+        messageStack.translatesAutoresizingMaskIntoConstraints = false
+        messageStack.axis = .vertical
+        messageStack.alignment = .center
+        messageStack.spacing = 12
+        configureReloadButton()
         contentView.addSubview(pageImageView)
-        contentView.addSubview(pageLabel)
+        contentView.addSubview(messageStack)
+        messageStack.addArrangedSubview(pageLabel)
+        messageStack.addArrangedSubview(reloadButton)
         NSLayoutConstraint.activate([
             pageImageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             pageImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             pageImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             pageImageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            pageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            pageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            pageLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+            messageStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            messageStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            messageStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            messageStack.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 24),
+            messageStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+            pageLabel.widthAnchor.constraint(equalTo: messageStack.widthAnchor),
+            reloadButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 112),
+            reloadButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)
         ])
     }
 
@@ -9096,6 +9240,9 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         super.prepareForReuse()
         releaseDecodedImage()
         pageLabel.text = nil
+        reloadButton.isHidden = true
+        representedPage = nil
+        representedSource = nil
         pageImageView.isHidden = false
     }
 
@@ -9122,11 +9269,14 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     func configure(page: AidokuRunnerLegacyPage, source: AidokuRunnerLegacySource) {
         let loadID = UUID()
         representedLoadID = loadID
+        representedPage = page
+        representedSource = source
         task?.cancel()
         task = nil
         pageImageView.image = nil
         pageImageView.isHidden = false
         pageLabel.text = nil
+        reloadButton.isHidden = true
         switch page.content {
             case .url(let url, let context):
                 pageLabel.text = "Loading..."
@@ -9174,6 +9324,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest] = [],
         retriesRemaining: Int = 1
     ) {
         task?.cancel()
@@ -9188,6 +9339,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                         context: context,
                         source: source,
                         loadID: loadID,
+                        fallbackRequests: fallbackRequests,
                         retriesRemaining: retriesRemaining
                     )
                 }
@@ -9229,6 +9381,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                         context: context,
                         source: source,
                         loadID: loadID,
+                        fallbackRequests: fallbackRequests,
                         retriesRemaining: retriesRemaining - 1
                     )
                 }
@@ -9236,10 +9389,16 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             return
         }
         guard let data = data, !data.isEmpty else {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
             return
         }
         if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
             return
         }
@@ -9254,6 +9413,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest],
         retriesRemaining: Int
     ) {
         guard representedLoadID == loadID else { return }
@@ -9267,16 +9427,23 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                     context: context,
                     source: source,
                     loadID: loadID,
+                    fallbackRequests: fallbackRequests,
                     retriesRemaining: retriesRemaining - 1
                 )
             }
             return
         }
         guard let data = data, !data.isEmpty else {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(loadFailureMessage(error: error, response: httpResponse), loadID: loadID)
             return
         }
         if let statusCode = statusCode, !(200..<300).contains(statusCode) {
+            if loadFallback(fallbackRequests, context: context, source: source, loadID: loadID) {
+                return
+            }
             showFailure(httpFailureMessage(statusCode: statusCode, response: httpResponse), loadID: loadID)
             return
         }
@@ -9313,6 +9480,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             guard self.representedLoadID == loadID else { return }
             self.pageImageView.isHidden = true
             self.pageLabel.text = message
+            self.reloadButton.isHidden = false
         }
     }
 
@@ -9356,8 +9524,93 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     private func setImage(_ image: UIImage, loadID: UUID) {
         guard representedLoadID == loadID else { return }
         pageLabel.text = nil
+        reloadButton.isHidden = true
         pageImageView.isHidden = false
         pageImageView.image = image
+    }
+
+    private func configureReloadButton() {
+        reloadButton.setTitle("Reload", for: .normal)
+        reloadButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
+        reloadButton.tintColor = UIColor.white
+        reloadButton.backgroundColor = LegacyPalette.accent
+        reloadButton.layer.cornerRadius = 8
+        reloadButton.layer.masksToBounds = true
+        reloadButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+        reloadButton.isHidden = true
+        reloadButton.addTarget(self, action: #selector(reloadCurrentPage), for: .touchUpInside)
+    }
+
+    private func loadFallback(
+        _ fallbackRequests: [URLRequest],
+        context: [String: String]?,
+        source: AidokuRunnerLegacySource,
+        loadID: UUID
+    ) -> Bool {
+        guard let request = fallbackRequests.first else { return false }
+        load(
+            request: request,
+            context: context,
+            source: source,
+            loadID: loadID,
+            fallbackRequests: Array(fallbackRequests.dropFirst()),
+            retriesRemaining: 1
+        )
+        return true
+    }
+
+    @objc private func reloadCurrentPage() {
+        guard let page = representedPage, let source = representedSource else { return }
+        let loadID = UUID()
+        representedLoadID = loadID
+        task?.cancel()
+        task = nil
+        pageImageView.image = nil
+        pageImageView.isHidden = false
+        pageLabel.text = "Loading..."
+        reloadButton.isHidden = true
+
+        switch page.content {
+            case .url(let url, let context):
+                if url.isFileURL {
+                    loadLocalImage(url: url, loadID: loadID)
+                    return
+                }
+                source.runner.getImageRequest(url: url, context: context) { [weak self] result in
+                    guard let self = self, self.representedLoadID == loadID else { return }
+                    let request: URLRequest
+                    switch result {
+                        case .success(let imageRequest):
+                            request = imageRequest.urlRequest(source: source, fallbackURL: url)
+                        case .failure:
+                            request = legacyFallbackImageRequest(url: url, source: source)
+                    }
+                    let reloadRequest = self.reloading(request)
+                    let fallbackRequests = legacyFallbackImageRequests(url: url, source: source, excluding: reloadRequest)
+                        .map(self.reloading)
+                    self.load(
+                        request: reloadRequest,
+                        context: context,
+                        source: source,
+                        loadID: loadID,
+                        fallbackRequests: fallbackRequests,
+                        retriesRemaining: 1
+                    )
+                }
+            case .image(let data):
+                setImage(from: data, loadID: loadID)
+            case .text(let text):
+                pageImageView.isHidden = true
+                pageLabel.text = text
+            case .zipFile(_, _):
+                showFailure("ZIP pages are not supported in the legacy reader yet.", loadID: loadID)
+        }
+    }
+
+    private func reloading(_ request: URLRequest) -> URLRequest {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        return request
     }
 
     private func loadFailureMessage(error: Error?, response: HTTPURLResponse?) -> String {
