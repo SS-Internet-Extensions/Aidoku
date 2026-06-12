@@ -38,7 +38,7 @@ public class Runtime {
         let mod: IM3Module? = module.raw
         let result = m3_LoadModule(raw, mod)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: raw)
         }
         guard let mod = mod else {
             throw Wasm3Error.failedAllocation
@@ -81,7 +81,7 @@ public class Runtime {
     public func resizeMemory(numPages: UInt32) throws {
         let result = ResizeMemory(raw, numPages)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: raw)
         }
     }
 

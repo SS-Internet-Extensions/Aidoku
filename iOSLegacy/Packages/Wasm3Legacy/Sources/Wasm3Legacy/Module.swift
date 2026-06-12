@@ -40,8 +40,6 @@ public class ParsedModule {
 // MARK: - Module
 
 public class Module {
-    private var id = UUID()
-
     var raw: IM3Module
     public var runtime: Runtime
 
@@ -51,6 +49,7 @@ public class Module {
     ) -> UnsafeRawPointer?
 
     private static var linkedFunctionCache = [UnsafeMutableRawPointer: LinkedFunctionSignature]()
+    private var linkedFunctionContexts: [UnsafeMutableRawPointer] = []
 
     public static func parse(env: Environment, bytes: [UInt8]) throws -> ParsedModule {
         try ParsedModule.parse(env: env, bytes: bytes)
@@ -61,6 +60,13 @@ public class Module {
         self.raw = raw
     }
 
+    deinit {
+        for context in linkedFunctionContexts {
+            Self.linkedFunctionCache.removeValue(forKey: context)
+            context.deallocate()
+        }
+    }
+
     public func findFunction(name: String) throws -> Function {
         var fun: IM3Function?
         let result = m3_FindFunction(&fun, runtime.raw, name)
@@ -68,7 +74,7 @@ public class Module {
             return Function(runtime: runtime, raw: fun)
         } else {
             if let result = result {
-                throw Wasm3Error(ffiResult: result)
+                throw Wasm3Error(ffiResult: result, runtime: runtime.raw)
             } else {
                 throw Wasm3Error.missingFunction
             }
@@ -94,7 +100,7 @@ public class Module {
     public func linkWasi() throws {
         let result = m3_LinkWASI(raw)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime.raw)
         }
     }
 }
@@ -118,11 +124,7 @@ extension Module {
         signature: String,
         function: @escaping LinkedFunctionSignature
     ) throws {
-        guard let context = UnsafeMutableRawPointer(
-            bitPattern: (id.uuidString + namespace + name).hashValue
-        ) else {
-            throw Wasm3Error.failedAllocation
-        }
+        let context = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
 
         // save linked functions in a cache to be accessed from handler
         Self.linkedFunctionCache[context] = function
@@ -144,8 +146,16 @@ extension Module {
 
         let result = m3_LinkRawFunctionEx(raw, namespace, name, signature, handler, context)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            Self.linkedFunctionCache.removeValue(forKey: context)
+            context.deallocate()
+
+            let error = Wasm3Error(ffiResult: result, runtime: runtime.raw)
+            if error == .functionLookupFailed {
+                return
+            }
+            throw Wasm3Error.wasm3Error("failed to link \(namespace).\(name): \(error.localizedDescription)")
         }
+        linkedFunctionContexts.append(context)
     }
 
     private static func argument<T: WasmType>(
@@ -325,6 +335,6 @@ public extension Module {
     func findGlobal<T: WasmType>(name: String, type: T.Type) -> Global<T>? {
         let result = m3_FindGlobal(raw, name)
         guard let result = result else { return nil }
-        return Global(type: type, raw: result)
+        return Global(type: type, raw: result, runtime: runtime)
     }
 }

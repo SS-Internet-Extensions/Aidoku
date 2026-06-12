@@ -10,11 +10,13 @@ import wasm3_legacy_c
 
 public class Global<T: WasmType> {
     var raw: IM3Global
+    private let runtime: Runtime?
     public var type: T.Type
 
-    init(type: T.Type, raw: IM3Global) {
+    init(type: T.Type, raw: IM3Global, runtime: Runtime? = nil) {
         self.type = type
         self.raw = raw
+        self.runtime = runtime
     }
 
     func value() throws -> T {
@@ -22,7 +24,7 @@ public class Global<T: WasmType> {
         defer { value.deallocate() }
         let result = m3_GetGlobal(raw, value)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime?.raw)
         }
         // swiftlint:disable force_cast
         switch type {
@@ -64,7 +66,7 @@ public class Global<T: WasmType> {
         var taggedValue = M3TaggedValue(type: type, value: valueUnion)
         let result = m3_SetGlobal(raw, &taggedValue)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime?.raw)
         }
     }
 }

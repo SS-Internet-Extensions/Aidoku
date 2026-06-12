@@ -16,58 +16,58 @@ struct Html: SourceLibrary {
     let store: GlobalStore
 
     func link() throws {
-        try? module.linkFunction(name: "parse", namespace: Self.namespace, function: parse)
-        try? module.linkFunction(name: "parse_fragment", namespace: Self.namespace, function: parseFragment)
-        try? module.linkFunction(name: "escape", namespace: Self.namespace, function: escape)
-        try? module.linkFunction(name: "unescape", namespace: Self.namespace, function: unescape)
+        try module.linkFunction(name: "parse", namespace: Self.namespace, function: parse)
+        try module.linkFunction(name: "parse_fragment", namespace: Self.namespace, function: parseFragment)
+        try module.linkFunction(name: "escape", namespace: Self.namespace, function: escape)
+        try module.linkFunction(name: "unescape", namespace: Self.namespace, function: unescape)
 
-        try? module.linkFunction(name: "kind", namespace: Self.namespace, function: kind)
+        try module.linkFunction(name: "kind", namespace: Self.namespace, function: kind)
 
         // `Node` functions
-        try? module.linkFunction(name: "child_nodes", namespace: Self.namespace, function: childNodes)
-        try? module.linkFunction(name: "has_attr", namespace: Self.namespace, function: hasAttr)
-        try? module.linkFunction(name: "set_attr", namespace: Self.namespace, function: setAttr)
-        try? module.linkFunction(name: "remove_attr", namespace: Self.namespace, function: removeAttr)
+        try module.linkFunction(name: "child_nodes", namespace: Self.namespace, function: childNodes)
+        try module.linkFunction(name: "has_attr", namespace: Self.namespace, function: hasAttr)
+        try module.linkFunction(name: "set_attr", namespace: Self.namespace, function: setAttr)
+        try module.linkFunction(name: "remove_attr", namespace: Self.namespace, function: removeAttr)
 
         // `Element` functions
-        try? module.linkFunction(name: "set_text", namespace: Self.namespace, function: setText)
-        try? module.linkFunction(name: "set_html", namespace: Self.namespace, function: setHtml)
-        try? module.linkFunction(name: "prepend", namespace: Self.namespace, function: prepend)
-        try? module.linkFunction(name: "append", namespace: Self.namespace, function: append)
-        try? module.linkFunction(name: "children", namespace: Self.namespace, function: children)
-        try? module.linkFunction(name: "base_uri", namespace: Self.namespace, function: baseUri)
-        try? module.linkFunction(name: "own_text", namespace: Self.namespace, function: ownText)
-        try? module.linkFunction(name: "data", namespace: Self.namespace, function: data)
-        try? module.linkFunction(name: "id", namespace: Self.namespace, function: id)
-        try? module.linkFunction(name: "tag_name", namespace: Self.namespace, function: tagName)
-        try? module.linkFunction(name: "class_name", namespace: Self.namespace, function: className)
-        try? module.linkFunction(name: "has_class", namespace: Self.namespace, function: hasClass)
-        try? module.linkFunction(name: "add_class", namespace: Self.namespace, function: addClass)
-        try? module.linkFunction(name: "remove_class", namespace: Self.namespace, function: removeClass)
+        try module.linkFunction(name: "set_text", namespace: Self.namespace, function: setText)
+        try module.linkFunction(name: "set_html", namespace: Self.namespace, function: setHtml)
+        try module.linkFunction(name: "prepend", namespace: Self.namespace, function: prepend)
+        try module.linkFunction(name: "append", namespace: Self.namespace, function: append)
+        try module.linkFunction(name: "children", namespace: Self.namespace, function: children)
+        try module.linkFunction(name: "base_uri", namespace: Self.namespace, function: baseUri)
+        try module.linkFunction(name: "own_text", namespace: Self.namespace, function: ownText)
+        try module.linkFunction(name: "data", namespace: Self.namespace, function: data)
+        try module.linkFunction(name: "id", namespace: Self.namespace, function: id)
+        try module.linkFunction(name: "tag_name", namespace: Self.namespace, function: tagName)
+        try module.linkFunction(name: "class_name", namespace: Self.namespace, function: className)
+        try module.linkFunction(name: "has_class", namespace: Self.namespace, function: hasClass)
+        try module.linkFunction(name: "add_class", namespace: Self.namespace, function: addClass)
+        try module.linkFunction(name: "remove_class", namespace: Self.namespace, function: removeClass)
 
         // `Elements` functions
-        try? module.linkFunction(name: "first", namespace: Self.namespace, function: first)
-        try? module.linkFunction(name: "last", namespace: Self.namespace, function: last)
-        try? module.linkFunction(name: "get", namespace: Self.namespace, function: get)
-        try? module.linkFunction(name: "size", namespace: Self.namespace, function: size)
+        try module.linkFunction(name: "first", namespace: Self.namespace, function: first)
+        try module.linkFunction(name: "last", namespace: Self.namespace, function: last)
+        try module.linkFunction(name: "get", namespace: Self.namespace, function: get)
+        try module.linkFunction(name: "size", namespace: Self.namespace, function: size)
 
         // `Element` and `Node` functions
-        try? module.linkFunction(name: "parent", namespace: Self.namespace, function: parent)
-        try? module.linkFunction(name: "siblings", namespace: Self.namespace, function: siblings)
-        try? module.linkFunction(name: "next", namespace: Self.namespace, function: next)
-        try? module.linkFunction(name: "previous", namespace: Self.namespace, function: previous)
+        try module.linkFunction(name: "parent", namespace: Self.namespace, function: parent)
+        try module.linkFunction(name: "siblings", namespace: Self.namespace, function: siblings)
+        try module.linkFunction(name: "next", namespace: Self.namespace, function: next)
+        try module.linkFunction(name: "previous", namespace: Self.namespace, function: previous)
 
         // `Elements` and `Node` functions
-        try? module.linkFunction(name: "attr", namespace: Self.namespace, function: attr)
-        try? module.linkFunction(name: "outer_html", namespace: Self.namespace, function: outerHtml)
-        try? module.linkFunction(name: "remove", namespace: Self.namespace, function: remove)
+        try module.linkFunction(name: "attr", namespace: Self.namespace, function: attr)
+        try module.linkFunction(name: "outer_html", namespace: Self.namespace, function: outerHtml)
+        try module.linkFunction(name: "remove", namespace: Self.namespace, function: remove)
 
         // `Elements` and `Element` functions
-        try? module.linkFunction(name: "select", namespace: Self.namespace, function: select)
-        try? module.linkFunction(name: "select_first", namespace: Self.namespace, function: selectFirst)
-        try? module.linkFunction(name: "text", namespace: Self.namespace, function: text)
-        try? module.linkFunction(name: "untrimmed_text", namespace: Self.namespace, function: untrimmedText)
-        try? module.linkFunction(name: "html", namespace: Self.namespace, function: html)
+        try module.linkFunction(name: "select", namespace: Self.namespace, function: select)
+        try module.linkFunction(name: "select_first", namespace: Self.namespace, function: selectFirst)
+        try module.linkFunction(name: "text", namespace: Self.namespace, function: text)
+        try module.linkFunction(name: "untrimmed_text", namespace: Self.namespace, function: untrimmedText)
+        try module.linkFunction(name: "html", namespace: Self.namespace, function: html)
     }
 
     enum Result: Int32 {

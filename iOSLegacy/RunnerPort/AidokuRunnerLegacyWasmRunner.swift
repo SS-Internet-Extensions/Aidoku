@@ -491,12 +491,19 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
             do {
                 result = .success(try operation())
             } catch {
-                result = .failure(error)
+                result = .failure(self.normalize(error: error))
             }
             DispatchQueue.main.async {
                 completion(result)
             }
         }
+    }
+
+    private func normalize(error: Error) -> Error {
+        guard let error = error as? Wasm3Error else {
+            return error
+        }
+        return SourceError.message("WASM runtime error in \(sourceKey): \(error.localizedDescription)")
     }
 
     private func handleResult(result: Int32) throws -> Data {

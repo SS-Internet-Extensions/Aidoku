@@ -21,10 +21,10 @@ struct Env: SourceLibrary {
     let printHandler: (String) -> Void
 
     func link() throws {
-        try? module.linkFunction(name: "abort", namespace: Self.namespace, function: abort)
-        try? module.linkFunction(name: "print", namespace: Self.namespace, function: envPrint)
-        try? module.linkFunction(name: "sleep", namespace: Self.namespace, function: sleep)
-        try? module.linkFunction(name: "send_partial_result", namespace: Self.namespace, function: sendPartialResult)
+        try module.linkFunction(name: "abort", namespace: Self.namespace, function: abort)
+        try module.linkFunction(name: "print", namespace: Self.namespace, function: envPrint)
+        try module.linkFunction(name: "sleep", namespace: Self.namespace, function: sleep)
+        try module.linkFunction(name: "send_partial_result", namespace: Self.namespace, function: sendPartialResult)
     }
 
     func abort() {
@@ -62,14 +62,14 @@ struct Std: SourceLibrary {
     let printHandler: ((String) -> Void)?
 
     func link() throws {
-        try? module.linkFunction(name: "abort", namespace: Self.namespace, function: abort)
-        try? module.linkFunction(name: "print", namespace: Self.namespace, function: stdPrint)
-        try? module.linkFunction(name: "destroy", namespace: Self.namespace, function: destroy)
-        try? module.linkFunction(name: "buffer_len", namespace: Self.namespace, function: bufferLength)
-        try? module.linkFunction(name: "read_buffer", namespace: Self.namespace, function: readBuffer)
-        try? module.linkFunction(name: "current_date", namespace: Self.namespace, function: currentDate)
-        try? module.linkFunction(name: "utc_offset", namespace: Self.namespace, function: utcOffset)
-        try? module.linkFunction(name: "parse_date", namespace: Self.namespace, function: parseDate)
+        try module.linkFunction(name: "abort", namespace: Self.namespace, function: abort)
+        try module.linkFunction(name: "print", namespace: Self.namespace, function: stdPrint)
+        try module.linkFunction(name: "destroy", namespace: Self.namespace, function: destroy)
+        try module.linkFunction(name: "buffer_len", namespace: Self.namespace, function: bufferLength)
+        try module.linkFunction(name: "read_buffer", namespace: Self.namespace, function: readBuffer)
+        try module.linkFunction(name: "current_date", namespace: Self.namespace, function: currentDate)
+        try module.linkFunction(name: "utc_offset", namespace: Self.namespace, function: utcOffset)
+        try module.linkFunction(name: "parse_date", namespace: Self.namespace, function: parseDate)
     }
 
     enum Result: Int32 {
@@ -180,8 +180,8 @@ struct Defaults: SourceLibrary {
     let defaultNamespace: String
 
     func link() throws {
-        try? module.linkFunction(name: "get", namespace: Self.namespace, function: get)
-        try? module.linkFunction(name: "set", namespace: Self.namespace, function: set)
+        try module.linkFunction(name: "get", namespace: Self.namespace, function: get)
+        try module.linkFunction(name: "set", namespace: Self.namespace, function: set)
     }
 
     enum Result: Int32 {
@@ -283,14 +283,14 @@ struct JavaScript: SourceLibrary {
     let store: GlobalStore
 
     func link() throws {
-        try? module.linkFunction(name: "context_create", namespace: Self.namespace, function: contextCreate)
-        try? module.linkFunction(name: "context_eval", namespace: Self.namespace, function: contextEval)
-        try? module.linkFunction(name: "context_get", namespace: Self.namespace, function: contextGet)
-        try? module.linkFunction(name: "webview_create", namespace: Self.namespace, function: webViewCreate)
-        try? module.linkFunction(name: "webview_load", namespace: Self.namespace, function: webViewLoad)
-        try? module.linkFunction(name: "webview_load_html", namespace: Self.namespace, function: webViewLoadHtml)
-        try? module.linkFunction(name: "webview_wait_for_load", namespace: Self.namespace, function: webViewWaitForLoad)
-        try? module.linkFunction(name: "webview_eval", namespace: Self.namespace, function: webViewEval)
+        try module.linkFunction(name: "context_create", namespace: Self.namespace, function: contextCreate)
+        try module.linkFunction(name: "context_eval", namespace: Self.namespace, function: contextEval)
+        try module.linkFunction(name: "context_get", namespace: Self.namespace, function: contextGet)
+        try module.linkFunction(name: "webview_create", namespace: Self.namespace, function: webViewCreate)
+        try module.linkFunction(name: "webview_load", namespace: Self.namespace, function: webViewLoad)
+        try module.linkFunction(name: "webview_load_html", namespace: Self.namespace, function: webViewLoadHtml)
+        try module.linkFunction(name: "webview_wait_for_load", namespace: Self.namespace, function: webViewWaitForLoad)
+        try module.linkFunction(name: "webview_eval", namespace: Self.namespace, function: webViewEval)
     }
 
     enum Result: Int32 {
@@ -485,21 +485,21 @@ struct Canvas: SourceLibrary {
     let store: GlobalStore
 
     func link() throws {
-        try? module.linkFunction(name: "new_context", namespace: Self.namespace, function: newContext)
-        try? module.linkFunction(name: "set_transform", namespace: Self.namespace, function: setTransform)
-        try? module.linkFunction(name: "draw_image", namespace: Self.namespace, function: drawImage)
-        try? module.linkFunction(name: "copy_image", namespace: Self.namespace, function: copyImage)
-        try? module.linkFunction(name: "fill", namespace: Self.namespace, function: fill)
-        try? module.linkFunction(name: "stroke", namespace: Self.namespace, function: stroke)
-        try? module.linkFunction(name: "draw_text", namespace: Self.namespace, function: drawText)
-        try? module.linkFunction(name: "get_image", namespace: Self.namespace, function: getImage)
-        try? module.linkFunction(name: "new_font", namespace: Self.namespace, function: newFont)
-        try? module.linkFunction(name: "system_font", namespace: Self.namespace, function: systemFont)
-        try? module.linkFunction(name: "load_font", namespace: Self.namespace, function: loadFont)
-        try? module.linkFunction(name: "new_image", namespace: Self.namespace, function: newImage)
-        try? module.linkFunction(name: "get_image_data", namespace: Self.namespace, function: getImageData)
-        try? module.linkFunction(name: "get_image_width", namespace: Self.namespace, function: getImageWidth)
-        try? module.linkFunction(name: "get_image_height", namespace: Self.namespace, function: getImageHeight)
+        try module.linkFunction(name: "new_context", namespace: Self.namespace, function: newContext)
+        try module.linkFunction(name: "set_transform", namespace: Self.namespace, function: setTransform)
+        try module.linkFunction(name: "draw_image", namespace: Self.namespace, function: drawImage)
+        try module.linkFunction(name: "copy_image", namespace: Self.namespace, function: copyImage)
+        try module.linkFunction(name: "fill", namespace: Self.namespace, function: fill)
+        try module.linkFunction(name: "stroke", namespace: Self.namespace, function: stroke)
+        try module.linkFunction(name: "draw_text", namespace: Self.namespace, function: drawText)
+        try module.linkFunction(name: "get_image", namespace: Self.namespace, function: getImage)
+        try module.linkFunction(name: "new_font", namespace: Self.namespace, function: newFont)
+        try module.linkFunction(name: "system_font", namespace: Self.namespace, function: systemFont)
+        try module.linkFunction(name: "load_font", namespace: Self.namespace, function: loadFont)
+        try module.linkFunction(name: "new_image", namespace: Self.namespace, function: newImage)
+        try module.linkFunction(name: "get_image_data", namespace: Self.namespace, function: getImageData)
+        try module.linkFunction(name: "get_image_width", namespace: Self.namespace, function: getImageWidth)
+        try module.linkFunction(name: "get_image_height", namespace: Self.namespace, function: getImageHeight)
     }
 
     enum Result: Int32 {
@@ -1077,23 +1077,23 @@ struct Net: SourceLibrary {
     let store: GlobalStore
 
     func link() throws {
-        try? module.linkFunction(name: "init", namespace: Self.namespace, function: initialize)
-        try? module.linkFunction(name: "send", namespace: Self.namespace, function: send)
-        try? module.linkFunction(name: "close", namespace: Self.namespace, function: close)
-        try? module.linkFunction(name: "send_all", namespace: Self.namespace, function: sendAll)
-        try? module.linkFunction(name: "set_url", namespace: Self.namespace, function: setUrl)
-        try? module.linkFunction(name: "set_header", namespace: Self.namespace, function: setHeader)
-        try? module.linkFunction(name: "set_body", namespace: Self.namespace, function: setBody)
-        try? module.linkFunction(name: "set_timeout", namespace: Self.namespace, function: setTimeout)
-        try? module.linkFunction(name: "data_len", namespace: Self.namespace, function: dataLength)
-        try? module.linkFunction(name: "read_data", namespace: Self.namespace, function: readData)
-        try? module.linkFunction(name: "get_image", namespace: Self.namespace, function: getImage)
-        try? module.linkFunction(name: "get_status_code", namespace: Self.namespace, function: getStatusCode)
-        try? module.linkFunction(name: "get_url", namespace: Self.namespace, function: getUrl)
-        try? module.linkFunction(name: "get_header", namespace: Self.namespace, function: getHeader)
-        try? module.linkFunction(name: "html", namespace: Self.namespace, function: dataToHtml)
-        try? module.linkFunction(name: "set_rate_limit", namespace: Self.namespace, function: setRateLimit)
-        try? module.linkFunction(name: "set_rate_limit_period", namespace: Self.namespace, function: setRateLimitPeriod)
+        try module.linkFunction(name: "init", namespace: Self.namespace, function: initialize)
+        try module.linkFunction(name: "send", namespace: Self.namespace, function: send)
+        try module.linkFunction(name: "close", namespace: Self.namespace, function: close)
+        try module.linkFunction(name: "send_all", namespace: Self.namespace, function: sendAll)
+        try module.linkFunction(name: "set_url", namespace: Self.namespace, function: setUrl)
+        try module.linkFunction(name: "set_header", namespace: Self.namespace, function: setHeader)
+        try module.linkFunction(name: "set_body", namespace: Self.namespace, function: setBody)
+        try module.linkFunction(name: "set_timeout", namespace: Self.namespace, function: setTimeout)
+        try module.linkFunction(name: "data_len", namespace: Self.namespace, function: dataLength)
+        try module.linkFunction(name: "read_data", namespace: Self.namespace, function: readData)
+        try module.linkFunction(name: "get_image", namespace: Self.namespace, function: getImage)
+        try module.linkFunction(name: "get_status_code", namespace: Self.namespace, function: getStatusCode)
+        try module.linkFunction(name: "get_url", namespace: Self.namespace, function: getUrl)
+        try module.linkFunction(name: "get_header", namespace: Self.namespace, function: getHeader)
+        try module.linkFunction(name: "html", namespace: Self.namespace, function: dataToHtml)
+        try module.linkFunction(name: "set_rate_limit", namespace: Self.namespace, function: setRateLimit)
+        try module.linkFunction(name: "set_rate_limit_period", namespace: Self.namespace, function: setRateLimitPeriod)
     }
 
     enum Result: Int32 {

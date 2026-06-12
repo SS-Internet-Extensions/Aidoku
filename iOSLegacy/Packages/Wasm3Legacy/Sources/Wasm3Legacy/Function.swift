@@ -20,7 +20,7 @@ public class Function {
     func compile() throws {
         let result = CompileFunction(raw)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime.raw)
         }
     }
 
@@ -43,7 +43,7 @@ public class Function {
         }
         let result = m3_Call(raw, UInt32(args.count), &argPtrs)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime.raw)
         }
     }
 
@@ -95,7 +95,7 @@ public class Function {
         }
         let result = m3_GetResults(raw, 1, &output)
         if let result = result {
-            throw Wasm3Error(ffiResult: result)
+            throw Wasm3Error(ffiResult: result, runtime: runtime.raw)
         }
         let retValue = output?.load(as: Ret.self)
         guard let retValue = retValue else {
