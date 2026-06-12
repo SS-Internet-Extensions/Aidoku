@@ -171,6 +171,14 @@ private func aidokuLegacyRemoveTemporaryPageDirectories(_ directories: [URL]) {
     }
 }
 
+private func aidokuLegacySplitList(_ value: String?) -> [String] {
+    guard let value = value else { return [] }
+    return value
+        .split(separator: ",")
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+}
+
 private func aidokuLegacyUsablePageDescription(_ description: String?) -> String? {
     guard let description = description else { return nil }
     return description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description
@@ -815,6 +823,25 @@ private extension AidokuRunnerLegacyManga {
         return manga
     }
 
+    var legacyTagText: String? {
+        let values = LegacyLibraryEntry.normalizedList(tags ?? [])
+        guard !values.isEmpty else { return nil }
+        return values.prefix(8).joined(separator: ", ")
+    }
+
+    var legacySummaryText: String? {
+        var components: [String] = []
+        if let authors = authors, !authors.isEmpty {
+            components.append(authors.joined(separator: ", "))
+        } else if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+            components.append(description)
+        }
+        if let tagText = legacyTagText {
+            components.append("Tags: \(tagText)")
+        }
+        return components.isEmpty ? nil : components.joined(separator: "\n")
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
@@ -829,9 +856,138 @@ struct LegacyLibraryEntry: Codable, Hashable {
     var manga: AidokuRunnerLegacyManga
     var dateAdded: Date
     var category: String?
+    var categories: [String]
 
     var key: String {
         return "\(sourceKey)::\(manga.key)"
+    }
+
+    var displayCategories: [String] {
+        let values = Self.normalizedList(categories)
+        if !values.isEmpty {
+            return values
+        }
+        return Self.normalizedList(category.map { [$0] } ?? [])
+    }
+
+    init(
+        sourceKey: String,
+        sourceName: String,
+        manga: AidokuRunnerLegacyManga,
+        dateAdded: Date,
+        category: String?,
+        categories: [String] = []
+    ) {
+        self.sourceKey = sourceKey
+        self.sourceName = sourceName
+        self.manga = manga
+        self.dateAdded = dateAdded
+        self.category = category
+        self.categories = Self.normalizedList(categories.isEmpty ? category.map { [$0] } ?? [] : categories)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceKey = try container.decode(String.self, forKey: .sourceKey)
+        sourceName = try container.decode(String.self, forKey: .sourceName)
+        manga = try container.decode(AidokuRunnerLegacyManga.self, forKey: .manga)
+        dateAdded = try container.decode(Date.self, forKey: .dateAdded)
+        category = try container.decodeIfPresent(String.self, forKey: .category)
+        let decodedCategories = try container.decodeIfPresent([String].self, forKey: .categories) ?? []
+        categories = Self.normalizedList(decodedCategories.isEmpty ? category.map { [$0] } ?? [] : decodedCategories)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourceKey, forKey: .sourceKey)
+        try container.encode(sourceName, forKey: .sourceName)
+        try container.encode(manga, forKey: .manga)
+        try container.encode(dateAdded, forKey: .dateAdded)
+        try container.encodeIfPresent(category, forKey: .category)
+        try container.encode(categories, forKey: .categories)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKey
+        case sourceName
+        case manga
+        case dateAdded
+        case category
+        case categories
+    }
+
+    static func normalizedList(_ values: [String]) -> [String] {
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if !result.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                result.append(trimmed)
+            }
+        }
+        return result
+    }
+}
+
+struct LegacyLibraryFilterGroup: Codable, Hashable {
+    var id: String
+    var name: String
+    var categories: [String]
+    var tags: [String]
+    var matchAll: Bool
+
+    var detailText: String {
+        var components: [String] = []
+        if !categories.isEmpty {
+            components.append("Categories: \(categories.joined(separator: ", "))")
+        }
+        if !tags.isEmpty {
+            components.append("Tags: \(tags.joined(separator: ", "))")
+        }
+        return components.isEmpty ? "No filters" : components.joined(separator: " - ")
+    }
+}
+
+final class LegacyLibraryFilterGroupStore {
+    static let shared = LegacyLibraryFilterGroupStore()
+
+    private let defaultsKey = "AidokuLegacy.library.filterGroups"
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    var groups: [LegacyLibraryFilterGroup] {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let groups = try? decoder.decode([LegacyLibraryFilterGroup].self, from: data)
+        else {
+            return []
+        }
+        return groups.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func save(_ group: LegacyLibraryFilterGroup) {
+        var current = groups.filter { $0.id != group.id }
+        current.append(group)
+        save(current)
+    }
+
+    func remove(id: String) {
+        save(groups.filter { $0.id != id })
+    }
+
+    func replace(_ groups: [LegacyLibraryFilterGroup]) {
+        save(groups)
+    }
+
+    func clear() {
+        save([])
+    }
+
+    private func save(_ groups: [LegacyLibraryFilterGroup]) {
+        if let data = try? encoder.encode(groups) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+            NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
+        }
     }
 }
 
@@ -856,28 +1012,46 @@ final class LegacyLibraryStore {
         return entries
     }
 
-    func entries(category: String? = nil, query: String? = nil, sort: LegacyLibrarySortOption = .recentlyAdded) -> [LegacyLibraryEntry] {
+    func entries(
+        category: String? = nil,
+        filterGroup: LegacyLibraryFilterGroup? = nil,
+        query: String? = nil,
+        sort: LegacyLibrarySortOption = .recentlyAdded
+    ) -> [LegacyLibraryEntry] {
         var filteredEntries = rawEntries
         if let category = category {
             if category.isEmpty {
-                filteredEntries = filteredEntries.filter { ($0.category ?? "").isEmpty }
+                filteredEntries = filteredEntries.filter { $0.displayCategories.isEmpty }
             } else {
-                filteredEntries = filteredEntries.filter { $0.category == category }
+                filteredEntries = filteredEntries.filter { entry in
+                    entry.displayCategories.contains { $0.caseInsensitiveCompare(category) == .orderedSame }
+                }
             }
+        }
+        if let filterGroup = filterGroup {
+            filteredEntries = filteredEntries.filter { matchesFilterGroup(filterGroup, entry: $0) }
         }
         let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedQuery.isEmpty {
             filteredEntries = filteredEntries.filter {
                 $0.manga.title.localizedCaseInsensitiveContains(trimmedQuery)
                     || $0.sourceName.localizedCaseInsensitiveContains(trimmedQuery)
-                    || ($0.category?.localizedCaseInsensitiveContains(trimmedQuery) ?? false)
+                    || $0.displayCategories.contains { $0.localizedCaseInsensitiveContains(trimmedQuery) }
+                    || ($0.manga.tags?.contains { $0.localizedCaseInsensitiveContains(trimmedQuery) } ?? false)
             }
         }
         return sortEntries(filteredEntries, sort: sort)
     }
 
     func categories() -> [String] {
-        let values = rawEntries.compactMap { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let values = rawEntries.flatMap { $0.displayCategories }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    func tags() -> [String] {
+        let values = rawEntries.flatMap { $0.manga.tags ?? [] }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return Array(Set(values)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
@@ -910,7 +1084,8 @@ final class LegacyLibraryStore {
             sourceName: source.name,
             manga: mergedManga,
             dateAdded: current[index].dateAdded,
-            category: current[index].category
+            category: current[index].category,
+            categories: current[index].displayCategories
         )
         save(current)
     }
@@ -932,12 +1107,17 @@ final class LegacyLibraryStore {
     }
 
     func setCategory(sourceKey: String, mangaKey: String, category: String?) {
+        setCategories(sourceKey: sourceKey, mangaKey: mangaKey, categories: category.map { [$0] } ?? [])
+    }
+
+    func setCategories(sourceKey: String, mangaKey: String, categories: [String]) {
         var current = rawEntries
         guard let index = current.firstIndex(where: { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }) else {
             return
         }
-        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
-        current[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let normalizedCategories = LegacyLibraryEntry.normalizedList(categories)
+        current[index].categories = normalizedCategories
+        current[index].category = normalizedCategories.first
         save(current)
     }
 
@@ -972,6 +1152,23 @@ final class LegacyLibraryStore {
                     return $0.manga.title.localizedCaseInsensitiveCompare($1.manga.title) == .orderedAscending
                 }
         }
+    }
+
+    private func matchesFilterGroup(_ group: LegacyLibraryFilterGroup, entry: LegacyLibraryEntry) -> Bool {
+        var checks: [Bool] = []
+        if !group.categories.isEmpty {
+            checks.append(group.categories.contains { category in
+                entry.displayCategories.contains { $0.caseInsensitiveCompare(category) == .orderedSame }
+            })
+        }
+        if !group.tags.isEmpty {
+            let entryTags = entry.manga.tags ?? []
+            checks.append(group.tags.contains { tag in
+                entryTags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
+            })
+        }
+        guard !checks.isEmpty else { return true }
+        return group.matchAll ? !checks.contains(false) : checks.contains(true)
     }
 
     private func save(_ entries: [LegacyLibraryEntry]) {
@@ -1715,7 +1912,40 @@ private struct LegacyBackupFile: Codable {
     var history: [LegacyHistoryEntry]
     var updates: [LegacyUpdateEntry]
     var repositories: [String]
+    var filterGroups: [LegacyLibraryFilterGroup]
     var settings: [LegacyBackupSetting]
+
+    init(
+        version: Int,
+        createdAt: Date,
+        library: [LegacyLibraryEntry],
+        history: [LegacyHistoryEntry],
+        updates: [LegacyUpdateEntry],
+        repositories: [String],
+        filterGroups: [LegacyLibraryFilterGroup],
+        settings: [LegacyBackupSetting]
+    ) {
+        self.version = version
+        self.createdAt = createdAt
+        self.library = library
+        self.history = history
+        self.updates = updates
+        self.repositories = repositories
+        self.filterGroups = filterGroups
+        self.settings = settings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        library = try container.decode([LegacyLibraryEntry].self, forKey: .library)
+        history = try container.decode([LegacyHistoryEntry].self, forKey: .history)
+        updates = try container.decode([LegacyUpdateEntry].self, forKey: .updates)
+        repositories = try container.decode([String].self, forKey: .repositories)
+        filterGroups = try container.decodeIfPresent([LegacyLibraryFilterGroup].self, forKey: .filterGroups) ?? []
+        settings = try container.decode([LegacyBackupSetting].self, forKey: .settings)
+    }
 }
 
 private struct LegacyBackupSetting: Codable {
@@ -1745,6 +1975,7 @@ final class LegacyBackupManager {
             history: LegacyHistoryStore.shared.entries,
             updates: LegacyUpdateStore.shared.entries,
             repositories: LegacySourceRepositoryStore.shared.repositoryURLs.map { $0.absoluteString },
+            filterGroups: LegacyLibraryFilterGroupStore.shared.groups,
             settings: collectSettings()
         )
         let directory = try backupDirectory()
@@ -1762,6 +1993,7 @@ final class LegacyBackupManager {
         LegacyHistoryStore.shared.replace(backup.history)
         LegacyUpdateStore.shared.replace(backup.updates)
         LegacySourceRepositoryStore.shared.replace(with: backup.repositories.compactMap(URL.init(string:)))
+        LegacyLibraryFilterGroupStore.shared.replace(backup.filterGroups)
         applySettings(backup.settings)
     }
 
@@ -2218,6 +2450,7 @@ final class LegacyLibraryViewController: UITableViewController {
     private var sourceObserver: NSObjectProtocol?
     private var isUpdatingLibrary = false
     private var activeCategory: String?
+    private var activeFilterGroup: LegacyLibraryFilterGroup?
     private var sortOption = LegacyLibrarySortOption.current
     private var pendingCoverRepairs = Set<String>()
     private var coverRepairAttempts: [String: Int] = [:]
@@ -2280,9 +2513,18 @@ final class LegacyLibraryViewController: UITableViewController {
 
     @objc private func reloadData() {
         let query = searchController.searchBar.text
-        entries = LegacyLibraryStore.shared.entries(category: activeCategory, query: query, sort: sortOption)
+        entries = LegacyLibraryStore.shared.entries(
+            category: activeFilterGroup == nil ? activeCategory : nil,
+            filterGroup: activeFilterGroup,
+            query: query,
+            sort: sortOption
+        )
         sources = packageInstaller.loadInstalledSources()
-        title = activeCategory.map { $0.isEmpty ? "Uncategorized" : $0 } ?? "Library"
+        if let activeFilterGroup = activeFilterGroup {
+            title = activeFilterGroup.name
+        } else {
+            title = activeCategory.map { $0.isEmpty ? "Uncategorized" : $0 } ?? "Library"
+        }
         refreshControl?.endRefreshing()
         tableView.reloadData()
     }
@@ -2350,8 +2592,8 @@ final class LegacyLibraryViewController: UITableViewController {
         let remove = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
             LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
         }
-        let category = UITableViewRowAction(style: .normal, title: "Category") { [weak self] _, _ in
-            self?.showCategoryPrompt(for: entry)
+        let category = UITableViewRowAction(style: .normal, title: "Categories") { [weak self] _, _ in
+            self?.showCategoriesPrompt(for: entry)
         }
         return [remove, category]
     }
@@ -2362,8 +2604,12 @@ final class LegacyLibraryViewController: UITableViewController {
 
     private func librarySubtitle(for entry: LegacyLibraryEntry) -> String {
         var components = [entry.sourceName]
-        if let category = entry.category, !category.isEmpty {
-            components.append(category)
+        let categories = entry.displayCategories
+        if !categories.isEmpty {
+            components.append(categories.joined(separator: ", "))
+        }
+        if let tags = entry.manga.tags, !tags.isEmpty {
+            components.append("Tags: \(tags.prefix(4).joined(separator: ", "))")
         }
         let downloadedCount = LegacyDownloadStore.shared.downloadedChapters.filter {
             $0.sourceKey == entry.sourceKey && $0.manga.key == entry.manga.key
@@ -2492,17 +2738,39 @@ final class LegacyLibraryViewController: UITableViewController {
             })
         }
         alert.addAction(UIAlertAction(title: activeCategory == nil ? "All Categories (Current)" : "All Categories", style: .default) { [weak self] _ in
+            self?.activeFilterGroup = nil
             self?.activeCategory = nil
             self?.reloadData()
         })
         alert.addAction(UIAlertAction(title: activeCategory == "" ? "Uncategorized (Current)" : "Uncategorized", style: .default) { [weak self] _ in
+            self?.activeFilterGroup = nil
             self?.activeCategory = ""
             self?.reloadData()
         })
         for category in LegacyLibraryStore.shared.categories() {
-            let title = activeCategory == category ? "\(category) (Current)" : category
+            let title = activeFilterGroup == nil && activeCategory == category ? "\(category) (Current)" : category
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.activeFilterGroup = nil
                 self?.activeCategory = category
+                self?.reloadData()
+            })
+        }
+        let filterGroups = LegacyLibraryFilterGroupStore.shared.groups
+        for group in filterGroups {
+            let title = activeFilterGroup?.id == group.id ? "Filter: \(group.name) (Current)" : "Filter: \(group.name)"
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.activeCategory = nil
+                self?.activeFilterGroup = group
+                self?.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Create Filter Group", style: .default) { [weak self] _ in
+            self?.showFilterGroupPrompt()
+        })
+        if let activeFilterGroup = activeFilterGroup {
+            alert.addAction(UIAlertAction(title: "Delete Current Filter Group", style: .destructive) { [weak self] _ in
+                LegacyLibraryFilterGroupStore.shared.remove(id: activeFilterGroup.id)
+                self?.activeFilterGroup = nil
                 self?.reloadData()
             })
         }
@@ -2513,25 +2781,69 @@ final class LegacyLibraryViewController: UITableViewController {
         present(alert, animated: true)
     }
 
-    private func showCategoryPrompt(for entry: LegacyLibraryEntry) {
-        let alert = UIAlertController(title: "Set Category", message: entry.manga.title, preferredStyle: .alert)
+    private func showCategoriesPrompt(for entry: LegacyLibraryEntry) {
+        let alert = UIAlertController(title: "Set Categories", message: entry.manga.title, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Category name"
-            textField.text = entry.category
+            textField.placeholder = "Reading, Favorites"
+            textField.text = entry.displayCategories.joined(separator: ", ")
             textField.autocapitalizationType = .words
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
-            LegacyLibraryStore.shared.setCategory(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, category: nil)
+            LegacyLibraryStore.shared.setCategories(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, categories: [])
         })
         alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak alert] _ in
-            LegacyLibraryStore.shared.setCategory(
+            LegacyLibraryStore.shared.setCategories(
                 sourceKey: entry.sourceKey,
                 mangaKey: entry.manga.key,
-                category: alert?.textFields?.first?.text
+                categories: aidokuLegacySplitList(alert?.textFields?.first?.text)
             )
         })
         present(alert, animated: true)
+    }
+
+    private func showFilterGroupPrompt() {
+        let alert = UIAlertController(
+            title: "Create Filter Group",
+            message: "Match manga by categories and tags. Separate values with commas.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "Group name"
+            textField.autocapitalizationType = .words
+        }
+        alert.addTextField { textField in
+            textField.placeholder = "Categories"
+            textField.autocapitalizationType = .words
+        }
+        alert.addTextField { textField in
+            textField.placeholder = "Tags"
+            textField.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save Match Any", style: .default) { [weak self, weak alert] _ in
+            self?.saveFilterGroup(from: alert, matchAll: false)
+        })
+        alert.addAction(UIAlertAction(title: "Save Match All", style: .default) { [weak self, weak alert] _ in
+            self?.saveFilterGroup(from: alert, matchAll: true)
+        })
+        present(alert, animated: true)
+    }
+
+    private func saveFilterGroup(from alert: UIAlertController?, matchAll: Bool) {
+        let name = alert?.textFields?[0].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else { return }
+        let group = LegacyLibraryFilterGroup(
+            id: UUID().uuidString,
+            name: name,
+            categories: LegacyLibraryEntry.normalizedList(aidokuLegacySplitList(alert?.textFields?[1].text)),
+            tags: LegacyLibraryEntry.normalizedList(aidokuLegacySplitList(alert?.textFields?[2].text)),
+            matchAll: matchAll
+        )
+        LegacyLibraryFilterGroupStore.shared.save(group)
+        activeCategory = nil
+        activeFilterGroup = group
+        reloadData()
     }
 
     @objc private func updateLibraryManually() {
@@ -3964,7 +4276,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
             cell.setNeedsLayout()
         }
         cell.textLabel?.text = manga.title
-        cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description ?? section.source.name
+        cell.detailTextLabel?.text = manga.legacySummaryText ?? section.source.name
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -4882,7 +5194,7 @@ final class LegacySourceHomeViewController: UITableViewController {
             case .manga(let manga):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
                 cell.textLabel?.text = manga.title
-                cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description
+                cell.detailTextLabel?.text = manga.legacySummaryText
                 loadCover(for: manga, into: cell, at: indexPath)
             case .chapter(let entry):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
@@ -5033,7 +5345,7 @@ final class LegacySourceHomeViewController: UITableViewController {
             case .listing(let listing):
                 return listing.name
             case .manga(let manga):
-                return manga.authors?.joined(separator: ", ") ?? manga.description
+                return manga.legacySummaryText
             case .none:
                 return nil
         }
@@ -5228,7 +5540,7 @@ final class LegacyMangaListViewController: UITableViewController {
             cell.setNeedsLayout()
         }
         cell.textLabel?.text = manga.title
-        cell.detailTextLabel?.text = manga.authors?.joined(separator: ", ") ?? manga.description
+        cell.detailTextLabel?.text = manga.legacySummaryText
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -6070,7 +6382,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 cell.setNeedsLayout()
             }
             cell.textLabel?.text = manga.title
-            cell.detailTextLabel?.text = errorMessage ?? manga.description ?? manga.authors?.joined(separator: ", ") ?? "No description."
+            cell.detailTextLabel?.numberOfLines = 5
+            cell.detailTextLabel?.text = errorMessage ?? manga.legacySummaryText ?? "No description."
             cell.accessoryType = source.runner.features.providesAlternateCovers ? .disclosureIndicator : .none
             cell.selectionStyle = source.runner.features.providesAlternateCovers ? .default : .none
             return cell

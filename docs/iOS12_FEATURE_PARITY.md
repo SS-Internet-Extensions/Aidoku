@@ -13,7 +13,7 @@ This tracks how much of the original Aidoku app is covered by the `AidokuLegacy 
 | Source browsing | Supports source home pages, static/dynamic listings, source search, pagination, saved filters, source settings, language selection, base URL selection, and source website browsing. |
 | Manga details | Loads details and chapters, adds/removes manga from the local library, filters chapter language, resumes reading, and starts from the first readable chapter. |
 | Reader | Supports vertical scroll, vertical fit, paged LTR, and paged RTL modes; page number overlay; tap zones; image cache; WebP/AVIF-aware loading; source image-request hooks; page processing; and low-memory downsampling/upscaling controls. |
-| Library and history | Stores library entries, categories, sort/search state, reading history, last reader session, and cover repair metadata in legacy-local storage. |
+| Library and history | Stores library entries, manga tags, multiple categories, saved filter groups, sort/search state, reading history, last reader session, and cover repair metadata in legacy-local storage. |
 | Updates | Manual and optional automatic library checks record newly discovered chapters in a local updates list. |
 | Downloads | Downloads chapters for offline reading, opens downloaded chapters in the reader, reports progress, deletes individual downloads, and clears all downloads. |
 | Backup/restore | Exports and imports a legacy JSON backup containing library, history, updates, repositories, and legacy settings. |
@@ -31,7 +31,7 @@ This tracks how much of the original Aidoku app is covered by the `AidokuLegacy 
 | Source migration hooks | Partial. The runner detects migration-related exports, but the app does not port the modern source key/chapter migration UI or Core Data migration flow. |
 | Background work | Partial. Source/library checks and downloads are callback-based, but they do not match the modern background download manager, background processing, or resume/pause behavior. |
 | Notifications | Partial. Runner notification hooks exist, but there is no full user-facing notification or update notification system. |
-| Library richness | Partial. Core library, categories, search, and sort exist, but modern unread counts, pins, rich grouping, custom display settings, and Core Data-backed state are not ported. |
+| Library richness | Partial. Core library, manga tags, multi-category filters, saved filter groups, search, and sort exist, but modern unread counts, pins, rich grouping, custom display settings, and Core Data-backed state are not ported. |
 | Reader feature depth | Partial. Core reading works, but advanced modern reader controls, gestures, transitions, reading-state sync, and all media/page variants are not guaranteed; ZIP pages are explicitly unsupported in the legacy reader/downloader. |
 | Localization | Missing/partial. Most legacy UI strings are hard-coded English rather than using `Shared/Localization`. |
 | Tests | Missing. There are no focused XCTest cases for the legacy catalog, package installer, runner bridge, stores, backup, downloads, or reader behavior. |
