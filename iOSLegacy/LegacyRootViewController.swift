@@ -9354,6 +9354,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                 context: context,
                 source: source,
                 loadID: loadID,
+                fallbackRequests: fallbackRequests,
                 retriesRemaining: retriesRemaining
             )
         }
