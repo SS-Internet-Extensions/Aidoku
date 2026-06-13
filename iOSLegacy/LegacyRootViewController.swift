@@ -8860,6 +8860,7 @@ private final class LegacyPageImageCell: UITableViewCell {
                 context: context,
                 source: source,
                 loadID: loadID,
+                fallbackRequests: fallbackRequests,
                 retriesRemaining: retriesRemaining
             )
         }
@@ -9367,6 +9368,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         context: [String: String]?,
         source: AidokuRunnerLegacySource,
         loadID: UUID,
+        fallbackRequests: [URLRequest],
         retriesRemaining: Int
     ) {
         let httpResponse = response as? HTTPURLResponse
