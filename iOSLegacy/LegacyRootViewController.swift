@@ -35,7 +35,12 @@ private func aidokuLegacyIsLowMemoryMode() -> Bool {
 private func aidokuLegacyReaderMaxPixelHeight() -> CGFloat {
     let nativeScreenLimit = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
     let sharpLowMemoryLimit = min(max(nativeScreenLimit, 1536), 2048)
-    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? sharpLowMemoryLimit : 1024
+    // Default low-memory pages now decode near the device's native resolution
+    // instead of a soft 1024 px. Bounded at 1800 px so a fit-to-width MangaDex
+    // page stays ~9 MB on a 1 GB iPad Air 1 (vs ~12.6 MB at full 2048).
+    // Upscale mode still allows the full native limit for users who opt in.
+    let balancedLowMemoryLimit = min(sharpLowMemoryLimit, 1800)
+    let lowMemoryLimit: CGFloat = aidokuLegacyReaderUpscaleImages() ? sharpLowMemoryLimit : balancedLowMemoryLimit
     let normalLimit: CGFloat = 2200
     let limit = aidokuLegacyIsLowMemoryMode() ? lowMemoryLimit : normalLimit
     let storedValue = UserDefaults.standard.integer(forKey: "AidokuLegacy.reader.maxImageHeight")
