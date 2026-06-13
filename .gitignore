@@ -19,3 +19,14 @@
 
 # Xcode-Build-Server
 buildServer.json
+
+# Claude
+CLAUDE.md
+
+# Local agent docs
+AGENTS.md
+docs/
+
+.verify/
+
+
