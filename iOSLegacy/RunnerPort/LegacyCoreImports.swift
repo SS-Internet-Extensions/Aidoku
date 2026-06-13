@@ -1325,11 +1325,13 @@ struct Net: SourceLibrary {
         }
     }
 
-    func setRateLimit(limit _: Int32) {
-        // Rate limiting is ignored in the legacy personal-use runner.
+    // Matches the current aidoku-rs signature `set_rate_limit(permits, period, unit)`.
+    // Rate limiting is ignored in the legacy personal-use runner.
+    func setRateLimit(permits _: Int32, period _: Int32, unit _: Int32) {
     }
 
+    // Older sources imported a separate single-argument period setter. Kept linked
+    // for backwards compatibility; the value is ignored.
     func setRateLimitPeriod(period _: Int32) {
-        // Rate limiting is ignored in the legacy personal-use runner.
     }
 }
