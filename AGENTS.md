@@ -13,6 +13,7 @@
 | Open project | `open Aidoku.xcodeproj` |
 | Build iOS | `xcodebuild -project Aidoku.xcodeproj -scheme "Aidoku (iOS)" -destination 'platform=iOS Simulator,name=iPhone 16' build` |
 | Test iOS | `xcodebuild test -project Aidoku.xcodeproj -scheme "Aidoku (iOS)" -destination 'platform=iOS Simulator,name=iPhone 16'` |
+| Build iOS 12 legacy | `xcodebuild -project iOSLegacy/AidokuLegacy.xcodeproj -scheme "AidokuLegacy (iOS 12)" -configuration Release -destination 'generic/platform=iOS' build` |
 | Build macOS | `xcodebuild -project Aidoku.xcodeproj -scheme "Aidoku (macOS)" build` |
 | Lint Swift | `swiftlint lint` |
 
@@ -37,4 +38,10 @@
 
 ## Agent-Specific Instructions
 - Prefix shell commands with `rtk`, for example `rtk git status` or `rtk swiftlint lint`.
-- AI-authored commits must include a `Co-Authored-By:` trailer for the agent model.
+- For iOS 12 work, read `docs/iOS12_PORT.md`, `docs/SOURCES_IOS12.md`, `docs/iOS12_FEATURE_PARITY.md`, and `docs/TASKS.md` before editing.
+- After feature, build, or bug-fix work, update `docs/TASKS.md` and `docs/WORK_TRACKING.md` when status, risks, or verification changes.
+- Commits made for Hai should use the configured author identity, be GPG-signed with `rtk git commit -S`, and include an agent trailer:
+
+```text
+Co-Authored-By: GPT-5 Codex <codex@openai.com>
+```
