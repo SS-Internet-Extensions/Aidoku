@@ -113,7 +113,7 @@ private func aidokuLegacyApplicationSupportDirectory() throws -> URL {
     return directory
 }
 
-private func aidokuLegacySanitizedPathComponent(_ value: String) -> String {
+func aidokuLegacySanitizedPathComponent(_ value: String) -> String {
     let dot: UnicodeScalar = "."
     let dash: UnicodeScalar = "-"
     let underscore: UnicodeScalar = "_"
@@ -6949,7 +6949,8 @@ private extension URLRequest {
     }
 }
 
-private func legacyFallbackImageRequest(url: URL, source: AidokuRunnerLegacySource? = nil) -> URLRequest {
+// Visibility widened from `private` to internal so AidokuLegacyTests can assert image-request fallback behavior.
+func legacyFallbackImageRequest(url: URL, source: AidokuRunnerLegacySource? = nil) -> URLRequest {
     var request = URLRequest(url: url)
     request.applyLegacyImageDefaults(for: url)
     request.applyLegacyRefererIfNeeded(source: source, imageURL: url)
@@ -6959,7 +6960,7 @@ private func legacyFallbackImageRequest(url: URL, source: AidokuRunnerLegacySour
     return request
 }
 
-private func legacyFallbackImageRequests(
+func legacyFallbackImageRequests(
     url: URL,
     source: AidokuRunnerLegacySource?,
     excluding primaryRequest: URLRequest? = nil
@@ -6981,7 +6982,7 @@ private func legacyFallbackImageRequests(
     return requests
 }
 
-private func legacyImageRequestsMatch(_ lhs: URLRequest, _ rhs: URLRequest) -> Bool {
+func legacyImageRequestsMatch(_ lhs: URLRequest, _ rhs: URLRequest) -> Bool {
     return lhs.url == rhs.url
         && lhs.httpMethod == rhs.httpMethod
         && lhs.httpBody == rhs.httpBody
@@ -6999,7 +7000,7 @@ private func aidokuLegacyIsHitomiImage(url: URL, source: AidokuRunnerLegacySourc
     return host.contains("hitomi.la") || host.contains("gold-usergeneratedcontent.net")
 }
 
-private func legacyMangaDexCoverFallbackURLs(from url: URL) -> [URL] {
+func legacyMangaDexCoverFallbackURLs(from url: URL) -> [URL] {
     let host = url.host?.lowercased() ?? ""
     let pathComponents = url.pathComponents
     guard
@@ -7043,7 +7044,7 @@ private func legacyMangaDexCoverFileNameCandidates(from fileName: String) -> [St
     return candidates
 }
 
-private func legacyHitomiThumbnailFallbackURLs(from url: URL) -> [URL] {
+func legacyHitomiThumbnailFallbackURLs(from url: URL) -> [URL] {
     guard aidokuLegacyIsHitomiImage(url: url, source: nil) else { return [] }
     let path = url.path
     let lowercasedPath = path.lowercased()
