@@ -58,6 +58,12 @@ private func aidokuLegacyReaderUpscaleImages() -> Bool {
     return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.upscaleImages")
 }
 
+/// When incognito mode is on, the reader does not record history, reading
+/// statistics, the resume session, or push progress to trackers.
+func aidokuLegacyIncognitoEnabled() -> Bool {
+    return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.incognito")
+}
+
 private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIImage {
     guard aidokuLegacyReaderUpscaleImages() else { return image }
     let maxPixelHeight = aidokuLegacyReaderMaxPixelHeight()
@@ -1453,6 +1459,348 @@ final class LegacyReaderSessionStore {
         if let data = try? encoder.encode(entry) {
             UserDefaults.standard.set(data, forKey: defaultsKey)
         }
+    }
+}
+
+/// Lightweight reading-statistics store backing the Insights screen.
+///
+/// Records one chapter-read event per chapter per calendar day. Persists a
+/// per-day map of chapter keys (capped to the last year) plus an all-time
+/// chapter total, all in UserDefaults. This is a deliberately small stand-in
+/// for the modern app's Core Data `ReadingSession` analytics.
+final class LegacyReadingStatsStore {
+    static let shared = LegacyReadingStatsStore()
+
+    private let dailyKey = "AidokuLegacy.stats.dailyChapters"
+    private let totalKey = "AidokuLegacy.stats.totalChapters"
+    private let maxDays = 366
+
+    private lazy var dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// Map of `yyyy-MM-dd` -> set of chapter keys read that day.
+    private var dailyChapters: [String: [String]] {
+        get {
+            guard
+                let data = UserDefaults.standard.data(forKey: dailyKey),
+                let value = try? JSONDecoder().decode([String: [String]].self, from: data)
+            else {
+                return [:]
+            }
+            return value
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: dailyKey)
+            }
+        }
+    }
+
+    /// All-time count of distinct chapter-read events (never decreases on prune).
+    var totalChapters: Int {
+        UserDefaults.standard.integer(forKey: totalKey)
+    }
+
+    func recordChapterRead(sourceKey: String, mangaKey: String, chapterKey: String) {
+        let day = dayFormatter.string(from: Date())
+        let chapterId = "\(sourceKey)::\(mangaKey)::\(chapterKey)"
+        var map = dailyChapters
+        var todays = map[day] ?? []
+        guard !todays.contains(chapterId) else { return }
+        todays.append(chapterId)
+        map[day] = todays
+        map = prune(map)
+        dailyChapters = map
+        UserDefaults.standard.set(totalChapters + 1, forKey: totalKey)
+    }
+
+    /// Number of chapters read on a given day.
+    func count(on date: Date) -> Int {
+        dailyChapters[dayFormatter.string(from: date)]?.count ?? 0
+    }
+
+    /// Days with at least one chapter read.
+    var daysActive: Int {
+        dailyChapters.values.filter { !$0.isEmpty }.count
+    }
+
+    /// Consecutive days read up to and including today.
+    var currentStreak: Int {
+        let calendar = Calendar(identifier: .gregorian)
+        var streak = 0
+        var day = Date()
+        while count(on: day) > 0 {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+
+    /// Longest run of consecutive active days in the stored window.
+    var longestStreak: Int {
+        let calendar = Calendar(identifier: .gregorian)
+        let activeDays = Set(dailyChapters.compactMap { $0.value.isEmpty ? nil : $0.key })
+        guard !activeDays.isEmpty else { return 0 }
+        var longest = 0
+        for dayString in activeDays {
+            guard let date = dayFormatter.date(from: dayString) else { continue }
+            // Only start counting from the beginning of a run.
+            if let prior = calendar.date(byAdding: .day, value: -1, to: date),
+               activeDays.contains(dayFormatter.string(from: prior)) {
+                continue
+            }
+            var run = 0
+            var cursor = date
+            while activeDays.contains(dayFormatter.string(from: cursor)) {
+                run += 1
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
+            }
+            longest = max(longest, run)
+        }
+        return longest
+    }
+
+    func clear() {
+        UserDefaults.standard.removeObject(forKey: dailyKey)
+        UserDefaults.standard.removeObject(forKey: totalKey)
+    }
+
+    private func prune(_ map: [String: [String]]) -> [String: [String]] {
+        guard map.count > maxDays else { return map }
+        let sortedKeys = map.keys.sorted(by: >)
+        let keep = Set(sortedKeys.prefix(maxDays))
+        return map.filter { keep.contains($0.key) }
+    }
+}
+
+/// Contribution-style grid of daily reading activity. Oldest day at top-left,
+/// today at bottom-right; column height is fixed at 7 days.
+final class LegacyHeatmapView: UIView {
+    private let spacing: CGFloat = 3
+    private let rows = 7
+
+    override func draw(_ rect: CGRect) {
+        let square = floor((bounds.height - spacing * CGFloat(rows - 1)) / CGFloat(rows))
+        guard square > 0 else { return }
+        let cols = max(1, Int((bounds.width + spacing) / (square + spacing)))
+        let totalDays = cols * rows
+        let calendar = Calendar(identifier: .gregorian)
+        let store = LegacyReadingStatsStore.shared
+        let today = Date()
+
+        // Day at grid index 0 is the oldest shown; index totalDays-1 is today.
+        for index in 0..<totalDays {
+            let offset = -(totalDays - 1 - index)
+            guard let date = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            let count = store.count(on: date)
+            let col = index / rows
+            let row = index % rows
+            let x = CGFloat(col) * (square + spacing)
+            let y = CGFloat(row) * (square + spacing)
+            let cellRect = CGRect(x: x, y: y, width: square, height: square)
+            let path = UIBezierPath(roundedRect: cellRect, cornerRadius: 2)
+            color(for: count).setFill()
+            path.fill()
+        }
+    }
+
+    private func color(for count: Int) -> UIColor {
+        let accent = LegacyPalette.accent
+        switch count {
+            case 0: return LegacyPalette.primaryText.withAlphaComponent(0.08)
+            case 1: return accent.withAlphaComponent(0.30)
+            case 2...3: return accent.withAlphaComponent(0.55)
+            case 4...6: return accent.withAlphaComponent(0.78)
+            default: return accent
+        }
+    }
+}
+
+/// Reading statistics screen: summary stats + an activity heatmap, backed by
+/// `LegacyReadingStatsStore`. A lightweight stand-in for the modern Insights UI.
+final class LegacyInsightsViewController: UIViewController {
+    private let scrollView = UIScrollView()
+    private let stack = UIStackView()
+    private let heatmap = LegacyHeatmapView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Reading Insights"
+        view.backgroundColor = LegacyPalette.background
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.alwaysBounceVertical = true
+        view.addSubview(scrollView)
+
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.alignment = .fill
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.layoutMargins = UIEdgeInsets(top: 20, left: 16, bottom: 20, right: 16)
+        scrollView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+        ])
+
+        rebuild()
+    }
+
+    private func rebuild() {
+        for subview in stack.arrangedSubviews {
+            stack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+
+        let store = LegacyReadingStatsStore.shared
+        if store.totalChapters == 0 {
+            stack.addArrangedSubview(makeEmptyLabel())
+            return
+        }
+
+        stack.addArrangedSubview(makeStatsGrid(store: store))
+        stack.addArrangedSubview(makeHeatmapCard())
+        stack.addArrangedSubview(makeClearButton())
+    }
+
+    private func makeEmptyLabel() -> UIView {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.textColor = LegacyPalette.secondaryText
+        label.font = UIFont.systemFont(ofSize: 15)
+        label.text = "No reading activity yet.\nRead a chapter to start tracking insights."
+        return label
+    }
+
+    private func makeStatsGrid(store: LegacyReadingStatsStore) -> UIView {
+        let items: [(String, String)] = [
+            ("\(store.totalChapters)", "Chapters Read"),
+            ("\(store.daysActive)", "Days Active"),
+            ("\(store.currentStreak)", "Current Streak"),
+            ("\(store.longestStreak)", "Longest Streak")
+        ]
+        // Two cards per row.
+        let topRow = UIStackView()
+        topRow.axis = .horizontal
+        topRow.distribution = .fillEqually
+        topRow.spacing = 12
+        topRow.addArrangedSubview(makeStatCard(value: items[0].0, label: items[0].1))
+        topRow.addArrangedSubview(makeStatCard(value: items[1].0, label: items[1].1))
+
+        let bottomRow = UIStackView()
+        bottomRow.axis = .horizontal
+        bottomRow.distribution = .fillEqually
+        bottomRow.spacing = 12
+        bottomRow.addArrangedSubview(makeStatCard(value: items[2].0, label: items[2].1))
+        bottomRow.addArrangedSubview(makeStatCard(value: items[3].0, label: items[3].1))
+
+        let container = UIStackView(arrangedSubviews: [topRow, bottomRow])
+        container.axis = .vertical
+        container.spacing = 12
+        return container
+    }
+
+    private func makeStatCard(value: String, label: String) -> UIView {
+        let card = UIView()
+        card.backgroundColor = LegacyPalette.panel
+        card.layer.cornerRadius = 12
+
+        let valueLabel = UILabel()
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        valueLabel.textColor = LegacyPalette.primaryText
+        valueLabel.text = value
+
+        let nameLabel = UILabel()
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.font = UIFont.systemFont(ofSize: 13)
+        nameLabel.textColor = LegacyPalette.secondaryText
+        nameLabel.text = label
+
+        card.addSubview(valueLabel)
+        card.addSubview(nameLabel)
+        NSLayoutConstraint.activate([
+            valueLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            valueLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            valueLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -14),
+            nameLabel.topAnchor.constraint(equalTo: valueLabel.bottomAnchor, constant: 4),
+            nameLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -14),
+            nameLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+        ])
+        return card
+    }
+
+    private func makeHeatmapCard() -> UIView {
+        let card = UIView()
+        card.backgroundColor = LegacyPalette.panel
+        card.layer.cornerRadius = 12
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = LegacyPalette.secondaryText
+        titleLabel.text = "ACTIVITY"
+
+        heatmap.translatesAutoresizingMaskIntoConstraints = false
+        heatmap.backgroundColor = .clear
+        heatmap.isOpaque = false
+        heatmap.contentMode = .redraw
+
+        card.addSubview(titleLabel)
+        card.addSubview(heatmap)
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            heatmap.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
+            heatmap.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            heatmap.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            heatmap.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+            heatmap.heightAnchor.constraint(equalToConstant: 110)
+        ])
+        return card
+    }
+
+    private func makeClearButton() -> UIView {
+        let button = UIButton(type: .system)
+        button.setTitle("Clear Statistics", for: .normal)
+        button.setTitleColor(UIColor.systemRed, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 16)
+        button.addTarget(self, action: #selector(confirmClear), for: .touchUpInside)
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return button
+    }
+
+    @objc private func confirmClear() {
+        let alert = UIAlertController(
+            title: "Clear Statistics",
+            message: "Remove all reading insights data? This cannot be undone.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+            LegacyReadingStatsStore.shared.clear()
+            self?.rebuild()
+        })
+        present(alert, animated: true)
     }
 }
 
@@ -3513,9 +3861,11 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case readerPageNumber
         case readerTapZones
         case darkTheme
+        case incognitoMode
         case automaticLibraryUpdates
         case automaticSourceUpdates
         case updateNotifications
+        case readingInsights
         case downloads
         case localFiles
         case selfHosted
@@ -3591,6 +3941,13 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.textLabel?.text = "Dark Theme"
                 cell.detailTextLabel?.text = enabled ? "Use dark lists and navigation bars" : "Use the light legacy theme"
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .incognitoMode:
+                let enabled = aidokuLegacyIncognitoEnabled()
+                cell.textLabel?.text = "Incognito Mode"
+                cell.detailTextLabel?.text = enabled
+                    ? "Reading does not update history, insights, resume, or trackers."
+                    : "Reading updates history, insights, resume, and trackers."
+                cell.accessoryType = enabled ? .checkmark : .none
             case .automaticLibraryUpdates:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.library.automaticUpdates")
                 cell.textLabel?.text = "Automatic Library Updates"
@@ -3608,6 +3965,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                     ? "Notify when a library update finds new chapters."
                     : "Do not send library update notifications."
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .readingInsights:
+                let total = LegacyReadingStatsStore.shared.totalChapters
+                cell.textLabel?.text = "Reading Insights"
+                cell.detailTextLabel?.text = total == 0
+                    ? "Track chapters read, active days, and streaks."
+                    : (total == 1 ? "1 chapter read all-time" : "\(total) chapters read all-time")
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
@@ -3691,6 +4054,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 tableView.backgroundColor = LegacyPalette.background
                 tableView.reloadData()
                 NotificationCenter.default.post(name: .legacyAppearanceDidChange, object: nil)
+            case .incognitoMode:
+                let key = "AidokuLegacy.reader.incognito"
+                UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
             case .automaticLibraryUpdates:
                 let key = "AidokuLegacy.library.automaticUpdates"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
@@ -3701,6 +4068,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .updateNotifications:
                 toggleUpdateNotifications(at: indexPath)
+            case .readingInsights:
+                navigationController?.pushViewController(LegacyInsightsViewController(), animated: true)
             case .downloads:
                 navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
             case .localFiles:
@@ -8227,6 +8596,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         }
         pendingHistorySaveWorkItem?.cancel()
         pendingHistorySaveWorkItem = nil
+        // Incognito mode: skip all persistence (history, stats, resume session,
+        // tracker sync) but keep throttle bookkeeping so we do not re-schedule.
+        if aidokuLegacyIncognitoEnabled() {
+            lastSavedHistoryPageIndex = pageIndex
+            lastHistorySaveDate = now
+            return
+        }
         LegacyHistoryStore.shared.update(
             source: source,
             manga: manga,
@@ -8247,6 +8623,11 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             chapter: chapter,
             pageIndex: pageIndex,
             pageCount: pages.count
+        )
+        LegacyReadingStatsStore.shared.recordChapterRead(
+            sourceKey: source.key,
+            mangaKey: manga.key,
+            chapterKey: chapter.key
         )
         lastSavedHistoryPageIndex = pageIndex
         lastHistorySaveDate = now
@@ -8866,6 +9247,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
         pendingHistorySaveWorkItem?.cancel()
         pendingHistorySaveWorkItem = nil
+        // Incognito mode: skip all persistence (history, stats, resume session,
+        // tracker sync) but keep throttle bookkeeping so we do not re-schedule.
+        if aidokuLegacyIncognitoEnabled() {
+            lastSavedHistoryPageIndex = pageIndex
+            lastHistorySaveDate = now
+            return
+        }
         LegacyHistoryStore.shared.update(
             source: source,
             manga: manga,
@@ -8886,6 +9274,11 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             chapter: chapter,
             pageIndex: pageIndex,
             pageCount: pages.count
+        )
+        LegacyReadingStatsStore.shared.recordChapterRead(
+            sourceKey: source.key,
+            mangaKey: manga.key,
+            chapterKey: chapter.key
         )
         lastSavedHistoryPageIndex = pageIndex
         lastHistorySaveDate = now
