@@ -1,0 +1,230 @@
+/* Aidoku Legacy (iOS 12) — English string table.
+   Keys use dot.separated snake_case grouped by screen.
+   This is a STARTER catalog. LegacyRootViewController.swift migrates to
+   LegacyString("key") incrementally; see README_LOCALIZATION.md. */
+
+/* MARK: - Tab bar titles */
+"tab.library" = "Library";
+"tab.history" = "History";
+"tab.sources" = "Sources";
+"tab.browse" = "Browse";
+"tab.settings" = "Settings";
+
+/* MARK: - Common buttons */
+"button.ok" = "OK";
+"button.cancel" = "Cancel";
+"button.save" = "Save";
+"button.clear" = "Clear";
+"button.done" = "Done";
+"button.add" = "Add";
+"button.delete" = "Delete";
+"button.reload" = "Reload";
+"button.restore" = "Restore";
+"button.login" = "Log In";
+"button.logout" = "Log Out";
+
+/* MARK: - Library screen */
+"library.title" = "Library";
+"library.search_placeholder" = "Search library";
+"library.empty.title" = "No manga in Library.";
+"library.empty.detail" = "Open Sources, browse manga, then tap Add.";
+"library.set_categories.title" = "Set Categories";
+"library.set_categories.message" = "Match manga by categories and tags. Separate values with commas.";
+"library.set_categories.placeholder" = "Reading, Favorites";
+"library.updated.title" = "Library Updated";
+
+/* MARK: - Categories / filter groups */
+"category.group_name.placeholder" = "Group name";
+"category.categories.placeholder" = "Categories";
+"category.tags.placeholder" = "Tags";
+"category.create_group" = "Create Filter Group";
+"category.delete_group" = "Delete Current Filter Group";
+"category.save_match_any" = "Save Match Any";
+"category.save_match_all" = "Save Match All";
+
+/* MARK: - History screen */
+"history.title" = "History";
+"history.empty.title" = "No reading history.";
+"history.empty.detail" = "Open a chapter to start tracking progress.";
+
+/* MARK: - Updates screen */
+"updates.title" = "Updates";
+"updates.empty.title" = "No new chapters recorded.";
+"updates.empty.detail" = "Use Library Update to check saved manga.";
+"updates.clear.title" = "Clear Updates";
+"updates.clear.message" = "Remove recorded chapter updates?";
+
+/* MARK: - Downloads screen */
+"downloads.title" = "Downloads";
+"downloads.empty.title" = "No downloaded chapters.";
+"downloads.empty.detail" = "Open a manga and download chapters for offline reading.";
+"downloads.clear.title" = "Clear Downloads";
+"downloads.clear.message" = "Remove all downloaded chapters?";
+
+/* MARK: - Settings screen */
+"settings.title" = "Settings";
+"settings.reader_layout" = "Reader Layout";
+"settings.reader_memory_mode" = "Reader Memory Mode";
+"settings.reader_upscale" = "Reader Upscale";
+"settings.reader_page_number" = "Reader Page Number";
+"settings.tap_zones_overlay" = "Tap Zones Overlay";
+"settings.dark_theme" = "Dark Theme";
+"settings.auto_library_updates" = "Automatic Library Updates";
+"settings.auto_source_updates" = "Automatic Source Updates";
+"settings.downloads" = "Downloads";
+"settings.create_backup" = "Create Backup";
+"settings.create_backup.detail" = "Export library, history, updates, repos, and legacy settings.";
+"settings.restore_backup" = "Restore Backup";
+"settings.restore_backup.detail" = "Import a legacy JSON backup file.";
+"settings.clear_image_cache" = "Clear Image Cache";
+"settings.clear_image_cache.detail" = "Remove cached covers and reader pages.";
+"settings.clear_history" = "Clear History";
+"settings.clear_history.detail" = "Remove local reading progress.";
+"settings.clear_library" = "Clear Library";
+"settings.clear_library.detail" = "Remove saved manga from Aidoku Legacy.";
+"settings.about.title" = "Aidoku Legacy";
+"settings.about.detail" = "iOS 12 personal-use reader with AidokuRunnerLegacy.";
+
+/* MARK: - Backup / restore */
+"backup.restore.title" = "Restore Backup";
+"backup.restore.message" = "This replaces the local legacy library, history, updates, repositories, and settings.";
+"backup.restore_latest" = "Restore Latest Local Backup";
+"backup.import_file" = "Import Backup File";
+"backup.failed.title" = "Backup Failed";
+"backup.restored.title" = "Backup Restored";
+"backup.restore_failed.title" = "Restore Failed";
+
+/* MARK: - Clear history / library confirmations */
+"clear_history.message" = "Remove all reading history from Aidoku Legacy?";
+"clear_library.message" = "Remove all saved manga from Aidoku Legacy?";
+
+/* MARK: - Sources screen */
+"sources.title" = "Sources";
+"sources.search_placeholder" = "Search sources";
+"sources.empty.title" = "No sources installed.";
+"sources.empty.detail" = "Open Browse to install Aidoku Community sources.";
+"sources.installed.title" = "Installed Sources";
+"sources.batch_search.title" = "Batch Search";
+"sources.batch_search.placeholder" = "Search all installed sources";
+"sources.source_settings.title" = "Source Settings";
+
+/* MARK: - Source repositories */
+"repo.title" = "Source Repositories";
+"repo.url.placeholder" = "https://example.com/sources/index.min.json";
+"repo.add" = "Add Source Repo";
+"repo.refresh" = "Refresh Repos";
+"repo.check_updates" = "Check Source Updates";
+"repo.reset_community" = "Reset to Community Repo";
+"repo.add.message" = "Paste an index.min.json URL or a GitHub owner/repo URL.";
+"repo.invalid.title" = "Invalid Repo";
+"repo.invalid.message" = "Enter a valid source repository URL.";
+"repo.added.title" = "Repo Added";
+"repo.added.message" = "Open Browse to install sources from this repository.";
+
+/* MARK: - Source install / browse */
+"source.browse_website" = "Browse Website";
+"source.browse_source" = "Browse Source";
+"source.open_source" = "Open Source";
+"source.download_package" = "Download Package";
+"source.copy_package_url" = "Copy Package URL";
+"source.missing.title" = "Source Missing";
+"source.install_failed.title" = "Install Failed";
+"source.download_failed.title" = "Download Failed";
+"source.settings_failed.title" = "Settings Failed";
+
+/* MARK: - Source updates */
+"source_update.no_sources.title" = "No Sources";
+"source_update.no_sources.message" = "Install sources before checking for updates.";
+"source_update.failed.title" = "Update Failed";
+"source_update.skipped.title" = "Update Skipped";
+"source_update.skipped.message" = "A source update is already running.";
+"source_update.current.title" = "Sources Current";
+"source_update.current.message" = "Installed sources are already up to date.";
+
+/* MARK: - Source detail rows */
+"source.home" = "Home";
+"source.home.detail" = "Run get_home";
+"source.search_manga" = "Search Manga";
+"source.search_manga.detail" = "Run get_search_manga_list";
+"source.settings.detail" = "Languages, content ratings, and source options";
+"source.manga_list.detail" = "Run get_manga_list";
+"source.languages" = "Languages";
+"source.base_url" = "Base URL";
+
+/* MARK: - Source login */
+"login.password.placeholder" = "Password";
+"login.failed.title" = "Login Failed";
+"login.failed.rejected" = "The source rejected the credentials.";
+"login.failed.no_url" = "This source did not provide a login URL.";
+"login.failed.no_cookies" = "No login cookies or local storage values were found.";
+"login.failed.web_rejected" = "The source did not accept the web login.";
+"login.logout.message" = "Remove saved login data for this source?";
+
+/* MARK: - Search */
+"search.placeholder" = "Search manga";
+"search.empty_term" = "Enter a search term.";
+"search.failed" = "Search failed";
+"search.no_sources" = "No sources installed.";
+"search.searching" = "Searching...";
+"search.with_filter" = "Search with this filter";
+"search.view_more" = "View more";
+
+/* MARK: - Filters */
+"filters.title" = "Filters";
+"filters.from.placeholder" = "From";
+"filters.to.placeholder" = "To";
+"filters.included" = "Included";
+"filters.excluded" = "Excluded";
+
+/* MARK: - Manga detail */
+"manga.resume_reading" = "Resume Reading";
+"manga.read_first_chapter" = "Read from First Chapter";
+"manga.unavailable.message" = "%@ is marked unavailable by this source.";
+
+/* MARK: - Chapters */
+"chapters.search_placeholder" = "Search chapters";
+"chapters.empty" = "No matching chapters.";
+"chapters.language.title" = "Chapter Language";
+"chapters.language.all" = "All Languages";
+
+/* MARK: - Cover selection */
+"cover.select.title" = "Select Cover";
+"cover.unavailable.title" = "Covers Unavailable";
+"cover.unavailable.message" = "This source did not return alternate covers.";
+"cover.none.title" = "No Covers";
+"cover.none.message" = "No alternate covers are available for this manga.";
+
+/* MARK: - Page actions */
+"page.copy_description" = "Copy Description";
+"page.copy_image" = "Copy Image";
+"page.download_image" = "Download Image";
+"page.share_image" = "Share Image";
+"page.copied.title" = "Copied";
+"page.copied.description" = "Page description copied to the clipboard.";
+"page.copied.image" = "Page image copied to the clipboard.";
+"page.saved.title" = "Saved";
+"page.saved.message" = "Page image saved to Photos.";
+"page.save_failed.title" = "Save Failed";
+"page.no_image.title" = "No Image";
+"page.no_image.message" = "This page image is not available yet.";
+
+/* MARK: - Download chapters */
+"download.title" = "Download";
+"download.chapter.title" = "Download Chapter";
+"download.first" = "Download First Chapter";
+"download.specific" = "Download Specific Chapter";
+"download.all" = "Download All Chapters";
+"download.open" = "Open Downloads";
+"download.no_chapters.title" = "No Chapters";
+"download.no_chapters.message" = "No readable chapters are available to download.";
+"download.already.title" = "Already Downloaded";
+"download.already.message" = "Selected chapters are already saved offline.";
+"download.complete.title" = "Download Complete";
+
+/* MARK: - Reader */
+"reader.loading" = "Loading...";
+"reader.loading_pages" = "Loading pages...";
+"reader.loading_home" = "Loading home...";
+"reader.no_pages" = "No pages.";
+"reader.zip_unsupported" = "ZIP pages are not supported in the legacy reader yet.";
+"reader.unavailable.message" = "%@ is unavailable from this source.";

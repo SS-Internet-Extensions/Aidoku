@@ -31,6 +31,20 @@
 		100000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000108 /* LegacyPostcardDecoder.swift */; };
 		100000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000109 /* LegacyPostcardEncoder.swift */; };
 		10000000000000000000011A /* LegacyVarInt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010A /* LegacyVarInt.swift */; };
+		200000000000000000000101 /* LegacyTrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* LegacyTrackerModels.swift */; };
+		200000000000000000000102 /* LegacyTrackerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* LegacyTrackerStore.swift */; };
+		200000000000000000000103 /* LegacyAniListTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* LegacyAniListTracker.swift */; };
+		200000000000000000000104 /* LegacyTrackerLoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* LegacyTrackerLoginViewController.swift */; };
+		200000000000000000000105 /* LegacyTrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* LegacyTrackerManager.swift */; };
+		200000000000000000000106 /* LegacyLocalFileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* LegacyLocalFileModels.swift */; };
+		200000000000000000000107 /* LegacyLocalFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* LegacyLocalFileStore.swift */; };
+		200000000000000000000108 /* LegacyLocalFilePageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* LegacyLocalFilePageProvider.swift */; };
+		200000000000000000000109 /* LegacyLocalFilesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* LegacyLocalFilesViewController.swift */; };
+		20000000000000000000010A /* LegacyModernBackupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* LegacyModernBackupModels.swift */; };
+		20000000000000000000010B /* LegacyModernBackupImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* LegacyModernBackupImporter.swift */; };
+		20000000000000000000010C /* LegacyModernBackupExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* LegacyModernBackupExporter.swift */; };
+		20000000000000000000010D /* LegacyLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* LegacyLocalization.swift */; };
+		200000000000000000000120 /* en.lproj in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* en.lproj */; };
 		1000000000000000000000E0 /* LegacyTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D0 /* LegacyTestSupport.swift */; };
 		1000000000000000000000E1 /* LegacySourceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D1 /* LegacySourceCatalogTests.swift */; };
 		1000000000000000000000E2 /* LegacyPackageInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D2 /* LegacyPackageInstallerTests.swift */; };
@@ -62,6 +76,20 @@
 		100000000000000000000108 /* LegacyPostcardDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardDecoder.swift; sourceTree = "<group>"; };
 		100000000000000000000109 /* LegacyPostcardEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPostcardEncoder.swift; sourceTree = "<group>"; };
 		10000000000000000000010A /* LegacyVarInt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyVarInt.swift; sourceTree = "<group>"; };
+		200000000000000000000001 /* LegacyTrackerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTrackerModels.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* LegacyTrackerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTrackerStore.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* LegacyAniListTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAniListTracker.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* LegacyTrackerLoginViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTrackerLoginViewController.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* LegacyTrackerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTrackerManager.swift; sourceTree = "<group>"; };
+		200000000000000000000006 /* LegacyLocalFileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalFileModels.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* LegacyLocalFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalFileStore.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* LegacyLocalFilePageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalFilePageProvider.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* LegacyLocalFilesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalFilesViewController.swift; sourceTree = "<group>"; };
+		20000000000000000000000A /* LegacyModernBackupModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyModernBackupModels.swift; sourceTree = "<group>"; };
+		20000000000000000000000B /* LegacyModernBackupImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyModernBackupImporter.swift; sourceTree = "<group>"; };
+		20000000000000000000000C /* LegacyModernBackupExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyModernBackupExporter.swift; sourceTree = "<group>"; };
+		20000000000000000000000D /* LegacyLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalization.swift; sourceTree = "<group>"; };
+		20000000000000000000000E /* en.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = en.lproj; sourceTree = "<group>"; };
 		1000000000000000000000DF /* AidokuLegacyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AidokuLegacyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1000000000000000000000D0 /* LegacyTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTestSupport.swift; sourceTree = "<group>"; };
 		1000000000000000000000D1 /* LegacySourceCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySourceCatalogTests.swift; sourceTree = "<group>"; };
@@ -132,9 +160,63 @@
 				100000000000000000000007 /* AidokuRunnerLegacy.swift */,
 				100000000000000000000008 /* AidokuRunnerLegacyPackageInstaller.swift */,
 				100000000000000000000042 /* RunnerPort */,
+				200000000000000000000200 /* Features */,
 				100000000000000000000003 /* LaunchScreen.storyboard */,
 			);
 			name = AidokuLegacy;
+			sourceTree = "<group>";
+		};
+		200000000000000000000200 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000201 /* Tracker */,
+				200000000000000000000202 /* LocalFiles */,
+				200000000000000000000203 /* ModernBackup */,
+				200000000000000000000204 /* Localization */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		200000000000000000000201 /* Tracker */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* LegacyTrackerModels.swift */,
+				200000000000000000000002 /* LegacyTrackerStore.swift */,
+				200000000000000000000003 /* LegacyAniListTracker.swift */,
+				200000000000000000000004 /* LegacyTrackerLoginViewController.swift */,
+				200000000000000000000005 /* LegacyTrackerManager.swift */,
+			);
+			path = Tracker;
+			sourceTree = "<group>";
+		};
+		200000000000000000000202 /* LocalFiles */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000006 /* LegacyLocalFileModels.swift */,
+				200000000000000000000007 /* LegacyLocalFileStore.swift */,
+				200000000000000000000008 /* LegacyLocalFilePageProvider.swift */,
+				200000000000000000000009 /* LegacyLocalFilesViewController.swift */,
+			);
+			path = LocalFiles;
+			sourceTree = "<group>";
+		};
+		200000000000000000000203 /* ModernBackup */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000A /* LegacyModernBackupModels.swift */,
+				20000000000000000000000B /* LegacyModernBackupImporter.swift */,
+				20000000000000000000000C /* LegacyModernBackupExporter.swift */,
+			);
+			path = ModernBackup;
+			sourceTree = "<group>";
+		};
+		200000000000000000000204 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000D /* LegacyLocalization.swift */,
+				20000000000000000000000E /* en.lproj */,
+			);
+			path = Localization;
 			sourceTree = "<group>";
 		};
 		100000000000000000000042 /* RunnerPort */ = {
@@ -273,6 +355,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000012 /* LaunchScreen.storyboard in Resources */,
+				200000000000000000000120 /* en.lproj in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -300,6 +383,19 @@
 				100000000000000000000118 /* LegacyPostcardDecoder.swift in Sources */,
 				100000000000000000000119 /* LegacyPostcardEncoder.swift in Sources */,
 				10000000000000000000011A /* LegacyVarInt.swift in Sources */,
+				200000000000000000000101 /* LegacyTrackerModels.swift in Sources */,
+				200000000000000000000102 /* LegacyTrackerStore.swift in Sources */,
+				200000000000000000000103 /* LegacyAniListTracker.swift in Sources */,
+				200000000000000000000104 /* LegacyTrackerLoginViewController.swift in Sources */,
+				200000000000000000000105 /* LegacyTrackerManager.swift in Sources */,
+				200000000000000000000106 /* LegacyLocalFileModels.swift in Sources */,
+				200000000000000000000107 /* LegacyLocalFileStore.swift in Sources */,
+				200000000000000000000108 /* LegacyLocalFilePageProvider.swift in Sources */,
+				200000000000000000000109 /* LegacyLocalFilesViewController.swift in Sources */,
+				20000000000000000000010A /* LegacyModernBackupModels.swift in Sources */,
+				20000000000000000000010B /* LegacyModernBackupImporter.swift in Sources */,
+				20000000000000000000010C /* LegacyModernBackupExporter.swift in Sources */,
+				20000000000000000000010D /* LegacyLocalization.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

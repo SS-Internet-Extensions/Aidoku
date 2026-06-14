@@ -1,0 +1,150 @@
+//
+//  LegacyTrackerModels.swift
+//  AidokuLegacy
+//
+//  Minimal tracker integration models (AniList only).
+//
+
+import Foundation
+
+// Identifies a supported tracker service.
+enum LegacyTrackerId: String, Codable, CaseIterable {
+    case anilist
+
+    // Human-readable name shown in the UI.
+    var displayName: String {
+        switch self {
+            case .anilist:
+                return "AniList"
+        }
+    }
+}
+
+// Reading status of a tracked title, mirroring the common tracker states.
+enum LegacyTrackStatus: String, Codable, CaseIterable {
+    case reading
+    case planning
+    case completed
+    case dropped
+    case paused
+    case rereading
+
+    // Display title for status pickers.
+    var displayName: String {
+        switch self {
+            case .reading:
+                return "Reading"
+            case .planning:
+                return "Plan to Read"
+            case .completed:
+                return "Completed"
+            case .dropped:
+                return "Dropped"
+            case .paused:
+                return "On Hold"
+            case .rereading:
+                return "Rereading"
+        }
+    }
+}
+
+// High-level authentication state for a tracker.
+enum LegacyTrackerAuthState: Equatable {
+    case loggedOut
+    case loggedIn
+}
+
+// A single tracked entry linking a local manga to a remote tracker record.
+struct LegacyTrackEntry: Codable, Hashable {
+    var sourceKey: String
+    var mangaKey: String
+    var trackerId: LegacyTrackerId
+    var remoteId: Int
+    var status: LegacyTrackStatus
+    var lastReadChapter: Float
+    var score: Float
+    var totalChapters: Int
+
+    init(
+        sourceKey: String,
+        mangaKey: String,
+        trackerId: LegacyTrackerId,
+        remoteId: Int,
+        status: LegacyTrackStatus = .reading,
+        lastReadChapter: Float = 0,
+        score: Float = 0,
+        totalChapters: Int = 0
+    ) {
+        self.sourceKey = sourceKey
+        self.mangaKey = mangaKey
+        self.trackerId = trackerId
+        self.remoteId = remoteId
+        self.status = status
+        self.lastReadChapter = lastReadChapter
+        self.score = score
+        self.totalChapters = totalChapters
+    }
+
+    // Stable storage key: "trackerId::sourceKey::mangaKey".
+    var key: String {
+        return LegacyTrackEntry.makeKey(
+            trackerId: trackerId,
+            sourceKey: sourceKey,
+            mangaKey: mangaKey
+        )
+    }
+
+    // Builds the storage key without an existing entry.
+    static func makeKey(trackerId: LegacyTrackerId, sourceKey: String, mangaKey: String) -> String {
+        return "\(trackerId.rawValue)::\(sourceKey)::\(mangaKey)"
+    }
+}
+
+// A search result candidate returned by a tracker for linking.
+struct LegacyTrackSearchResult {
+    var remoteId: Int
+    var title: String
+    var totalChapters: Int
+    var coverURL: URL?
+
+    init(remoteId: Int, title: String, totalChapters: Int = 0, coverURL: URL? = nil) {
+        self.remoteId = remoteId
+        self.title = title
+        self.totalChapters = totalChapters
+        self.coverURL = coverURL
+    }
+}
+
+// The current remote state for a tracked title (used to seed the local entry).
+struct LegacyTrackRemoteState {
+    var status: LegacyTrackStatus
+    var lastReadChapter: Float
+    var score: Float
+    var totalChapters: Int
+}
+
+// Errors surfaced by tracker network operations.
+enum LegacyTrackerError: Error, LocalizedError {
+    case notAuthenticated
+    case invalidResponse
+    case requestFailed(String)
+    case noResults
+
+    var errorDescription: String? {
+        switch self {
+            case .notAuthenticated:
+                return "Not logged in to the tracker."
+            case .invalidResponse:
+                return "Received an invalid response from the tracker."
+            case .requestFailed(let message):
+                return message
+            case .noResults:
+                return "No matching titles were found."
+        }
+    }
+}
+
+// Notification posted whenever tracking state changes (entries or tokens).
+extension Notification.Name {
+    static let aidokuLegacyTrackingDidChange = Notification.Name("AidokuLegacyTrackingDidChange")
+}
