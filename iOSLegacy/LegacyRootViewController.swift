@@ -11,6 +11,7 @@ import ImageIO
 import SDWebImage
 import SDWebImageWebPCoder
 import avif
+import ZIPFoundation
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
@@ -173,6 +174,131 @@ private func aidokuLegacyPreparePagesForLowMemory(
 private func aidokuLegacyRemoveTemporaryPageDirectories(_ directories: [URL]) {
     for directory in directories {
         try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+/// Resolves `.zipFile` reader/download pages into in-memory image pages.
+///
+/// Some sources deliver a chapter as a single archive plus a per-page entry
+/// path. The legacy reader and downloader only understand image/url/text
+/// pages, so this resolver downloads each referenced archive once, extracts
+/// the requested entry, and rewrites the page as `.image(data)`. Downstream
+/// low-memory handling then relocates the bytes to a temp file as usual, so
+/// nothing is held in memory longer than a single page on a 1 GB device.
+final class LegacyZipPageResolver {
+    static let shared = LegacyZipPageResolver()
+
+    private let session = aidokuLegacyReaderImageSession
+    private let queue = DispatchQueue(label: "AidokuLegacy.zipPageResolver", qos: .userInitiated)
+
+    func resolve(
+        _ pages: [AidokuRunnerLegacyPage],
+        source: AidokuRunnerLegacySource,
+        completion: @escaping ([AidokuRunnerLegacyPage]) -> Void
+    ) {
+        let hasZipPage = pages.contains {
+            if case .zipFile = $0.content { return true }
+            return false
+        }
+        guard hasZipPage else {
+            completion(pages)
+            return
+        }
+
+        queue.async {
+            var result = pages
+            var localArchives: [URL: URL] = [:]   // source archive URL -> local file on disk
+            var downloadedArchives: [URL] = []     // temp copies to delete when finished
+
+            for index in result.indices {
+                guard case .zipFile(let archiveURL, let filePath) = result[index].content else { continue }
+
+                let localArchiveURL: URL?
+                if let cached = localArchives[archiveURL] {
+                    localArchiveURL = cached
+                } else if archiveURL.isFileURL {
+                    localArchiveURL = archiveURL
+                    localArchives[archiveURL] = archiveURL
+                } else if let downloaded = self.downloadArchive(archiveURL, source: source) {
+                    localArchiveURL = downloaded
+                    localArchives[archiveURL] = downloaded
+                    downloadedArchives.append(downloaded)
+                } else {
+                    localArchiveURL = nil
+                }
+
+                guard
+                    let archiveFileURL = localArchiveURL,
+                    let data = Self.extractEntry(from: archiveFileURL, filePath: filePath),
+                    !data.isEmpty
+                else {
+                    continue // leave the page as .zipFile so the placeholder renders
+                }
+                result[index].content = .image(data)
+            }
+
+            for url in downloadedArchives {
+                try? FileManager.default.removeItem(at: url)
+            }
+            completion(result)
+        }
+    }
+
+    /// Synchronously downloads a remote archive to a temporary file.
+    private func downloadArchive(_ url: URL, source: AidokuRunnerLegacySource) -> URL? {
+        var request = URLRequest(url: url)
+        if let referer = source.urls.first, let scheme = referer.scheme, let host = referer.host {
+            request.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var resultURL: URL?
+        let task = session.downloadTask(with: request) { location, response, _ in
+            defer { semaphore.signal() }
+            guard
+                let location = location,
+                (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
+            else {
+                return
+            }
+            let destination = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("AidokuLegacyZip-\(UUID().uuidString).zip")
+            do {
+                try FileManager.default.moveItem(at: location, to: destination)
+                resultURL = destination
+            } catch {
+                resultURL = nil
+            }
+        }
+        task.resume()
+        semaphore.wait()
+        return resultURL
+    }
+
+    /// Extracts a single entry from a local archive into memory.
+    static func extractEntry(from archiveURL: URL, filePath: String) -> Data? {
+        guard let archive = Archive(url: archiveURL, accessMode: .read) else { return nil }
+        guard let entry = archive[filePath] ?? Self.entry(in: archive, matching: filePath) else { return nil }
+        var data = Data()
+        do {
+            _ = try archive.extract(entry, skipCRC32: true) { chunk in
+                data.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+        return data
+    }
+
+    /// Falls back to a case-insensitive / basename match when the exact path
+    /// from the source does not line up with the archive's entry names.
+    private static func entry(in archive: Archive, matching filePath: String) -> Entry? {
+        let target = filePath.lowercased()
+        let targetBase = (filePath as NSString).lastPathComponent.lowercased()
+        return archive.first { entry in
+            let path = entry.path.lowercased()
+            return path == target || (path as NSString).lastPathComponent == targetBase
+        }
     }
 }
 
@@ -1651,28 +1777,30 @@ final class LegacyDownloadManager {
         }
         source.runner.getPageList(manga: manga, chapter: chapter) { result in
             switch result {
-                case .success(let pages):
-                    guard !pages.isEmpty else {
+                case .success(let rawPages):
+                    guard !rawPages.isEmpty else {
                         completion(.failure(NSError(domain: "AidokuLegacy", code: 2, userInfo: [NSLocalizedDescriptionKey: "No pages to download."])))
                         return
                     }
-                    do {
-                        let writer = try LegacyDownloadStore.shared.makeWriter(
-                            source: source,
-                            manga: manga,
-                            chapter: chapter,
-                            pageCount: pages.count
-                        )
-                        self.downloadPage(
-                            pages: pages,
-                            index: 0,
-                            source: source,
-                            writer: writer,
-                            progress: progress,
-                            completion: completion
-                        )
-                    } catch {
-                        completion(.failure(error))
+                    LegacyZipPageResolver.shared.resolve(rawPages, source: source) { pages in
+                        do {
+                            let writer = try LegacyDownloadStore.shared.makeWriter(
+                                source: source,
+                                manga: manga,
+                                chapter: chapter,
+                                pageCount: pages.count
+                            )
+                            self.downloadPage(
+                                pages: pages,
+                                index: 0,
+                                source: source,
+                                writer: writer,
+                                progress: progress,
+                                completion: completion
+                            )
+                        } catch {
+                            completion(.failure(error))
+                        }
                     }
                 case .failure(let error):
                     completion(.failure(error))
@@ -7370,14 +7498,22 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
                 guard let self = self else { return }
                 switch result {
                     case .success(let pages):
-                        self.setPages(pages)
-                        self.message = pages.isEmpty ? "No pages." : ""
+                        LegacyZipPageResolver.shared.resolve(pages, source: self.source) { [weak self] resolved in
+                            DispatchQueue.main.async {
+                                guard let self = self else { return }
+                                self.setPages(resolved)
+                                self.message = resolved.isEmpty ? "No pages." : ""
+                                self.tableView.reloadData()
+                                self.scrollToInitialPageIfNeeded()
+                                self.updatePageHUD()
+                            }
+                        }
                     case .failure(let error):
                         self.message = self.readerMessage(for: error)
+                        self.tableView.reloadData()
+                        self.scrollToInitialPageIfNeeded()
+                        self.updatePageHUD()
                 }
-                self.tableView.reloadData()
-                self.scrollToInitialPageIfNeeded()
-                self.updatePageHUD()
             }
         }
     }
@@ -7980,14 +8116,22 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                 guard let self = self else { return }
                 switch result {
                     case .success(let pages):
-                        self.setPages(pages)
-                        self.message = pages.isEmpty ? "No pages." : ""
+                        LegacyZipPageResolver.shared.resolve(pages, source: self.source) { [weak self] resolved in
+                            DispatchQueue.main.async {
+                                guard let self = self else { return }
+                                self.setPages(resolved)
+                                self.message = resolved.isEmpty ? "No pages." : ""
+                                self.collectionView.reloadData()
+                                self.scrollToInitialPageIfNeeded()
+                                self.updatePageHUD()
+                            }
+                        }
                     case .failure(let error):
                         self.message = self.readerMessage(for: error)
+                        self.collectionView.reloadData()
+                        self.scrollToInitialPageIfNeeded()
+                        self.updatePageHUD()
                 }
-                self.collectionView.reloadData()
-                self.scrollToInitialPageIfNeeded()
-                self.updatePageHUD()
             }
         }
     }

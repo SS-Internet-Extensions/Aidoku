@@ -6,7 +6,91 @@
 //
 
 import XCTest
+import ZIPFoundation
 @testable import AidokuLegacy
+
+final class LegacyZipPageResolverTests: XCTestCase {
+    private var tempRoots: [URL] = []
+
+    override func tearDown() {
+        for url in tempRoots {
+            try? FileManager.default.removeItem(at: url)
+        }
+        tempRoots = []
+        super.tearDown()
+    }
+
+    /// Builds a zip containing `entries` and returns its file URL.
+    private func makeArchive(_ entries: [String: Data]) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ZipSrc-\(UUID().uuidString)", isDirectory: true)
+        tempRoots.append(dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (name, data) in entries {
+            try data.write(to: dir.appendingPathComponent(name))
+        }
+        let zipURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Zip-\(UUID().uuidString).zip")
+        tempRoots.append(zipURL)
+        try FileManager.default.zipItem(at: dir, to: zipURL, shouldKeepParent: false)
+        return zipURL
+    }
+
+    func testExtractEntryReturnsBytes() throws {
+        let payload = Data("page-bytes".utf8)
+        let zipURL = try makeArchive(["1.png": payload, "2.png": Data("other".utf8)])
+        XCTAssertEqual(LegacyZipPageResolver.extractEntry(from: zipURL, filePath: "1.png"), payload)
+    }
+
+    func testExtractEntryFallsBackToBasename() throws {
+        let payload = Data("nested".utf8)
+        let zipURL = try makeArchive(["1.png": payload])
+        // Source-supplied path may include directories the archive doesn't use.
+        XCTAssertEqual(LegacyZipPageResolver.extractEntry(from: zipURL, filePath: "chapter/1.png"), payload)
+    }
+
+    func testExtractEntryReturnsNilForMissingEntry() throws {
+        let zipURL = try makeArchive(["1.png": Data([0x1])])
+        XCTAssertNil(LegacyZipPageResolver.extractEntry(from: zipURL, filePath: "missing.png"))
+    }
+
+    func testResolveRewritesLocalZipPageToImage() throws {
+        let payload = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        let zipURL = try makeArchive(["p1.jpg": payload])
+        let source = LegacyFixtures.source(runner: FakeLegacyRunner())
+        let pages = [
+            AidokuRunnerLegacyPage(content: .zipFile(url: zipURL, filePath: "p1.jpg"), hasDescription: false, description: nil),
+            AidokuRunnerLegacyPage(content: .text("note"), hasDescription: false, description: nil)
+        ]
+
+        let expectation = expectation(description: "resolve")
+        LegacyZipPageResolver.shared.resolve(pages, source: source) { resolved in
+            XCTAssertEqual(resolved.count, 2)
+            if case .image(let data) = resolved[0].content {
+                XCTAssertEqual(data, payload)
+            } else {
+                XCTFail("zip page should resolve to image data")
+            }
+            if case .text = resolved[1].content {} else { XCTFail("text page should be untouched") }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 5)
+    }
+
+    func testResolvePassesThroughWhenNoZipPages() {
+        let source = LegacyFixtures.source(runner: FakeLegacyRunner())
+        let pages = [
+            AidokuRunnerLegacyPage(content: .text("a"), hasDescription: false, description: nil)
+        ]
+        let expectation = expectation(description: "resolve")
+        LegacyZipPageResolver.shared.resolve(pages, source: source) { resolved in
+            XCTAssertEqual(resolved.count, 1)
+            if case .text = resolved[0].content {} else { XCTFail("page should be unchanged") }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+    }
+}
 
 final class LegacyDownloadTests: XCTestCase {
     private var source: AidokuRunnerLegacySource!
