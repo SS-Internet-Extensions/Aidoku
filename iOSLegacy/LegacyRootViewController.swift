@@ -5071,6 +5071,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
         navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
     }
 
@@ -6331,6 +6332,7 @@ final class LegacyMangaListViewController: UITableViewController {
             searchController.searchResultsUpdater = self
             searchController.obscuresBackgroundDuringPresentation = false
             navigationItem.searchController = searchController
+            navigationItem.hidesSearchBarWhenScrolling = false
             definesPresentationContext = true
             navigationItem.rightBarButtonItem = UIBarButtonItem(
                 title: "Filters",
