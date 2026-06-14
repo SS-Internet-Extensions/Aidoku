@@ -9157,10 +9157,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
     @objc private func handleReaderTap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: view)
+        // In right-to-left paging the next page sits on the left, so invert the zones.
+        let nextOnLeft = mode == .pagedRTL
         if location.x < view.bounds.width * 0.33 {
-            movePage(delta: -1)
+            movePage(delta: nextOnLeft ? 1 : -1)
         } else if location.x > view.bounds.width * 0.67 {
-            movePage(delta: 1)
+            movePage(delta: nextOnLeft ? -1 : 1)
         } else {
             toggleBars()
         }
@@ -9288,7 +9290,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let current = currentPageIndex ?? initialPageIndex
         let next = min(max(current + delta, 0), pages.count - 1)
         guard next != current else {
-            overlayView.showGuide(modeTitle: mode.title)
+            overlayView.showGuide(modeTitle: mode.title, nextOnLeft: mode == .pagedRTL)
             return
         }
         scrollTo(pageIndex: next, animated: true)
@@ -9327,7 +9329,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private func showTapOverlayIfNeeded() {
         guard aidokuLegacyReaderShowsTapZones(), !didShowTapOverlay else { return }
         didShowTapOverlay = true
-        overlayView.showGuide(modeTitle: mode.title)
+        overlayView.showGuide(modeTitle: mode.title, nextOnLeft: mode == .pagedRTL)
     }
 
     private func updatePageHUD() {
@@ -9491,6 +9493,9 @@ private final class LegacyPagedMessageCell: UICollectionViewCell {
 }
 
 private final class LegacyReaderOverlayView: UIView {
+    private static let prevZoneColor = UIColor.orange.withAlphaComponent(0.55)
+    private static let nextZoneColor = UIColor.green.withAlphaComponent(0.50)
+
     private let leftZone = UILabel()
     private let rightZone = UILabel()
     private let modeLabel = UILabel()
@@ -9508,8 +9513,8 @@ private final class LegacyReaderOverlayView: UIView {
         isUserInteractionEnabled = true
         backgroundColor = .clear
 
-        configureZone(leftZone, text: "Prev", color: UIColor.orange.withAlphaComponent(0.55))
-        configureZone(rightZone, text: "Next", color: UIColor.green.withAlphaComponent(0.50))
+        configureZone(leftZone, text: "Prev", color: LegacyReaderOverlayView.prevZoneColor)
+        configureZone(rightZone, text: "Next", color: LegacyReaderOverlayView.nextZoneColor)
         configurePill(modeLabel, fontSize: 22)
         configurePill(pageLabel, fontSize: 15)
         configureSlider()
@@ -9597,8 +9602,9 @@ private final class LegacyReaderOverlayView: UIView {
         pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
     }
 
-    func showGuide(modeTitle: String) {
+    func showGuide(modeTitle: String, nextOnLeft: Bool = false) {
         hideWorkItem?.cancel()
+        applyZoneDirection(nextOnLeft: nextOnLeft)
         guard !controlsHidden else {
             setControlsHidden(true, animated: false)
             return
@@ -9638,6 +9644,20 @@ private final class LegacyReaderOverlayView: UIView {
             UIView.animate(withDuration: 0.25, animations: changes)
         } else {
             changes()
+        }
+    }
+
+    private func applyZoneDirection(nextOnLeft: Bool) {
+        if nextOnLeft {
+            leftZone.text = "Next"
+            leftZone.backgroundColor = LegacyReaderOverlayView.nextZoneColor
+            rightZone.text = "Prev"
+            rightZone.backgroundColor = LegacyReaderOverlayView.prevZoneColor
+        } else {
+            leftZone.text = "Prev"
+            leftZone.backgroundColor = LegacyReaderOverlayView.prevZoneColor
+            rightZone.text = "Next"
+            rightZone.backgroundColor = LegacyReaderOverlayView.nextZoneColor
         }
     }
 
