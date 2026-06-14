@@ -6966,7 +6966,8 @@ private final class LegacyReaderPageActionPresenter {
         pageDescription: String?,
         pageIndex: Int,
         from viewController: UIViewController,
-        sourceView: UIView?
+        sourceView: UIView?,
+        sourceRect: CGRect? = nil
     ) {
         let alert = UIAlertController(
             title: "Page \(pageIndex + 1)",
@@ -7003,8 +7004,18 @@ private final class LegacyReaderPageActionPresenter {
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         if let popover = alert.popoverPresentationController {
-            popover.sourceView = sourceView ?? viewController.view
-            popover.sourceRect = (sourceView ?? viewController.view).bounds
+            let anchorView: UIView? = sourceView ?? viewController.view
+            popover.sourceView = anchorView
+            let bounds = anchorView?.bounds ?? .zero
+            // Anchoring to the full page-sized cell bounds pushes the popover
+            // off-screen on iPad, where it renders as an empty clipped sliver.
+            // Prefer the explicit touch-point rect, clamped to the anchor's
+            // visible bounds, falling back to the anchor center.
+            if let sourceRect = sourceRect, !bounds.intersection(sourceRect).isNull {
+                popover.sourceRect = sourceRect
+            } else {
+                popover.sourceRect = CGRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+            }
         }
         viewController.present(alert, animated: true)
     }
@@ -8476,15 +8487,23 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             let indexPath = tableView.indexPathForRow(at: location),
             pages.indices.contains(indexPath.row)
         else { return }
-        showPageActions(pageIndex: indexPath.row, sourceView: tableView.cellForRow(at: indexPath))
+        let point = recognizer.location(in: view)
+        showPageActions(
+            pageIndex: indexPath.row,
+            sourceView: view,
+            sourceRect: CGRect(origin: point, size: CGSize(width: 1, height: 1))
+        )
     }
 
     @objc private func showCurrentPageActions() {
         guard !pages.isEmpty else { return }
         let pageIndex = currentPageIndex ?? tableView.indexPathsForVisibleRows?.first?.row ?? initialPageIndex
         guard pages.indices.contains(pageIndex) else { return }
-        let sourceView = tableView.cellForRow(at: IndexPath(row: pageIndex, section: 0)) ?? view
-        showPageActions(pageIndex: pageIndex, sourceView: sourceView)
+        showPageActions(pageIndex: pageIndex, sourceView: view, sourceRect: topBarAnchorRect)
+    }
+
+    private var topBarAnchorRect: CGRect {
+        return CGRect(x: view.bounds.maxX - 40, y: max(8, view.safeAreaInsets.top), width: 1, height: 1)
     }
 
     @objc private func openChapterWebPage() {
@@ -8492,7 +8511,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         aidokuLegacyOpenWebPage(url: url, title: chapter.legacyFormattedTitle, from: self)
     }
 
-    private func showPageActions(pageIndex: Int, sourceView: UIView?) {
+    private func showPageActions(pageIndex: Int, sourceView: UIView?, sourceRect: CGRect? = nil) {
         guard pages.indices.contains(pageIndex) else { return }
         let visibleImage = (tableView.cellForRow(at: IndexPath(row: pageIndex, section: 0)) as? LegacyPageImageCell)?.currentImage
         resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
@@ -8508,7 +8527,8 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
                     pageDescription: pageDescription,
                     pageIndex: pageIndex,
                     from: self,
-                    sourceView: sourceView ?? self.view
+                    sourceView: sourceView ?? self.view,
+                    sourceRect: sourceRect
                 )
             }
         }
@@ -9153,9 +9173,11 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             let indexPath = collectionView.indexPathForItem(at: location),
             pages.indices.contains(pageIndex(forVisualIndex: indexPath.item))
         else { return }
+        let point = recognizer.location(in: view)
         showPageActions(
             pageIndex: pageIndex(forVisualIndex: indexPath.item),
-            sourceView: collectionView.cellForItem(at: indexPath)
+            sourceView: view,
+            sourceRect: CGRect(origin: point, size: CGSize(width: 1, height: 1))
         )
     }
 
@@ -9163,8 +9185,11 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         guard !pages.isEmpty else { return }
         let pageIndex = currentPageIndex ?? initialPageIndex
         guard pages.indices.contains(pageIndex) else { return }
-        let indexPath = IndexPath(item: visualIndex(forPageIndex: pageIndex), section: 0)
-        showPageActions(pageIndex: pageIndex, sourceView: collectionView.cellForItem(at: indexPath) ?? view)
+        showPageActions(pageIndex: pageIndex, sourceView: view, sourceRect: topBarAnchorRect)
+    }
+
+    private var topBarAnchorRect: CGRect {
+        return CGRect(x: view.bounds.maxX - 40, y: max(8, view.safeAreaInsets.top), width: 1, height: 1)
     }
 
     @objc private func openChapterWebPage() {
@@ -9172,7 +9197,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         aidokuLegacyOpenWebPage(url: url, title: chapter.legacyFormattedTitle, from: self)
     }
 
-    private func showPageActions(pageIndex: Int, sourceView: UIView?) {
+    private func showPageActions(pageIndex: Int, sourceView: UIView?, sourceRect: CGRect? = nil) {
         guard pages.indices.contains(pageIndex) else { return }
         let indexPath = IndexPath(item: visualIndex(forPageIndex: pageIndex), section: 0)
         let visibleImage = (collectionView.cellForItem(at: indexPath) as? LegacyPagedImageCell)?.currentImage
@@ -9189,7 +9214,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                     pageDescription: pageDescription,
                     pageIndex: pageIndex,
                     from: self,
-                    sourceView: sourceView ?? self.view
+                    sourceView: sourceView ?? self.view,
+                    sourceRect: sourceRect
                 )
             }
         }
