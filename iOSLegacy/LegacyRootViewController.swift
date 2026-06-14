@@ -3920,7 +3920,36 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case about
     }
 
+    private struct Section {
+        let title: String
+        let rows: [Row]
+    }
+
+    private let sections: [Section] = [
+        Section(title: "Reader", rows: [.readerMode, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
+        Section(title: "Appearance", rows: [.darkTheme]),
+        Section(title: "Privacy", rows: [.incognitoMode]),
+        Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
+        Section(title: "Library", rows: [.readingInsights, .downloads, .localFiles, .selfHosted, .trackers]),
+        Section(title: "Backup & Restore", rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup]),
+        Section(title: "Storage", rows: [.clearImageCache, .clearHistory, .clearLibrary]),
+        Section(title: "About", rows: [.about])
+    ]
+
+    private func row(at indexPath: IndexPath) -> Row {
+        return sections[indexPath.section].rows[indexPath.row]
+    }
+
     private var importsModernBackup = false
+
+    init() {
+        super.init(style: .grouped)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -3931,12 +3960,20 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         navigationController?.navigationBar.tintColor = LegacyPalette.accent
     }
 
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return Row.allCases.count
+        return sections[section].rows.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return sections[section].title
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let row = Row(rawValue: indexPath.row) ?? .about
+        let row = self.row(at: indexPath)
         let cell = tableView.dequeueReusableCell(withIdentifier: "SettingsCell")
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: "SettingsCell")
         cell.backgroundColor = LegacyPalette.panel
@@ -4065,7 +4102,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard let row = Row(rawValue: indexPath.row) else { return }
+        let row = self.row(at: indexPath)
         switch row {
             case .readerMode:
                 showReaderModePicker(from: indexPath)
@@ -7144,10 +7181,74 @@ final class LegacyMangaDetailViewController: UITableViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 96
         navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton, languageButton, trackerButton]
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleDetailLongPress(_:)))
+        tableView.addGestureRecognizer(longPress)
         updateBookmarkButton()
         updateLanguageButton()
         updateTrackerButton()
         loadDetails()
+    }
+
+    @objc private func handleDetailLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        let location = recognizer.location(in: tableView)
+        guard
+            let indexPath = tableView.indexPathForRow(at: location),
+            indexPath.section == 0
+        else { return }
+        showMangaActions(from: tableView.cellForRow(at: indexPath))
+    }
+
+    private func showMangaActions(from sourceView: UIView?) {
+        let alert = UIAlertController(title: manga.title, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Download", style: .default) { [weak self] _ in
+            self?.showDownloadOptions()
+        })
+        alert.addAction(UIAlertAction(title: "Share Cover Image", style: .default) { [weak self] _ in
+            self?.shareCoverImage(from: sourceView)
+        })
+        if source.runner.features.providesAlternateCovers {
+            alert.addAction(UIAlertAction(title: "Set as Cover", style: .default) { [weak self] _ in
+                self?.showAlternateCoverPicker(from: sourceView)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Copy", style: .default) { [weak self] _ in
+            self?.copyMangaInfo()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sourceView ?? view
+            popover.sourceRect = (sourceView ?? view).bounds
+        }
+        present(alert, animated: true)
+    }
+
+    private func shareCoverImage(from sourceView: UIView?) {
+        LegacyImageLoader.shared.loadCover(
+            urls: currentCoverURLs,
+            source: source,
+            targetHeight: 1024
+        ) { [weak self] image in
+            guard let self = self else { return }
+            guard let image = image else {
+                self.showAlert(title: "No Cover", message: "The cover image is not available yet.")
+                return
+            }
+            let controller = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+            if let popover = controller.popoverPresentationController {
+                popover.sourceView = sourceView ?? self.view
+                popover.sourceRect = (sourceView ?? self.view).bounds
+            }
+            self.present(controller, animated: true)
+        }
+    }
+
+    private func copyMangaInfo() {
+        var text = manga.title
+        if let url = manga.url?.absoluteString, !url.isEmpty {
+            text += "\n" + url
+        }
+        UIPasteboard.general.string = text
     }
 
     private var currentCoverURLs: [URL] {
@@ -8076,6 +8177,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
     private var temporaryPageDirectories: [URL] = []
+    private weak var readerTapRecognizer: UITapGestureRecognizer?
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
     }
@@ -8139,6 +8241,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
         tableView.addGestureRecognizer(tapRecognizer)
+        readerTapRecognizer = tapRecognizer
         let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handlePageLongPress(_:)))
         longPressRecognizer.delegate = self
         tableView.addGestureRecognizer(longPressRecognizer)
@@ -8248,6 +8351,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if let pageCell = cell as? LegacyPageImageCell {
+            readerTapRecognizer?.require(toFail: pageCell.zoomDoubleTapRecognizer)
+        }
         if !pages.isEmpty, indexPath.row < pages.count {
             currentPageIndex = indexPath.row
             recordHistory(pageIndex: indexPath.row, force: false)
@@ -8694,6 +8800,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
     private var temporaryPageDirectories: [URL] = []
+    private weak var readerTapRecognizer: UITapGestureRecognizer?
 
     init(
         source: AidokuRunnerLegacySource,
@@ -8778,6 +8885,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
         collectionView.addGestureRecognizer(tapRecognizer)
+        readerTapRecognizer = tapRecognizer
         let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handlePageLongPress(_:)))
         longPressRecognizer.delegate = self
         collectionView.addGestureRecognizer(longPressRecognizer)
@@ -8882,6 +8990,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         willDisplay cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
+        if let pageCell = cell as? LegacyPagedImageCell {
+            readerTapRecognizer?.require(toFail: pageCell.zoomDoubleTapRecognizer)
+        }
         guard !pages.isEmpty else { return }
         let pageIndex = pageIndex(forVisualIndex: indexPath.item)
         currentPageIndex = pageIndex
@@ -9575,6 +9686,10 @@ private final class LegacyReaderOverlayView: UIView {
 private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let imageView = UIImageView()
 
+    // Exposed so the reader's single-tap recognizer can `require(toFail:)` it,
+    // preventing a double tap from also flipping pages or toggling the bars.
+    let doubleTapRecognizer = UITapGestureRecognizer()
+
     var isZoomed: Bool {
         return zoomScale > minimumZoomScale + 0.01
     }
@@ -9610,11 +9725,33 @@ private final class LegacyZoomableImageView: UIScrollView, UIScrollViewDelegate,
         imageView.layer.contentsScale = UIScreen.main.scale
         imageView.layer.magnificationFilter = .nearest
         addSubview(imageView)
+
+        doubleTapRecognizer.numberOfTapsRequired = 2
+        doubleTapRecognizer.addTarget(self, action: #selector(handleDoubleTap(_:)))
+        addGestureRecognizer(doubleTapRecognizer)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+        guard image != nil else { return }
+        if isZoomed {
+            setZoomScale(minimumZoomScale, animated: true)
+        } else {
+            let targetScale = min(maximumZoomScale, 2)
+            let point = recognizer.location(in: imageView)
+            let size = CGSize(width: bounds.width / targetScale, height: bounds.height / targetScale)
+            let rect = CGRect(
+                x: point.x - size.width / 2,
+                y: point.y - size.height / 2,
+                width: size.width,
+                height: size.height
+            )
+            zoom(to: rect, animated: true)
+        }
     }
 
     override func layoutSubviews() {
@@ -9663,6 +9800,8 @@ private final class LegacyPageImageCell: UITableViewCell {
     private var availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
     private var fitsViewport = false
     var onHeightChange: (() -> Void)?
+
+    var zoomDoubleTapRecognizer: UIGestureRecognizer { pageImageView.doubleTapRecognizer }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -10172,6 +10311,8 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     private var representedLoadID = UUID()
     private var representedPage: AidokuRunnerLegacyPage?
     private var representedSource: AidokuRunnerLegacySource?
+
+    var zoomDoubleTapRecognizer: UIGestureRecognizer { pageImageView.doubleTapRecognizer }
 
     override init(frame: CGRect) {
         super.init(frame: frame)

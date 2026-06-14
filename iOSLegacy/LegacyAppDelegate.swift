@@ -26,7 +26,38 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         window.rootViewController = LegacyTabBarController()
         self.window = window
         window.makeKeyAndVisible()
+        presentLaunchCover(over: window)
         return true
+    }
+
+    // The launch storyboard is system-rendered and can only follow the device's
+    // system appearance, so it stays light when the user enables the in-app dark
+    // theme. Cover the window with a themed splash matching the in-app theme and
+    // fade it out, avoiding a white flash before the themed UI appears.
+    private func presentLaunchCover(over window: UIWindow) {
+        let cover = UIView(frame: window.bounds)
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = LegacyPalette.background
+
+        let label = UILabel()
+        label.text = "Aidoku"
+        label.textColor = LegacyPalette.accent
+        label.font = .systemFont(ofSize: 36, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        cover.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: cover.centerYAnchor)
+        ])
+
+        window.addSubview(cover)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            UIView.animate(
+                withDuration: 0.25,
+                animations: { cover.alpha = 0 },
+                completion: { _ in cover.removeFromSuperview() }
+            )
+        }
     }
 
     func application(
