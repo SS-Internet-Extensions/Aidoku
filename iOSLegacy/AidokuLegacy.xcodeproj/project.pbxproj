@@ -10,7 +10,7 @@
 		100000000000000000000010 /* LegacyAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000001 /* LegacyAppDelegate.swift */; };
 		100000000000000000000011 /* LegacyRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000002 /* LegacyRootViewController.swift */; };
 		100000000000000000000012 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000003 /* LaunchScreen.storyboard */; };
-		1000000000000000000000F1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000F0 /* Assets.xcassets */; };
+		1000000000000000000000FB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000FA /* Assets.xcassets */; };
 		100000000000000000000013 /* LegacySourceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* LegacySourceCatalog.swift */; };
 		100000000000000000000014 /* AidokuRunnerLegacyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000006 /* AidokuRunnerLegacyModels.swift */; };
 		100000000000000000000015 /* AidokuRunnerLegacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* AidokuRunnerLegacy.swift */; };
@@ -71,7 +71,7 @@
 		100000000000000000000001 /* LegacyAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAppDelegate.swift; sourceTree = "<group>"; };
 		100000000000000000000002 /* LegacyRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyRootViewController.swift; sourceTree = "<group>"; };
 		100000000000000000000003 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
-		1000000000000000000000F0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1000000000000000000000FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		100000000000000000000004 /* AidokuLegacy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AidokuLegacy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000005 /* LegacySourceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySourceCatalog.swift; sourceTree = "<group>"; };
 		100000000000000000000006 /* AidokuRunnerLegacyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AidokuRunnerLegacyModels.swift; sourceTree = "<group>"; };
@@ -184,7 +184,7 @@
 				100000000000000000000042 /* RunnerPort */,
 				200000000000000000000200 /* Features */,
 				100000000000000000000003 /* LaunchScreen.storyboard */,
-				1000000000000000000000F0 /* Assets.xcassets */,
+				1000000000000000000000FA /* Assets.xcassets */,
 			);
 			name = AidokuLegacy;
 			sourceTree = "<group>";
@@ -412,7 +412,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000012 /* LaunchScreen.storyboard in Resources */,
-				1000000000000000000000F1 /* Assets.xcassets in Resources */,
+				1000000000000000000000FB /* Assets.xcassets in Resources */,
 				200000000000000000000120 /* en.lproj in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
