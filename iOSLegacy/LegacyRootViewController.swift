@@ -786,7 +786,7 @@ private enum LegacyReaderMode: String, CaseIterable {
 
 }
 
-private extension Notification.Name {
+extension Notification.Name {
     static let legacyInstalledSourcesDidChange = Notification.Name("AidokuLegacyInstalledSourcesDidChange")
     static let legacyLibraryDidChange = Notification.Name("AidokuLegacyLibraryDidChange")
     static let legacyHistoryDidChange = Notification.Name("AidokuLegacyHistoryDidChange")
