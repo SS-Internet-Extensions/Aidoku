@@ -3861,12 +3861,39 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     }
 
     private func presentTrackerLogin() {
+        guard LegacyAniListTracker.shared.isClientConfigured else {
+            promptForAniListClientId()
+            return
+        }
         let loginVC = LegacyTrackerLoginViewController { [weak self] _ in
             self?.tableView.reloadData()
         }
         let nav = UINavigationController(rootViewController: loginVC)
         nav.modalPresentationStyle = .fullScreen
         present(nav, animated: true)
+    }
+
+    private func promptForAniListClientId() {
+        let alert = UIAlertController(
+            title: "AniList Client ID",
+            message: "Create an API client at anilist.co (Settings -> Developer) with redirect URL "
+                + "https://anilist.co/api/v2/oauth/pin, then paste its Client ID here.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "Client ID"
+            textField.keyboardType = .numberPad
+            textField.text = LegacyAniListTracker.shared.isClientConfigured ? LegacyAniListTracker.shared.clientId : ""
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save & Connect", style: .default) { [weak self, weak alert] _ in
+            let value = alert?.textFields?.first?.text ?? ""
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            LegacyAniListTracker.shared.setClientId(trimmed)
+            self?.presentTrackerLogin()
+        })
+        present(alert, animated: true)
     }
 
     private func confirmRestore(url: URL) {
@@ -8019,6 +8046,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             pageIndex: pageIndex,
             pageCount: pages.count
         )
+        // Push read progress to a linked tracker. No-op when not logged in,
+        // not linked, or the chapter is not ahead of stored progress.
+        LegacyTrackerManager.shared.syncProgress(
+            sourceKey: source.key,
+            mangaKey: manga.key,
+            chapterNumber: chapter.chapterNumber ?? 0
+        )
         LegacyReaderSessionStore.shared.save(
             source: source,
             manga: manga,
@@ -8650,6 +8684,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             chapter: chapter,
             pageIndex: pageIndex,
             pageCount: pages.count
+        )
+        // Push read progress to a linked tracker. No-op when not logged in,
+        // not linked, or the chapter is not ahead of stored progress.
+        LegacyTrackerManager.shared.syncProgress(
+            sourceKey: source.key,
+            mangaKey: manga.key,
+            chapterNumber: chapter.chapterNumber ?? 0
         )
         LegacyReaderSessionStore.shared.save(
             source: source,

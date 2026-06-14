@@ -7,7 +7,8 @@
 
 import Foundation
 
-// Replace with the real AniList API client id before shipping.
+// Default placeholder. A real AniList API client id is supplied at runtime by the
+// user (Settings -> Trackers) and stored in UserDefaults; see `clientId` below.
 let ANILIST_CLIENT_ID = "ANILIST_CLIENT_ID_PLACEHOLDER"
 
 final class LegacyAniListTracker {
@@ -17,9 +18,29 @@ final class LegacyAniListTracker {
     private let apiURL = URL(string: "https://graphql.anilist.co")!
     private let store = LegacyTrackerStore.shared
     private let session: URLSession
+    private let clientIdDefaultsKey = "AidokuLegacy.tracker.anilist.clientId"
 
     init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    // The effective AniList client id: a user-supplied value when present,
+    // otherwise the compile-time placeholder.
+    var clientId: String {
+        if let stored = UserDefaults.standard.string(forKey: clientIdDefaultsKey), !stored.isEmpty {
+            return stored
+        }
+        return ANILIST_CLIENT_ID
+    }
+
+    // Whether a usable (non-placeholder) client id has been configured.
+    var isClientConfigured: Bool {
+        let id = clientId
+        return !id.isEmpty && id != "ANILIST_CLIENT_ID_PLACEHOLDER"
+    }
+
+    func setClientId(_ id: String) {
+        UserDefaults.standard.set(id.trimmingCharacters(in: .whitespacesAndNewlines), forKey: clientIdDefaultsKey)
     }
 
     // MARK: - Auth
@@ -33,7 +54,7 @@ final class LegacyAniListTracker {
     var authorizationURL: URL {
         var components = URLComponents(string: "https://anilist.co/api/v2/oauth/authorize")!
         components.queryItems = [
-            URLQueryItem(name: "client_id", value: ANILIST_CLIENT_ID),
+            URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "response_type", value: "token")
         ]
         // Force-unwrap is safe: the base string and query items are all valid.
