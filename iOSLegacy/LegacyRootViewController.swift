@@ -3477,6 +3477,7 @@ final class LegacyHistoryViewController: UITableViewController {
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
     private var pendingCoverRepairs = Set<String>()
+    private var coverRepairAttempts: [String: Int] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -3630,38 +3631,99 @@ final class LegacyHistoryViewController: UITableViewController {
             repairCover(for: entry, source: source)
             return
         }
+        let entryKey = entry.key
         LegacyImageLoader.shared.loadCover(
             urls: coverURLs,
             source: source,
             targetHeight: 130
-        ) { [weak self] image in
+        ) { [weak self, weak cell] image in
             guard
                 let self = self,
+                let cell = cell,
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
-                visibleIndexPath == indexPath
+                visibleIndexPath == indexPath,
+                self.entries.indices.contains(indexPath.row),
+                self.entries[indexPath.row].key == entryKey
             else { return }
             cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
             cell.setNeedsLayout()
             if image == nil {
+                LegacyImageLoader.shared.removeCachedImages(for: coverURLs, source: source)
                 self.repairCover(for: entry, source: source)
+            } else {
+                self.coverRepairAttempts[entryKey] = nil
             }
         }
     }
 
     private func repairCover(for entry: LegacyHistoryEntry, source: AidokuRunnerLegacySource) {
+        let attempts = coverRepairAttempts[entry.key] ?? 0
+        guard attempts < 4 else { return }
         guard !pendingCoverRepairs.contains(entry.key) else { return }
+        coverRepairAttempts[entry.key] = attempts + 1
         pendingCoverRepairs.insert(entry.key)
+        let oldCoverURL = entry.manga.coverURL(relativeTo: source.urls.first)
         source.runner.getMangaUpdate(manga: entry.manga, needsDetails: true, needsChapters: false) { [weak self] result in
             DispatchQueue.main.async {
-                self?.pendingCoverRepairs.remove(entry.key)
+                guard let self = self else { return }
+                self.pendingCoverRepairs.remove(entry.key)
                 guard case .success(let updatedManga) = result else { return }
                 let mergedManga = entry.manga.mergedWithUpdate(updatedManga)
-                guard mergedManga.coverURL(relativeTo: source.urls.first) != nil else { return }
+                guard !mergedManga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else {
+                    self.repairCoverWithAlternateCovers(for: entry, source: source, oldCoverURL: oldCoverURL)
+                    return
+                }
+                if let oldCoverURL = oldCoverURL {
+                    LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
+                }
+                LegacyImageLoader.shared.removeCachedImages(for: mergedManga.coverURLCandidates(relativeTo: source.urls.first), source: source)
                 LegacyLibraryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
                 LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: source)
+                self.reloadVisibleHistoryEntry(with: entry.key)
             }
         }
+    }
+
+    private func repairCoverWithAlternateCovers(
+        for entry: LegacyHistoryEntry,
+        source: AidokuRunnerLegacySource,
+        oldCoverURL: URL?
+    ) {
+        guard source.runner.features.providesAlternateCovers else { return }
+        source.runner.getAlternateCovers(manga: entry.manga) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard case .success(let covers) = result else { return }
+                let cover = covers
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+                guard let cover = cover else { return }
+                var manga = entry.manga
+                manga.cover = cover
+                guard !manga.coverURLCandidates(relativeTo: source.urls.first).isEmpty else { return }
+                if let oldCoverURL = oldCoverURL {
+                    LegacyImageLoader.shared.removeCachedImage(for: oldCoverURL, source: source)
+                }
+                LegacyImageLoader.shared.removeCachedImages(for: manga.coverURLCandidates(relativeTo: source.urls.first), source: source)
+                LegacyLibraryStore.shared.updateMangaMetadata(manga: manga, source: source)
+                LegacyHistoryStore.shared.updateMangaMetadata(manga: manga, source: source)
+                LegacyUpdateStore.shared.updateMangaMetadata(manga: manga, source: source)
+                self.reloadVisibleHistoryEntry(with: entry.key)
+            }
+        }
+    }
+
+    private func reloadVisibleHistoryEntry(with key: String) {
+        guard let row = entries.firstIndex(where: { $0.key == key }) else { return }
+        guard let refreshedEntry = LegacyHistoryStore.shared.entries.first(where: { $0.key == key }) else {
+            reloadData()
+            return
+        }
+        entries[row] = refreshedEntry
+        let indexPath = IndexPath(row: row, section: 0)
+        guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
+        tableView.reloadRows(at: [indexPath], with: .none)
     }
 
     private func showAlert(title: String, message: String) {
