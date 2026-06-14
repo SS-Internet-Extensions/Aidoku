@@ -3539,7 +3539,32 @@ final class LegacyHistoryViewController: UITableViewController {
         cell.detailTextLabel?.text = historySubtitle(for: entry)
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
+        if let cover = cell.imageView {
+            cover.isUserInteractionEnabled = true
+            if cover.gestureRecognizers?.isEmpty ?? true {
+                cover.addGestureRecognizer(
+                    UITapGestureRecognizer(target: self, action: #selector(handleCoverTap(_:)))
+                )
+            }
+        }
         return cell
+    }
+
+    @objc private func handleCoverTap(_ recognizer: UITapGestureRecognizer) {
+        let location = recognizer.location(in: tableView)
+        guard
+            let indexPath = tableView.indexPathForRow(at: location),
+            entries.indices.contains(indexPath.row)
+        else { return }
+        let entry = entries[indexPath.row]
+        guard let source = source(for: entry) else {
+            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to view this manga.")
+            return
+        }
+        navigationController?.pushViewController(
+            LegacyMangaDetailViewController(source: source, manga: entry.manga),
+            animated: true
+        )
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
