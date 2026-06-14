@@ -6518,6 +6518,7 @@ final class LegacyMangaListViewController: UITableViewController {
 
     private func load(reset: Bool) {
         guard !isLoading else { return }
+        let appending = !reset && !entries.isEmpty
         if reset {
             page = 1
             entries = []
@@ -6525,25 +6526,65 @@ final class LegacyMangaListViewController: UITableViewController {
         }
         isLoading = true
         message = "Loading..."
-        tableView.reloadData()
+        if appending {
+            // Refresh only the footer ("Load Next Page" -> "Loading...") so an
+            // in-flight scroll isn't interrupted by a full table reload.
+            let footer = IndexPath(row: entries.count, section: 0)
+            if hasNextPage, tableView.numberOfRows(inSection: 0) > entries.count {
+                tableView.reloadRows(at: [footer], with: .none)
+            }
+        } else {
+            tableView.reloadData()
+        }
 
         let completion: (Result<AidokuRunnerLegacyMangaPageResult, Error>) -> Void = { [weak self] result in
             guard let self = self else { return }
             self.isLoading = false
-            switch result {
-                case .success(let pageResult):
-                    if reset {
-                        self.entries = pageResult.entries
-                    } else {
-                        self.entries.append(contentsOf: pageResult.entries)
-                    }
-                    self.hasNextPage = pageResult.hasNextPage
-                    self.page += 1
-                    self.message = self.entries.isEmpty ? "No manga found." : ""
-                case .failure(let error):
-                    self.message = error.localizedDescription
-            }
             self.refreshControl?.endRefreshing()
+
+            guard case .success(let pageResult) = result else {
+                if case .failure(let error) = result {
+                    self.message = error.localizedDescription
+                }
+                self.tableView.reloadData()
+                return
+            }
+
+            // Incremental append: insert just the new rows instead of reloading
+            // the whole table, which would restart every visible cover load.
+            if appending, !pageResult.entries.isEmpty {
+                let oldCount = self.entries.count
+                self.entries.append(contentsOf: pageResult.entries)
+                let hadNextPage = self.hasNextPage
+                self.hasNextPage = pageResult.hasNextPage
+                self.page += 1
+                self.message = ""
+
+                let newRows = (oldCount..<self.entries.count).map { IndexPath(row: $0, section: 0) }
+                self.tableView.performBatchUpdates({
+                    self.tableView.insertRows(at: newRows, with: .none)
+                    if hadNextPage, !self.hasNextPage {
+                        self.tableView.deleteRows(at: [IndexPath(row: oldCount, section: 0)], with: .none)
+                    }
+                }, completion: { _ in
+                    if self.hasNextPage {
+                        let footer = IndexPath(row: self.entries.count, section: 0)
+                        if self.tableView.numberOfRows(inSection: 0) > self.entries.count {
+                            self.tableView.reloadRows(at: [footer], with: .none)
+                        }
+                    }
+                })
+                return
+            }
+
+            if reset {
+                self.entries = pageResult.entries
+            } else {
+                self.entries.append(contentsOf: pageResult.entries)
+            }
+            self.hasNextPage = pageResult.hasNextPage
+            self.page += 1
+            self.message = self.entries.isEmpty ? "No manga found." : ""
             self.tableView.reloadData()
         }
 
