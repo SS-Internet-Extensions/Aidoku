@@ -45,6 +45,15 @@
 		20000000000000000000010C /* LegacyModernBackupExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* LegacyModernBackupExporter.swift */; };
 		20000000000000000000010D /* LegacyLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* LegacyLocalization.swift */; };
 		20000000000000000000010E /* LegacyLocalFileRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* LegacyLocalFileRunner.swift */; };
+		200000000000000000000220 /* LegacyKomgaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* LegacyKomgaModels.swift */; };
+		200000000000000000000221 /* LegacyKomgaServerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* LegacyKomgaServerStore.swift */; };
+		200000000000000000000222 /* LegacyKomgaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* LegacyKomgaClient.swift */; };
+		200000000000000000000223 /* LegacyKomgaServerListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* LegacyKomgaServerListViewController.swift */; };
+		200000000000000000000224 /* LegacyKomgaRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* LegacyKomgaRunner.swift */; };
+		200000000000000000000225 /* LegacyKomgaBrowseViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* LegacyKomgaBrowseViewController.swift */; };
+		200000000000000000000226 /* LegacyMyAnimeListTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* LegacyMyAnimeListTracker.swift */; };
+		200000000000000000000227 /* LegacyDeepLinkHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* LegacyDeepLinkHandler.swift */; };
+		200000000000000000000228 /* LegacyUpdateNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* LegacyUpdateNotificationManager.swift */; };
 		200000000000000000000120 /* en.lproj in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* en.lproj */; };
 		1000000000000000000000E0 /* LegacyTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D0 /* LegacyTestSupport.swift */; };
 		1000000000000000000000E1 /* LegacySourceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D1 /* LegacySourceCatalogTests.swift */; };
@@ -91,6 +100,15 @@
 		20000000000000000000000C /* LegacyModernBackupExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyModernBackupExporter.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* LegacyLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalization.swift; sourceTree = "<group>"; };
 		20000000000000000000000F /* LegacyLocalFileRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyLocalFileRunner.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* LegacyKomgaModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaModels.swift; sourceTree = "<group>"; };
+		200000000000000000000021 /* LegacyKomgaServerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaServerStore.swift; sourceTree = "<group>"; };
+		200000000000000000000022 /* LegacyKomgaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaClient.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* LegacyKomgaServerListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaServerListViewController.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* LegacyKomgaRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaRunner.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* LegacyKomgaBrowseViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyKomgaBrowseViewController.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* LegacyMyAnimeListTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyMyAnimeListTracker.swift; sourceTree = "<group>"; };
+		200000000000000000000027 /* LegacyDeepLinkHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyDeepLinkHandler.swift; sourceTree = "<group>"; };
+		200000000000000000000028 /* LegacyUpdateNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyUpdateNotificationManager.swift; sourceTree = "<group>"; };
 		20000000000000000000000E /* en.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = en.lproj; sourceTree = "<group>"; };
 		1000000000000000000000DF /* AidokuLegacyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AidokuLegacyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1000000000000000000000D0 /* LegacyTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyTestSupport.swift; sourceTree = "<group>"; };
@@ -175,6 +193,9 @@
 				200000000000000000000202 /* LocalFiles */,
 				200000000000000000000203 /* ModernBackup */,
 				200000000000000000000204 /* Localization */,
+				200000000000000000000205 /* SelfHosted */,
+				200000000000000000000206 /* DeepLinks */,
+				200000000000000000000207 /* Notifications */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -185,10 +206,40 @@
 				200000000000000000000001 /* LegacyTrackerModels.swift */,
 				200000000000000000000002 /* LegacyTrackerStore.swift */,
 				200000000000000000000003 /* LegacyAniListTracker.swift */,
+				200000000000000000000026 /* LegacyMyAnimeListTracker.swift */,
 				200000000000000000000004 /* LegacyTrackerLoginViewController.swift */,
 				200000000000000000000005 /* LegacyTrackerManager.swift */,
 			);
 			path = Tracker;
+			sourceTree = "<group>";
+		};
+		200000000000000000000205 /* SelfHosted */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000020 /* LegacyKomgaModels.swift */,
+				200000000000000000000021 /* LegacyKomgaServerStore.swift */,
+				200000000000000000000022 /* LegacyKomgaClient.swift */,
+				200000000000000000000023 /* LegacyKomgaServerListViewController.swift */,
+				200000000000000000000024 /* LegacyKomgaRunner.swift */,
+				200000000000000000000025 /* LegacyKomgaBrowseViewController.swift */,
+			);
+			path = SelfHosted;
+			sourceTree = "<group>";
+		};
+		200000000000000000000206 /* DeepLinks */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000027 /* LegacyDeepLinkHandler.swift */,
+			);
+			path = DeepLinks;
+			sourceTree = "<group>";
+		};
+		200000000000000000000207 /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000028 /* LegacyUpdateNotificationManager.swift */,
+			);
+			path = Notifications;
 			sourceTree = "<group>";
 		};
 		200000000000000000000202 /* LocalFiles */ = {
@@ -400,6 +451,15 @@
 				20000000000000000000010C /* LegacyModernBackupExporter.swift in Sources */,
 				20000000000000000000010D /* LegacyLocalization.swift in Sources */,
 				20000000000000000000010E /* LegacyLocalFileRunner.swift in Sources */,
+				200000000000000000000220 /* LegacyKomgaModels.swift in Sources */,
+				200000000000000000000221 /* LegacyKomgaServerStore.swift in Sources */,
+				200000000000000000000222 /* LegacyKomgaClient.swift in Sources */,
+				200000000000000000000223 /* LegacyKomgaServerListViewController.swift in Sources */,
+				200000000000000000000224 /* LegacyKomgaRunner.swift in Sources */,
+				200000000000000000000225 /* LegacyKomgaBrowseViewController.swift in Sources */,
+				200000000000000000000226 /* LegacyMyAnimeListTracker.swift in Sources */,
+				200000000000000000000227 /* LegacyDeepLinkHandler.swift in Sources */,
+				200000000000000000000228 /* LegacyUpdateNotificationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -2,31 +2,52 @@
 //  LegacyTrackerLoginViewController.swift
 //  AidokuLegacy
 //
-//  WKWebView-hosted OAuth implicit-grant login for AniList. iOS 12 safe (UIKit + WebKit).
+//  WKWebView-hosted OAuth login for the supported trackers. iOS 12 safe (UIKit + WebKit).
+//
+//  - AniList uses the implicit grant: the redirect carries the access token in its
+//    fragment, captured directly.
+//  - MyAnimeList uses the PKCE authorization-code grant: the redirect carries a
+//    `?code=`, which is exchanged for an access token before finishing.
 //
 
 import UIKit
 import WebKit
 
 final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDelegate {
-    // Called once with true if a token was captured, false if the user cancelled.
+    // Called once with true if login succeeded, false if the user cancelled.
     private let completion: ((Bool) -> Void)?
-    private let tracker: LegacyAniListTracker
+    private let trackerId: LegacyTrackerId
+    private let anilist: LegacyAniListTracker
+    private let myanimelist: LegacyMyAnimeListTracker
     private var webView: WKWebView!
     private let progressView = UIProgressView(progressViewStyle: .bar)
     private var didCapture = false
 
     init(
-        tracker: LegacyAniListTracker = .shared,
+        trackerId: LegacyTrackerId,
+        anilist: LegacyAniListTracker = .shared,
+        myanimelist: LegacyMyAnimeListTracker = .shared,
         completion: ((Bool) -> Void)? = nil
     ) {
-        self.tracker = tracker
+        self.trackerId = trackerId
+        self.anilist = anilist
+        self.myanimelist = myanimelist
         self.completion = completion
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    // Authorization URL for the selected tracker.
+    private var authorizationURL: URL {
+        switch trackerId {
+            case .anilist:
+                return anilist.authorizationURL
+            case .myanimelist:
+                return myanimelist.authorizationURL
+        }
     }
 
     override func loadView() {
@@ -39,7 +60,7 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "AniList Login"
+        title = "\(trackerId.displayName) Login"
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel,
             target: self,
@@ -48,7 +69,7 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
         progressView.frame = CGRect(x: 0, y: 0, width: 120, height: 2)
         navigationItem.rightBarButtonItem = UIBarButtonItem(customView: progressView)
         webView.addObserver(self, forKeyPath: #keyPath(WKWebView.estimatedProgress), options: [.new], context: nil)
-        webView.load(URLRequest(url: tracker.authorizationURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+        webView.load(URLRequest(url: authorizationURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
     }
 
     deinit {
@@ -73,7 +94,7 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        if let url = navigationAction.request.url, captureTokenIfPresent(in: url) {
+        if let url = navigationAction.request.url, captureCredentialIfPresent(in: url) {
             decisionHandler(.cancel)
             return
         }
@@ -83,21 +104,53 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         progressView.isHidden = true
         if let url = webView.url {
-            _ = captureTokenIfPresent(in: url)
+            _ = captureCredentialIfPresent(in: url)
         }
     }
 
-    // Extracts and stores an access token from a redirect URL fragment, then dismisses.
+    // Extracts a token (AniList) or code (MyAnimeList) from a redirect URL, completes
+    // the login, then dismisses. Returns true when a credential was found.
     @discardableResult
-    private func captureTokenIfPresent(in url: URL) -> Bool {
+    private func captureCredentialIfPresent(in url: URL) -> Bool {
         guard !didCapture else { return true }
-        guard let token = LegacyAniListTracker.accessToken(fromRedirect: url) else {
-            return false
+        switch trackerId {
+            case .anilist:
+                guard let token = LegacyAniListTracker.accessToken(fromRedirect: url) else {
+                    return false
+                }
+                didCapture = true
+                anilist.setAccessToken(token)
+                finish(success: true)
+                return true
+            case .myanimelist:
+                guard let code = LegacyMyAnimeListTracker.authorizationCode(fromRedirect: url) else {
+                    return false
+                }
+                didCapture = true
+                myanimelist.exchangeCode(code) { [weak self] result in
+                    DispatchQueue.main.async {
+                        switch result {
+                            case .success:
+                                self?.finish(success: true)
+                            case .failure(let error):
+                                self?.presentExchangeFailure(error)
+                        }
+                    }
+                }
+                return true
         }
-        didCapture = true
-        tracker.setAccessToken(token)
-        finish(success: true)
-        return true
+    }
+
+    private func presentExchangeFailure(_ error: Error) {
+        let alert = UIAlertController(
+            title: "Login Failed",
+            message: error.localizedDescription,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.finish(success: false)
+        })
+        present(alert, animated: true)
     }
 
     @objc private func cancel() {

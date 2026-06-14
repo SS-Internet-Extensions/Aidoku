@@ -2582,6 +2582,8 @@ final class LegacyLibraryViewController: UITableViewController {
     private var libraryObserver: NSObjectProtocol?
     private var sourceObserver: NSObjectProtocol?
     private var isUpdatingLibrary = false
+    private var updateNewChapterCount = 0
+    private var updateNewMangaCount = 0
     private var activeCategory: String?
     private var activeFilterGroup: LegacyLibraryFilterGroup?
     private var sortOption = LegacyLibrarySortOption.current
@@ -3010,6 +3012,8 @@ final class LegacyLibraryViewController: UITableViewController {
             return
         }
         isUpdatingLibrary = true
+        updateNewChapterCount = 0
+        updateNewMangaCount = 0
         navigationItem.prompt = automatic ? "Updating library..." : "Updating \(items.count) manga..."
         updateLibraryItems(items, index: 0, automatic: automatic)
     }
@@ -3020,6 +3024,10 @@ final class LegacyLibraryViewController: UITableViewController {
             navigationItem.prompt = nil
             refreshControl?.endRefreshing()
             reloadData()
+            LegacyUpdateNotificationManager.shared.notifyLibraryUpdateSummary(
+                updatedMangaCount: updateNewMangaCount,
+                totalNewChapters: updateNewChapterCount
+            )
             if !automatic {
                 showAlert(title: "Library Updated", message: "Finished checking \(items.count) manga.")
             }
@@ -3056,7 +3064,10 @@ final class LegacyLibraryViewController: UITableViewController {
         }
         let oldKeys = Set(oldChapters.map { $0.key })
         let addedChapters = newChapters.filter { !oldKeys.contains($0.key) && !$0.locked }
+        guard !addedChapters.isEmpty else { return }
         LegacyUpdateStore.shared.add(source: source, manga: newManga, chapters: addedChapters)
+        updateNewChapterCount += addedChapters.count
+        updateNewMangaCount += 1
     }
 
     private func showAlert(title: String, message: String) {
@@ -3504,8 +3515,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case darkTheme
         case automaticLibraryUpdates
         case automaticSourceUpdates
+        case updateNotifications
         case downloads
         case localFiles
+        case selfHosted
         case trackers
         case createBackup
         case restoreBackup
@@ -3588,6 +3601,13 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.textLabel?.text = "Automatic Source Updates"
                 cell.detailTextLabel?.text = enabled ? "Install source package updates when the app opens" : "Update installed sources manually"
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .updateNotifications:
+                let enabled = LegacyUpdateNotificationManager.shared.isEnabled
+                cell.textLabel?.text = "Update Notifications"
+                cell.detailTextLabel?.text = enabled
+                    ? "Notify when a library update finds new chapters."
+                    : "Do not send library update notifications."
+                cell.accessoryType = enabled ? .checkmark : .none
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
@@ -3598,11 +3618,20 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.detailTextLabel?.text = count == 0
                     ? "Import .cbz, .zip, or .pdf files to read offline."
                     : (count == 1 ? "1 imported item" : "\(count) imported items")
+            case .selfHosted:
+                let count = LegacyKomgaServerStore.shared.servers.count
+                cell.textLabel?.text = "Self-Hosted Servers"
+                cell.detailTextLabel?.text = count == 0
+                    ? "Add a Komga or Kavita server to browse and read."
+                    : (count == 1 ? "1 server configured" : "\(count) servers configured")
             case .trackers:
                 cell.textLabel?.text = "Trackers"
-                cell.detailTextLabel?.text = LegacyTrackerManager.shared.isLoggedIn
-                    ? "AniList connected."
-                    : "Connect an AniList account to sync progress."
+                let connected = LegacyTrackerManager.shared.loggedInTrackers
+                if connected.isEmpty {
+                    cell.detailTextLabel?.text = "Connect AniList or MyAnimeList to sync progress."
+                } else {
+                    cell.detailTextLabel?.text = connected.map { $0.displayName }.joined(separator: ", ") + " connected."
+                }
             case .createBackup:
                 cell.textLabel?.text = "Create Backup"
                 cell.detailTextLabel?.text = "Export library, history, updates, repos, and legacy settings."
@@ -3670,10 +3699,14 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let key = "AidokuLegacy.sources.automaticUpdates"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
                 tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .updateNotifications:
+                toggleUpdateNotifications(at: indexPath)
             case .downloads:
                 navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
             case .localFiles:
                 openLocalFiles()
+            case .selfHosted:
+                openSelfHosted()
             case .trackers:
                 showTrackerOptions(from: indexPath)
             case .createBackup:
@@ -3834,18 +3867,47 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         navigationController?.pushViewController(reader, animated: true)
     }
 
+    private func openSelfHosted() {
+        let serversVC = LegacyKomgaServerListViewController()
+        serversVC.onSelectServer = { [weak self] server in
+            let browseVC = LegacyKomgaSeriesListViewController(server: server)
+            self?.navigationController?.pushViewController(browseVC, animated: true)
+        }
+        navigationController?.pushViewController(serversVC, animated: true)
+    }
+
+    private func toggleUpdateNotifications(at indexPath: IndexPath) {
+        let manager = LegacyUpdateNotificationManager.shared
+        if manager.isEnabled {
+            manager.isEnabled = false
+            tableView.reloadRows(at: [indexPath], with: .automatic)
+        } else {
+            manager.requestAuthorization { [weak self] granted in
+                if !granted {
+                    self?.showAlert(
+                        title: "Notifications Disabled",
+                        message: "Enable notifications for Aidoku Legacy in the Settings app to receive update alerts."
+                    )
+                }
+                self?.tableView.reloadRows(at: [indexPath], with: .automatic)
+            }
+        }
+    }
+
     private func showTrackerOptions(from indexPath: IndexPath) {
         let manager = LegacyTrackerManager.shared
         let alert = UIAlertController(title: "Trackers", message: nil, preferredStyle: .actionSheet)
-        if manager.isLoggedIn {
-            alert.addAction(UIAlertAction(title: "Log Out of AniList", style: .destructive) { [weak self] _ in
-                manager.logout()
-                self?.tableView.reloadData()
-            })
-        } else {
-            alert.addAction(UIAlertAction(title: "Connect AniList", style: .default) { [weak self] _ in
-                self?.presentTrackerLogin()
-            })
+        for trackerId in LegacyTrackerId.allCases {
+            if manager.isLoggedIn(trackerId) {
+                alert.addAction(UIAlertAction(title: "Log Out of \(trackerId.displayName)", style: .destructive) { [weak self] _ in
+                    manager.logout(trackerId)
+                    self?.tableView.reloadData()
+                })
+            } else {
+                alert.addAction(UIAlertAction(title: "Connect \(trackerId.displayName)", style: .default) { [weak self] _ in
+                    self?.presentTrackerLogin(trackerId)
+                })
+            }
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         if let popover = alert.popoverPresentationController {
@@ -3860,12 +3922,19 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         present(alert, animated: true)
     }
 
-    private func presentTrackerLogin() {
-        guard LegacyAniListTracker.shared.isClientConfigured else {
-            promptForAniListClientId()
+    private func presentTrackerLogin(_ trackerId: LegacyTrackerId) {
+        let isConfigured: Bool
+        switch trackerId {
+            case .anilist:
+                isConfigured = LegacyAniListTracker.shared.isClientConfigured
+            case .myanimelist:
+                isConfigured = LegacyMyAnimeListTracker.shared.isClientConfigured
+        }
+        guard isConfigured else {
+            promptForClientId(trackerId)
             return
         }
-        let loginVC = LegacyTrackerLoginViewController { [weak self] _ in
+        let loginVC = LegacyTrackerLoginViewController(trackerId: trackerId) { [weak self] _ in
             self?.tableView.reloadData()
         }
         let nav = UINavigationController(rootViewController: loginVC)
@@ -3873,25 +3942,43 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         present(nav, animated: true)
     }
 
-    private func promptForAniListClientId() {
-        let alert = UIAlertController(
-            title: "AniList Client ID",
-            message: "Create an API client at anilist.co (Settings -> Developer) with redirect URL "
-                + "https://anilist.co/api/v2/oauth/pin, then paste its Client ID here.",
-            preferredStyle: .alert
-        )
+    private func promptForClientId(_ trackerId: LegacyTrackerId) {
+        let title: String
+        let message: String
+        let currentValue: String
+        switch trackerId {
+            case .anilist:
+                title = "AniList Client ID"
+                message = "Create an API client at anilist.co (Settings -> Developer) with redirect URL "
+                    + "https://anilist.co/api/v2/oauth/pin, then paste its Client ID here."
+                currentValue = LegacyAniListTracker.shared.isClientConfigured ? LegacyAniListTracker.shared.clientId : ""
+            case .myanimelist:
+                title = "MyAnimeList Client ID"
+                message = "Create an API app at myanimelist.net (Account Settings -> API) and paste its Client ID here."
+                currentValue = LegacyMyAnimeListTracker.shared.isClientConfigured ? LegacyMyAnimeListTracker.shared.clientId : ""
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addTextField { textField in
             textField.placeholder = "Client ID"
-            textField.keyboardType = .numberPad
-            textField.text = LegacyAniListTracker.shared.isClientConfigured ? LegacyAniListTracker.shared.clientId : ""
+            if trackerId == .anilist {
+                textField.keyboardType = .numberPad
+            }
+            textField.autocorrectionType = .no
+            textField.autocapitalizationType = .none
+            textField.text = currentValue
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Save & Connect", style: .default) { [weak self, weak alert] _ in
             let value = alert?.textFields?.first?.text ?? ""
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
-            LegacyAniListTracker.shared.setClientId(trimmed)
-            self?.presentTrackerLogin()
+            switch trackerId {
+                case .anilist:
+                    LegacyAniListTracker.shared.setClientId(trimmed)
+                case .myanimelist:
+                    LegacyMyAnimeListTracker.shared.setClientId(trimmed)
+            }
+            self?.presentTrackerLogin(trackerId)
         })
         present(alert, animated: true)
     }
@@ -6624,6 +6711,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private lazy var bookmarkButton = UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
     private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
     private lazy var languageButton = UIBarButtonItem(title: "Language", style: .plain, target: self, action: #selector(showChapterLanguagePicker))
+    private lazy var trackerButton = UIBarButtonItem(title: "Track", style: .plain, target: self, action: #selector(showTrackerLinkOptions))
+
+    private var sourceKey: String { source.key }
+    private var mangaKey: String { manga.key }
 
     init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
         self.source = source
@@ -6643,9 +6734,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
         tableView.backgroundColor = LegacyPalette.background
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 96
-        navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton, languageButton]
+        navigationItem.rightBarButtonItems = [bookmarkButton, downloadButton, languageButton, trackerButton]
         updateBookmarkButton()
         updateLanguageButton()
+        updateTrackerButton()
         loadDetails()
     }
 
@@ -6916,6 +7008,102 @@ final class LegacyMangaDetailViewController: UITableViewController {
         } else {
             languageButton.title = "Language"
         }
+    }
+
+    // MARK: - Tracking
+
+    private func updateTrackerButton() {
+        let linked = !LegacyTrackerManager.shared.entries(sourceKey: sourceKey, mangaKey: mangaKey).isEmpty
+        trackerButton.title = linked ? "Tracked" : "Track"
+    }
+
+    @objc private func showTrackerLinkOptions() {
+        let manager = LegacyTrackerManager.shared
+        let loggedIn = manager.loggedInTrackers
+        guard !loggedIn.isEmpty else {
+            presentDetailAlert(
+                title: "No Tracker Connected",
+                message: "Connect AniList or MyAnimeList in Settings -> Trackers first."
+            )
+            return
+        }
+
+        let alert = UIAlertController(title: "Tracking", message: manga.title, preferredStyle: .actionSheet)
+        for trackerId in loggedIn {
+            if let entry = manager.entry(trackerId: trackerId, sourceKey: sourceKey, mangaKey: mangaKey) {
+                alert.addAction(UIAlertAction(title: "\(trackerId.displayName): \(entry.status.displayName)", style: .default) { [weak self] _ in
+                    self?.presentTrackerStatusOptions(entry: entry)
+                })
+            } else {
+                alert.addAction(UIAlertAction(title: "Link to \(trackerId.displayName)", style: .default) { [weak self] _ in
+                    self?.beginLink(trackerId: trackerId)
+                })
+            }
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = trackerButton
+        }
+        present(alert, animated: true)
+    }
+
+    private func beginLink(trackerId: LegacyTrackerId) {
+        let searchVC = LegacyTrackerSearchViewController(
+            trackerId: trackerId,
+            initialQuery: manga.title
+        ) { [weak self] result in
+            guard let self = self else { return }
+            LegacyTrackerManager.shared.link(
+                trackerId: trackerId,
+                sourceKey: self.sourceKey,
+                mangaKey: self.mangaKey,
+                remoteId: result.remoteId
+            ) { linkResult in
+                DispatchQueue.main.async {
+                    self.updateTrackerButton()
+                    if case .failure(let error) = linkResult {
+                        self.presentDetailAlert(title: "Linked With Warnings", message: error.localizedDescription)
+                    }
+                }
+            }
+        }
+        navigationController?.pushViewController(searchVC, animated: true)
+    }
+
+    private func presentTrackerStatusOptions(entry: LegacyTrackEntry) {
+        let alert = UIAlertController(title: "Status", message: nil, preferredStyle: .actionSheet)
+        for status in LegacyTrackStatus.allCases {
+            let title = status == entry.status ? "\(status.displayName) (Current)" : status.displayName
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                LegacyTrackerManager.shared.updateEntry(entry, status: status, score: nil) { result in
+                    DispatchQueue.main.async {
+                        if case .failure(let error) = result {
+                            self?.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                        }
+                    }
+                }
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Unlink", style: .destructive) { [weak self] _ in
+            guard let self = self else { return }
+            LegacyTrackerManager.shared.unlink(
+                trackerId: entry.trackerId,
+                sourceKey: self.sourceKey,
+                mangaKey: self.mangaKey
+            )
+            self.updateTrackerButton()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = trackerButton
+        }
+        present(alert, animated: true)
+    }
+
+    private func presentDetailAlert(title: String, message: String?) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     @objc private func showChapterLanguagePicker() {
@@ -7435,7 +7623,7 @@ private func legacyPath(_ path: String, insertingSuffixBeforeExtension suffix: S
     return basePath + suffix + "." + pathExtension
 }
 
-private enum LegacyReaderFactory {
+enum LegacyReaderFactory {
     static func makeReader(
         source: AidokuRunnerLegacySource,
         manga: AidokuRunnerLegacyManga,
@@ -10406,5 +10594,105 @@ private final class LegacySourceWebViewController: UIViewController, WKNavigatio
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
             .lowercased()
         return domain == host || domain.hasSuffix(".\(host)") || host.hasSuffix(".\(domain)")
+    }
+}
+
+// Searches a tracker for candidates and reports the chosen result back to the caller.
+// Used by the manga detail screen to link a manga to an AniList / MyAnimeList record.
+final class LegacyTrackerSearchViewController: UITableViewController, UISearchResultsUpdating {
+    private let trackerId: LegacyTrackerId
+    private let onPick: (LegacyTrackSearchResult) -> Void
+    private let searchController = UISearchController(searchResultsController: nil)
+
+    private var results: [LegacyTrackSearchResult] = []
+    private var isLoading = false
+    private var pendingSearch: DispatchWorkItem?
+    private var currentQuery: String
+
+    init(
+        trackerId: LegacyTrackerId,
+        initialQuery: String,
+        onPick: @escaping (LegacyTrackSearchResult) -> Void
+    ) {
+        self.trackerId = trackerId
+        self.currentQuery = initialQuery
+        self.onPick = onPick
+        super.init(style: .plain)
+        title = "Link to \(trackerId.displayName)"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search \(trackerId.displayName)"
+        searchController.searchBar.text = currentQuery
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+        performSearch(query: currentQuery)
+    }
+
+    private func performSearch(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            results = []
+            tableView.reloadData()
+            return
+        }
+        isLoading = true
+        LegacyTrackerManager.shared.search(trackerId: trackerId, title: trimmed) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoading = false
+                switch result {
+                    case .success(let items):
+                        self.results = items
+                        self.tableView.reloadData()
+                    case .failure(let error):
+                        self.results = []
+                        self.tableView.reloadData()
+                        let alert = UIAlertController(title: "Search Failed", message: error.localizedDescription, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
+                }
+            }
+        }
+    }
+
+    func updateSearchResults(for searchController: UISearchController) {
+        let text = searchController.searchBar.text ?? ""
+        pendingSearch?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.performSearch(query: text)
+        }
+        pendingSearch = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return results.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "Cell")
+        let item = results[indexPath.row]
+        cell.textLabel?.text = item.title
+        cell.detailTextLabel?.text = item.totalChapters > 0 ? "\(item.totalChapters) chapters" : "Unknown length"
+        cell.accessoryType = .none
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let item = results[indexPath.row]
+        onPick(item)
+        navigationController?.popViewController(animated: true)
     }
 }

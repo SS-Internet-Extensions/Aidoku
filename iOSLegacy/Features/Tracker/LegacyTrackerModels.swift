@@ -10,15 +10,38 @@ import Foundation
 // Identifies a supported tracker service.
 enum LegacyTrackerId: String, Codable, CaseIterable {
     case anilist
+    case myanimelist
 
     // Human-readable name shown in the UI.
     var displayName: String {
         switch self {
             case .anilist:
                 return "AniList"
+            case .myanimelist:
+                return "MyAnimeList"
         }
     }
 }
+
+// Common operations shared by every tracker client, so the manager can route
+// search/status/update/auth generically by LegacyTrackerId.
+protocol LegacyTrackerService: AnyObject {
+    var isAuthenticated: Bool { get }
+    func getViewer(completion: @escaping (Result<String, Error>) -> Void)
+    func search(title: String, completion: @escaping (Result<[LegacyTrackSearchResult], Error>) -> Void)
+    func getStatus(remoteId: Int, completion: @escaping (Result<LegacyTrackRemoteState, Error>) -> Void)
+    func update(
+        remoteId: Int,
+        status: LegacyTrackStatus?,
+        progress: Int?,
+        score: Float?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+    func logout()
+}
+
+extension LegacyAniListTracker: LegacyTrackerService {}
+extension LegacyMyAnimeListTracker: LegacyTrackerService {}
 
 // Reading status of a tracked title, mirroring the common tracker states.
 enum LegacyTrackStatus: String, Codable, CaseIterable {
