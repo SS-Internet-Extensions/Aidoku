@@ -107,7 +107,9 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
     private func finish(success: Bool) {
         let completion = self.completion
         let dismissAction = {
-            completion?(success)
+            if let completion = completion {
+                completion(success)
+            }
         }
         if let navigationController = navigationController, navigationController.viewControllers.first !== self {
             navigationController.popViewController(animated: true)

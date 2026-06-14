@@ -3505,13 +3505,19 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case automaticLibraryUpdates
         case automaticSourceUpdates
         case downloads
+        case localFiles
+        case trackers
         case createBackup
         case restoreBackup
+        case importModernBackup
+        case exportModernBackup
         case clearImageCache
         case clearHistory
         case clearLibrary
         case about
     }
+
+    private var importsModernBackup = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -3586,12 +3592,29 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
                 cell.detailTextLabel?.text = count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"
+            case .localFiles:
+                let count = LegacyLocalFileStore.shared.mangaList.count
+                cell.textLabel?.text = "Local Files"
+                cell.detailTextLabel?.text = count == 0
+                    ? "Import .cbz, .zip, or .pdf files to read offline."
+                    : (count == 1 ? "1 imported item" : "\(count) imported items")
+            case .trackers:
+                cell.textLabel?.text = "Trackers"
+                cell.detailTextLabel?.text = LegacyTrackerManager.shared.isLoggedIn
+                    ? "AniList connected."
+                    : "Connect an AniList account to sync progress."
             case .createBackup:
                 cell.textLabel?.text = "Create Backup"
                 cell.detailTextLabel?.text = "Export library, history, updates, repos, and legacy settings."
             case .restoreBackup:
                 cell.textLabel?.text = "Restore Backup"
                 cell.detailTextLabel?.text = "Import a legacy JSON backup file."
+            case .importModernBackup:
+                cell.textLabel?.text = "Import Modern Backup"
+                cell.detailTextLabel?.text = "Merge a modern Aidoku backup (.json) into the library."
+            case .exportModernBackup:
+                cell.textLabel?.text = "Export Modern Backup"
+                cell.detailTextLabel?.text = "Save a modern Aidoku backup that newer apps can read."
             case .clearImageCache:
                 cell.textLabel?.text = "Clear Image Cache"
                 cell.detailTextLabel?.text = "Remove cached covers and reader pages."
@@ -3649,10 +3672,18 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .downloads:
                 navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
+            case .localFiles:
+                openLocalFiles()
+            case .trackers:
+                showTrackerOptions(from: indexPath)
             case .createBackup:
                 createBackup()
             case .restoreBackup:
                 showRestoreOptions(from: indexPath)
+            case .importModernBackup:
+                openModernBackupPicker()
+            case .exportModernBackup:
+                exportModernBackup()
             case .clearImageCache:
                 LegacyImageLoader.shared.clear()
             case .clearHistory:
@@ -3703,10 +3734,139 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     }
 
     private func openBackupPicker() {
+        importsModernBackup = false
         let picker = UIDocumentPickerViewController(documentTypes: ["public.json", "public.data"], in: .import)
         picker.delegate = self
         picker.modalPresentationStyle = .formSheet
         present(picker, animated: true)
+    }
+
+    private func openModernBackupPicker() {
+        importsModernBackup = true
+        let picker = UIDocumentPickerViewController(documentTypes: ["public.json", "public.data"], in: .import)
+        picker.delegate = self
+        picker.modalPresentationStyle = .formSheet
+        present(picker, animated: true)
+    }
+
+    private func importModernBackup(url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        LegacyModernBackupImporter.shared.importBackup(at: url) { [weak self] result in
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+            guard let self = self else { return }
+            switch result {
+                case .success(let summary):
+                    self.tableView.reloadData()
+                    self.showAlert(
+                        title: "Backup Imported",
+                        message: "Added \(summary.libraryAdded) library, \(summary.historyAdded) history, "
+                            + "and \(summary.updatesAdded) update entries."
+                    )
+                case .failure(let error):
+                    self.showAlert(title: "Import Failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func exportModernBackup() {
+        LegacyModernBackupExporter.shared.exportBackup { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let url):
+                    let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                    if let popover = controller.popoverPresentationController {
+                        popover.sourceView = self.view
+                        popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 1, height: 1)
+                    }
+                    self.present(controller, animated: true)
+                case .failure(let error):
+                    self.showAlert(title: "Export Failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func openLocalFiles() {
+        let localFilesVC = LegacyLocalFilesViewController()
+        localFilesVC.onOpenChapter = { [weak self] manga, chapter in
+            self?.presentLocalReader(manga: manga, chapter: chapter)
+        }
+        navigationController?.pushViewController(localFilesVC, animated: true)
+    }
+
+    private func presentLocalReader(manga localManga: LegacyLocalManga, chapter localChapter: LegacyLocalChapter) {
+        let runner = LegacyLocalFileRunner(localManga: localManga, localChapter: localChapter)
+        let info = AidokuRunnerLegacySourceInfo(
+            info: .init(
+                id: "local",
+                name: "Local Files",
+                altNames: nil,
+                version: 1,
+                url: nil,
+                urls: nil,
+                contentRating: .safe,
+                languages: ["en"],
+                minAppVersion: nil,
+                maxAppVersion: nil
+            ),
+            listings: nil,
+            config: nil
+        )
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("AidokuLegacyLocalSource-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let source = AidokuRunnerLegacySource(url: directory, info: info, runner: runner)
+        let manga = AidokuRunnerLegacyManga(
+            sourceKey: "local",
+            key: localManga.id,
+            title: localManga.title,
+            cover: nil,
+            artists: nil,
+            authors: nil,
+            description: nil,
+            url: nil,
+            tags: nil,
+            chapters: nil
+        )
+        let chapter = AidokuRunnerLegacyChapter(key: localChapter.id, title: localChapter.title, chapterNumber: 1)
+        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: chapter)
+        navigationController?.pushViewController(reader, animated: true)
+    }
+
+    private func showTrackerOptions(from indexPath: IndexPath) {
+        let manager = LegacyTrackerManager.shared
+        let alert = UIAlertController(title: "Trackers", message: nil, preferredStyle: .actionSheet)
+        if manager.isLoggedIn {
+            alert.addAction(UIAlertAction(title: "Log Out of AniList", style: .destructive) { [weak self] _ in
+                manager.logout()
+                self?.tableView.reloadData()
+            })
+        } else {
+            alert.addAction(UIAlertAction(title: "Connect AniList", style: .default) { [weak self] _ in
+                self?.presentTrackerLogin()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
+    }
+
+    private func presentTrackerLogin() {
+        let loginVC = LegacyTrackerLoginViewController { [weak self] _ in
+            self?.tableView.reloadData()
+        }
+        let nav = UINavigationController(rootViewController: loginVC)
+        nav.modalPresentationStyle = .fullScreen
+        present(nav, animated: true)
     }
 
     private func confirmRestore(url: URL) {
@@ -3734,7 +3894,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first else { return }
-        confirmRestore(url: url)
+        if importsModernBackup {
+            importsModernBackup = false
+            importModernBackup(url: url)
+        } else {
+            confirmRestore(url: url)
+        }
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
