@@ -1135,18 +1135,58 @@ final class LegacyLibraryStore {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
+    // In-memory cache of the decoded library. Previously `rawEntries` re-decoded
+    // the entire UserDefaults blob on every access, and the launch path plus the
+    // library/history table views hit it many times per refresh. Decoding once
+    // and reusing the result keeps startup and scrolling fast.
+    private let cacheLock = NSLock()
+    private var cachedRawEntries: [LegacyLibraryEntry]?
+
+    init() {
+        // External writers (backup restore, deep-link import) mutate the stored
+        // library without going through `save`, but they all post this
+        // notification, so invalidate the cache whenever the library changes.
+        NotificationCenter.default.addObserver(
+            forName: .legacyLibraryDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.invalidateCache()
+        }
+    }
+
+    private func invalidateCache() {
+        cacheLock.lock()
+        cachedRawEntries = nil
+        cacheLock.unlock()
+    }
+
     var entries: [LegacyLibraryEntry] {
         return entries(sort: .recentlyAdded)
     }
 
     var rawEntries: [LegacyLibraryEntry] {
-        guard
+        cacheLock.lock()
+        if let cached = cachedRawEntries {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let decoded: [LegacyLibraryEntry]
+        if
             let data = UserDefaults.standard.data(forKey: defaultsKey),
             let entries = try? decoder.decode([LegacyLibraryEntry].self, from: data)
-        else {
-            return []
+        {
+            decoded = entries
+        } else {
+            decoded = []
         }
-        return entries
+
+        cacheLock.lock()
+        cachedRawEntries = decoded
+        cacheLock.unlock()
+        return decoded
     }
 
     func entries(

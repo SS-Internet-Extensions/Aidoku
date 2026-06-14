@@ -23,7 +23,7 @@
                             </label>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
-                        <color key="backgroundColor" red="0.96862745100000003" green="0.95686274510000002" blue="0.94117647059999998" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" name="LaunchBackground"/>
                         <constraints>
                             <constraint firstItem="7dY-iA-mbA" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="0nH-ru-Ubx"/>
                             <constraint firstItem="7dY-iA-mbA" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="sjD-pv-Mzy"/>
@@ -36,4 +36,9 @@
             <point key="canvasLocation" x="53" y="375"/>
         </scene>
     </scenes>
+    <resources>
+        <namedColor name="LaunchBackground">
+            <color red="0.96862745100000003" green="0.95686274510000002" blue="0.94117647059999998" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
 </document>
