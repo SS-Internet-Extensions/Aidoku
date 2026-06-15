@@ -3504,8 +3504,14 @@ extension LegacyLibraryViewController: UISearchResultsUpdating {
 }
 
 final class LegacyHistoryViewController: UITableViewController {
+    private struct HistorySection {
+        let title: String
+        var entries: [LegacyHistoryEntry]
+    }
+
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
-    private var entries: [LegacyHistoryEntry] = []
+    private var sectionsData: [HistorySection] = []
+    private var isEmpty = true
     private var sources: [AidokuRunnerLegacySource] = []
     private var observer: NSObjectProtocol?
     private var pendingCoverRepairs = Set<String>()
@@ -3539,38 +3545,102 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 
     @objc private func reloadData() {
-        entries = Self.dedupedByManga(LegacyHistoryStore.shared.entries)
+        let all = Self.backfillCovers(LegacyHistoryStore.shared.entries)
+        sectionsData = Self.groupByDay(all)
+        isEmpty = all.isEmpty
         sources = packageInstaller.loadInstalledSources()
         refreshControl?.endRefreshing()
         tableView.reloadData()
     }
 
-    // History stores one entry per chapter, so a manga read across several
-    // chapters shows up multiple times. Collapse to the most recent entry per
-    // manga (the store is already sorted newest-first), backfilling a missing
-    // cover from an older entry so the row still shows artwork.
-    private static func dedupedByManga(_ all: [LegacyHistoryEntry]) -> [LegacyHistoryEntry] {
-        var order: [String] = []
-        var byManga: [String: LegacyHistoryEntry] = [:]
+    // History stores one entry per chapter. The store sometimes drops the cover
+    // on the latest entry (e.g. a source returned no artwork that read); reuse a
+    // cover from another entry of the same manga so every row shows art.
+    private static func backfillCovers(_ all: [LegacyHistoryEntry]) -> [LegacyHistoryEntry] {
+        var coverByManga: [String: String] = [:]
         for entry in all {
-            let mangaKey = "\(entry.sourceKey)::\(entry.manga.key)"
-            if var existing = byManga[mangaKey] {
-                if (existing.manga.cover ?? "").isEmpty,
-                   let cover = entry.manga.cover,
-                   !cover.isEmpty {
-                    existing.manga.cover = cover
-                    byManga[mangaKey] = existing
-                }
-            } else {
-                byManga[mangaKey] = entry
-                order.append(mangaKey)
+            let key = "\(entry.sourceKey)::\(entry.manga.key)"
+            if coverByManga[key] == nil, let cover = entry.manga.cover, !cover.isEmpty {
+                coverByManga[key] = cover
             }
         }
-        return order.compactMap { byManga[$0] }
+        return all.map { entry in
+            guard (entry.manga.cover ?? "").isEmpty else { return entry }
+            let key = "\(entry.sourceKey)::\(entry.manga.key)"
+            guard let cover = coverByManga[key] else { return entry }
+            var copy = entry
+            copy.manga.cover = cover
+            return copy
+        }
+    }
+
+    // Group newest-first entries into day buckets with Mihon-style headers
+    // ("Today", "Yesterday", "N days ago", then an explicit date).
+    private static func groupByDay(_ all: [LegacyHistoryEntry]) -> [HistorySection] {
+        let calendar = Calendar.current
+        var order: [Date] = []
+        var byDay: [Date: [LegacyHistoryEntry]] = [:]
+        for entry in all {
+            let day = calendar.startOfDay(for: entry.dateRead)
+            if byDay[day] == nil {
+                order.append(day)
+                byDay[day] = []
+            }
+            byDay[day]?.append(entry)
+        }
+        return order.map { HistorySection(title: dayTitle(for: $0, calendar: calendar), entries: byDay[$0] ?? []) }
+    }
+
+    private static func dayTitle(for day: Date, calendar: Calendar) -> String {
+        let today = calendar.startOfDay(for: Date())
+        let daysAgo = calendar.dateComponents([.day], from: day, to: today).day ?? 0
+        switch daysAgo {
+        case ..<0: break
+        case 0: return "Today"
+        case 1: return "Yesterday"
+        case 2...6: return "\(daysAgo) days ago"
+        default: break
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d/yy"
+        return formatter.string(from: day)
+    }
+
+    private func entry(at indexPath: IndexPath) -> LegacyHistoryEntry? {
+        guard sectionsData.indices.contains(indexPath.section) else { return nil }
+        let entries = sectionsData[indexPath.section].entries
+        guard entries.indices.contains(indexPath.row) else { return nil }
+        return entries[indexPath.row]
+    }
+
+    private func indexPath(forKey key: String) -> IndexPath? {
+        for (section, data) in sectionsData.enumerated() {
+            if let row = data.entries.firstIndex(where: { $0.key == key }) {
+                return IndexPath(row: row, section: section)
+            }
+        }
+        return nil
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return isEmpty ? 1 : sectionsData.count
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return entries.isEmpty ? 1 : entries.count
+        guard !isEmpty else { return 1 }
+        return sectionsData[section].entries.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard !isEmpty, sectionsData.indices.contains(section) else { return nil }
+        return sectionsData[section].title
+    }
+
+    override func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
+        guard let header = view as? UITableViewHeaderFooterView else { return }
+        header.textLabel?.textColor = LegacyPalette.secondaryText
+        header.textLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        header.contentView.backgroundColor = LegacyPalette.background
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -3578,23 +3648,24 @@ final class LegacyHistoryViewController: UITableViewController {
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: "HistoryCell")
         cell.backgroundColor = LegacyPalette.panel
         cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.textLabel?.numberOfLines = 2
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
-        cell.detailTextLabel?.numberOfLines = 2
+        cell.detailTextLabel?.numberOfLines = 1
 
-        guard !entries.isEmpty else {
+        guard let entry = entry(at: indexPath) else {
             cell.imageView?.image = nil
             cell.textLabel?.text = "No reading history."
             cell.detailTextLabel?.text = "Open a chapter to start tracking progress."
+            cell.accessoryView = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
             return cell
         }
 
-        let entry = entries[indexPath.row]
         loadCover(for: entry, into: cell, at: indexPath)
         cell.textLabel?.text = entry.manga.title
         cell.detailTextLabel?.text = historySubtitle(for: entry)
-        cell.accessoryType = .disclosureIndicator
+        cell.accessoryView = makeDeleteButton()
         cell.selectionStyle = .default
         if let cover = cell.imageView {
             cover.isUserInteractionEnabled = true
@@ -3607,13 +3678,58 @@ final class LegacyHistoryViewController: UITableViewController {
         return cell
     }
 
+    private func makeDeleteButton() -> UIButton {
+        let button = UIButton(type: .custom)
+        button.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        button.setImage(Self.trashIcon(color: LegacyPalette.secondaryText), for: .normal)
+        button.addTarget(self, action: #selector(handleDeleteTap(_:)), for: .touchUpInside)
+        return button
+    }
+
+    @objc private func handleDeleteTap(_ sender: UIButton) {
+        let point = sender.convert(CGPoint(x: sender.bounds.midX, y: sender.bounds.midY), to: tableView)
+        guard
+            let indexPath = tableView.indexPathForRow(at: point),
+            let entry = entry(at: indexPath)
+        else { return }
+        LegacyHistoryStore.shared.remove(key: entry.key)
+    }
+
+    // SF Symbols are iOS 13+, so draw a simple trash glyph for iOS 12.
+    private static func trashIcon(color: UIColor) -> UIImage {
+        let size = CGSize(width: 24, height: 24)
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        color.setStroke()
+        let path = UIBezierPath()
+        path.lineWidth = 1.6
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.move(to: CGPoint(x: 4, y: 6.5))
+        path.addLine(to: CGPoint(x: 20, y: 6.5))
+        path.move(to: CGPoint(x: 9, y: 6.5))
+        path.addLine(to: CGPoint(x: 9, y: 4))
+        path.addLine(to: CGPoint(x: 15, y: 4))
+        path.addLine(to: CGPoint(x: 15, y: 6.5))
+        path.move(to: CGPoint(x: 6, y: 6.5))
+        path.addLine(to: CGPoint(x: 7, y: 20))
+        path.addLine(to: CGPoint(x: 17, y: 20))
+        path.addLine(to: CGPoint(x: 18, y: 6.5))
+        path.move(to: CGPoint(x: 10, y: 9.5))
+        path.addLine(to: CGPoint(x: 10.5, y: 17))
+        path.move(to: CGPoint(x: 14, y: 9.5))
+        path.addLine(to: CGPoint(x: 13.5, y: 17))
+        path.stroke()
+        let image = UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
+        UIGraphicsEndImageContext()
+        return image.withRenderingMode(.alwaysOriginal)
+    }
+
     @objc private func handleCoverTap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: tableView)
         guard
             let indexPath = tableView.indexPathForRow(at: location),
-            entries.indices.contains(indexPath.row)
+            let entry = entry(at: indexPath)
         else { return }
-        let entry = entries[indexPath.row]
         guard let source = source(for: entry) else {
             showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to view this manga.")
             return
@@ -3626,8 +3742,7 @@ final class LegacyHistoryViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard !entries.isEmpty else { return }
-        let entry = entries[indexPath.row]
+        guard let entry = entry(at: indexPath) else { return }
         guard let source = source(for: entry) else {
             showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to resume this chapter.")
             return
@@ -3648,22 +3763,20 @@ final class LegacyHistoryViewController: UITableViewController {
         commit editingStyle: UITableViewCell.EditingStyle,
         forRowAt indexPath: IndexPath
     ) {
-        guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
-        let entry = entries[indexPath.row]
-        LegacyHistoryStore.shared.removeManga(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        guard editingStyle == .delete, let entry = entry(at: indexPath) else { return }
+        LegacyHistoryStore.shared.remove(key: entry.key)
     }
 
     override func tableView(
         _ tableView: UITableView,
         editActionsForRowAt indexPath: IndexPath
     ) -> [UITableViewRowAction]? {
-        guard entries.indices.contains(indexPath.row) else { return nil }
-        let entry = entries[indexPath.row]
-        // Each row represents a whole manga, so removing clears its history.
-        let removeManga = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
-            LegacyHistoryStore.shared.removeManga(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        guard let entry = entry(at: indexPath) else { return nil }
+        // Each row is one read chapter, so removing clears just that entry.
+        let remove = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
+            LegacyHistoryStore.shared.remove(key: entry.key)
         }
-        return [removeManga]
+        return [remove]
     }
 
     private func source(for entry: LegacyHistoryEntry) -> AidokuRunnerLegacySource? {
@@ -3671,11 +3784,23 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 
     private func historySubtitle(for entry: LegacyHistoryEntry) -> String {
-        let chapterTitle = entry.chapter.legacyFormattedTitle
-        if entry.pageCount > 0 {
-            return "\(chapterTitle) - Page \(entry.pageIndex + 1) of \(entry.pageCount)\n\(entry.sourceName)"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let time = formatter.string(from: entry.dateRead)
+        let label: String
+        if let number = entry.chapter.chapterNumber {
+            label = "Ch. \(Self.formatChapterNumber(number))"
+        } else {
+            label = entry.chapter.legacyFormattedTitle
         }
-        return "\(chapterTitle)\n\(entry.sourceName)"
+        return "\(label) - \(time)"
+    }
+
+    private static func formatChapterNumber(_ number: Float) -> String {
+        if number == number.rounded() {
+            return String(Int(number))
+        }
+        return String(number)
     }
 
     private func loadCover(for entry: LegacyHistoryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
@@ -3697,8 +3822,7 @@ final class LegacyHistoryViewController: UITableViewController {
                 let cell = cell,
                 let visibleIndexPath = self.tableView.indexPath(for: cell),
                 visibleIndexPath == indexPath,
-                self.entries.indices.contains(indexPath.row),
-                self.entries[indexPath.row].key == entryKey
+                self.entry(at: indexPath)?.key == entryKey
             else { return }
             cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
             cell.setNeedsLayout()
@@ -3770,13 +3894,12 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 
     private func reloadVisibleHistoryEntry(with key: String) {
-        guard let row = entries.firstIndex(where: { $0.key == key }) else { return }
+        guard let indexPath = indexPath(forKey: key) else { return }
         guard let refreshedEntry = LegacyHistoryStore.shared.entries.first(where: { $0.key == key }) else {
             reloadData()
             return
         }
-        entries[row] = refreshedEntry
-        let indexPath = IndexPath(row: row, section: 0)
+        sectionsData[indexPath.section].entries[indexPath.row] = refreshedEntry
         guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
         tableView.reloadRows(at: [indexPath], with: .none)
     }
