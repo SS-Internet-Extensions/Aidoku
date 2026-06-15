@@ -300,7 +300,7 @@ enum LegacyDeepLinkCoordinator {
             return
         }
 
-        let task = URLSession.shared.downloadTask(with: url) { tempURL, _, error in
+        let task = LegacyURLSession.shared.downloadTask(with: url) { tempURL, _, error in
             if let error = error {
                 completion(.failure(error))
                 return

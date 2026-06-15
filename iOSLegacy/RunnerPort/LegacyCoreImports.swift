@@ -1132,7 +1132,7 @@ struct Net: SourceLibrary {
         var responseData: Data?
         var response: URLResponse?
         var responseError: Error?
-        URLSession.shared.dataTask(with: urlRequest) { data, urlResponse, error in
+        LegacyURLSession.shared.dataTask(with: urlRequest) { data, urlResponse, error in
             responseData = data
             response = urlResponse
             responseError = error

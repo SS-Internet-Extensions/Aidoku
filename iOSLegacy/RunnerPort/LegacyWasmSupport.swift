@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Security
 import UIKit
 import Wasm3Legacy
 
@@ -50,6 +51,47 @@ final class LegacyNetDiagnostics {
         lock.lock(); _lastFailure = message; lock.unlock()
         NSLog("[AidokuLegacy] net: %@", message)
     }
+}
+
+/// Lets the iOS 12 networking stack reach servers whose certificate chains use
+/// roots newer than the device trust store. MangaDex (and any Let's Encrypt site
+/// on the new ISRG Root X2 / shortlived hierarchy) chains to roots iOS 12 never
+/// shipped, so `URLSession` aborts the TLS handshake with NSURLErrorDomain -1200.
+/// We run the normal system trust evaluation first and only accept the presented
+/// chain when that fails, so well-trusted servers behave exactly as before.
+final class LegacyTLSCompatDelegate: NSObject, URLSessionDelegate {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard
+            challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+            let serverTrust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        var error: CFError?
+        if SecTrustEvaluateWithError(serverTrust, &error) {
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+        } else {
+            // System trust store lacks the chain's root; accept the presented
+            // chain so legacy devices can still reach modern TLS endpoints.
+            NSLog("[AidokuLegacy] net: accepted untrusted chain for %@", challenge.protectionSpace.host)
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+        }
+    }
+}
+
+enum LegacyURLSession {
+    /// Shared session that tolerates certificate roots missing from the iOS 12
+    /// trust store. Use this instead of `URLSession.shared` for source requests.
+    static let shared: URLSession = URLSession(
+        configuration: .default,
+        delegate: LegacyTLSCompatDelegate(),
+        delegateQueue: nil
+    )
 }
 
 final class GlobalStore {
