@@ -1144,9 +1144,20 @@ struct Net: SourceLibrary {
             return Result.requestError.rawValue
         }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            // Source code may treat a non-2xx status as a request error; record it
-            // so the surfaced message names the status (e.g. 403, 429).
-            LegacyNetDiagnostics.shared.record("\(urlText) — HTTP \(http.statusCode)")
+            // Source code may treat a non-2xx status as a request error; record the
+            // status plus a short body snippet so the surfaced message names the
+            // server's own reason (e.g. MangaDex 400 validation JSON, 403, 429).
+            var detail = "\(urlText) — HTTP \(http.statusCode)"
+            if let body = responseData, !body.isEmpty {
+                let snippet = String(decoding: body.prefix(512), as: UTF8.self)
+                    .replacingOccurrences(of: "\r", with: " ")
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                if !snippet.isEmpty {
+                    detail += ", body: \(snippet.prefix(300))"
+                }
+            }
+            LegacyNetDiagnostics.shared.record(detail)
         }
         return Result.success.rawValue
     }
