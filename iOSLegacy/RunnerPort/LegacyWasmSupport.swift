@@ -619,12 +619,18 @@ struct NetRequest {
             request.setValue(header.value, forHTTPHeaderField: header.key)
         }
         if request.value(forHTTPHeaderField: "User-Agent") == nil {
-            // Some APIs (e.g. MangaDex behind Cloudflare) reject the stock iOS 12
-            // user agent with a 403, which sources surface as a generic request
-            // failure. Send a current mobile Safari UA so those requests succeed.
+            // MangaDex's API rejects browser-style `Mozilla/...` user agents with a
+            // branded HTML 400 (an anti-scraping measure: it requires a unique,
+            // identifying, non-browser UA). A spoofed Safari UA here therefore
+            // breaks every MangaDex request, so identify as the app instead. Any
+            // non-browser token is accepted (verified: `Aidoku/x` -> 200). Sources
+            // that genuinely need a browser UA to clear a Cloudflare JS challenge
+            // set one themselves or run through the web view path, which keeps its
+            // browser UA.
+            let appVersion = Bundle.main
+                .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
             request.setValue(
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
-                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                "Aidoku/\(appVersion) (iOS 12)",
                 forHTTPHeaderField: "User-Agent"
             )
         }
