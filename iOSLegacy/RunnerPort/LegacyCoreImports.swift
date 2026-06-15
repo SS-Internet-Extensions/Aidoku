@@ -1128,17 +1128,9 @@ struct Net: SourceLibrary {
             return Result.missingUrl.rawValue
         }
 
-        let semaphore = DispatchSemaphore(value: 0)
-        var responseData: Data?
-        var response: URLResponse?
-        var responseError: Error?
-        LegacyURLSession.shared.dataTask(with: urlRequest) { data, urlResponse, error in
-            responseData = data
-            response = urlResponse
-            responseError = error
-            semaphore.signal()
-        }.resume()
-        semaphore.wait()
+        // Routes through the system URLSession, falling back to OpenSSL for
+        // TLS 1.3-only hosts (e.g. MangaDex) that iOS 12 cannot reach otherwise.
+        let (responseData, response, responseError) = legacyPerformSourceRequest(urlRequest)
 
         request.responseData = responseData
         request.response = response

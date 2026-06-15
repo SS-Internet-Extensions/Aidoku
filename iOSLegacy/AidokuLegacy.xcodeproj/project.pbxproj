@@ -21,6 +21,7 @@
 		10000000000000000000001B /* SDWebImage in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B0 /* SDWebImage */; };
 		10000000000000000000001C /* SDWebImageWebPCoder in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B2 /* SDWebImageWebPCoder */; };
 		10000000000000000000001D /* avif in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B4 /* avif */; };
+		10000000000000000000001E /* OpenSSL in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B6 /* OpenSSL */; };
 		100000000000000000000110 /* AidokuRunnerLegacyWasmRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* AidokuRunnerLegacyWasmRunner.swift */; };
 		100000000000000000000111 /* LegacyAidokuRunnerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* LegacyAidokuRunnerModels.swift */; };
 		100000000000000000000112 /* LegacyCoreImports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* LegacyCoreImports.swift */; };
@@ -136,6 +137,7 @@
 				10000000000000000000001B /* SDWebImage in Frameworks */,
 				10000000000000000000001C /* SDWebImageWebPCoder in Frameworks */,
 				10000000000000000000001D /* avif in Frameworks */,
+				10000000000000000000001E /* OpenSSL in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +339,7 @@
 				1000000000000000000000B0 /* SDWebImage */,
 				1000000000000000000000B2 /* SDWebImageWebPCoder */,
 				1000000000000000000000B4 /* avif */,
+				1000000000000000000000B6 /* OpenSSL */,
 			);
 			productName = AidokuLegacy;
 			productReference = 100000000000000000000004 /* AidokuLegacy.app */;
@@ -398,6 +401,7 @@
 				1000000000000000000000B1 /* XCRemoteSwiftPackageReference "SDWebImage" */,
 				1000000000000000000000B3 /* XCRemoteSwiftPackageReference "SDWebImageWebPCoder" */,
 				1000000000000000000000B5 /* XCLocalSwiftPackageReference "AVIFLegacy" */,
+				1000000000000000000000B7 /* XCRemoteSwiftPackageReference "OpenSSL" */,
 			);
 			productRefGroup = 100000000000000000000041 /* Products */;
 			projectDirPath = "";
@@ -726,6 +730,14 @@
 				version = 0.15.0;
 			};
 		};
+		1000000000000000000000B7 /* XCRemoteSwiftPackageReference "OpenSSL" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/krzyzanowskim/OpenSSL.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.6.2000;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -758,6 +770,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1000000000000000000000B5 /* XCLocalSwiftPackageReference "AVIFLegacy" */;
 			productName = avif;
+		};
+		1000000000000000000000B6 /* OpenSSL */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1000000000000000000000B7 /* XCRemoteSwiftPackageReference "OpenSSL" */;
+			productName = OpenSSL;
 		};
 		1000000000000000000000C0 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
