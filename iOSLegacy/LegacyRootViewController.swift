@@ -11899,6 +11899,12 @@ private final class LegacySourceWebViewController: UIViewController, WKNavigatio
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        // iOS 12's stock WebKit reports an old Safari user agent that some sites
+        // (e.g. MangaDex) reject with "400: unsupported browser". Spoof a current
+        // mobile Safari UA so those pages load.
+        webView.customUserAgent =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         view = webView
     }
 
