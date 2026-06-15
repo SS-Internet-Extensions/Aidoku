@@ -163,8 +163,12 @@ struct NetRequest {
             request.setValue(header.value, forHTTPHeaderField: header.key)
         }
         if request.value(forHTTPHeaderField: "User-Agent") == nil {
+            // Some APIs (e.g. MangaDex behind Cloudflare) reject the stock iOS 12
+            // user agent with a 403, which sources surface as a generic request
+            // failure. Send a current mobile Safari UA so those requests succeed.
             request.setValue(
-                "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
                 forHTTPHeaderField: "User-Agent"
             )
         }
