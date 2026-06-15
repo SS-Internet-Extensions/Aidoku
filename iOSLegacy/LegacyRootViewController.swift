@@ -625,13 +625,33 @@ private final class LegacyReaderImagePipeline {
     }
 
     private func configureCacheLimits() {
-        if aidokuLegacyIsLowMemoryMode() {
-            cache.countLimit = aidokuLegacyReaderUpscaleImages() ? 4 : 5
-            cache.totalCostLimit = aidokuLegacyReaderUpscaleImages() ? 16 * 1024 * 1024 : 10 * 1024 * 1024
-        } else {
-            cache.countLimit = 24
-            cache.totalCostLimit = 48 * 1024 * 1024
+        let prefetchCount = aidokuLegacyReaderPrefetchCount()
+        let lowMemory = aidokuLegacyIsLowMemoryMode()
+        let memoryPressure = aidokuLegacyHasRecentMemoryPressure()
+
+        // Hold the entire prefetch window (both directions) plus a back-buffer
+        // so swiping back to a recently viewed page is instant instead of
+        // flashing "Loading...". Previously the cache (48 MB / ~3-4 decoded
+        // 2200 px pages) was smaller than the prefetch window itself, so the
+        // prefetched pages evicted each other and swiping back one page meant a
+        // re-download and re-decode. Low-memory devices were worse: 10-16 MB
+        // held barely one page, so every swipe reloaded.
+        let windowPages = 2 * prefetchCount + 1
+        let backBuffer = memoryPressure ? 1 : (lowMemory ? 2 : 4)
+        let pagesToHold = max(3, windowPages + backBuffer)
+
+        // Estimate the decoded cost from the reader's max pixel height (assume a
+        // tall manga page at ~0.7 width:height) so the cost limit tracks the
+        // real page size on this device instead of a fixed budget.
+        let maxHeight = aidokuLegacyReaderMaxPixelHeight()
+        let estimatedPageCost = max(1, Int(maxHeight * maxHeight * 0.7 * 4))
+        var costCeiling = lowMemory ? 40 * 1024 * 1024 : 128 * 1024 * 1024
+        if memoryPressure {
+            costCeiling /= 2
         }
+
+        cache.countLimit = pagesToHold
+        cache.totalCostLimit = min(pagesToHold * estimatedPageCost, costCeiling)
     }
 
     private func localCacheKey(
