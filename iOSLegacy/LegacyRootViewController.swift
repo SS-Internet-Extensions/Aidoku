@@ -3539,10 +3539,34 @@ final class LegacyHistoryViewController: UITableViewController {
     }
 
     @objc private func reloadData() {
-        entries = LegacyHistoryStore.shared.entries
+        entries = Self.dedupedByManga(LegacyHistoryStore.shared.entries)
         sources = packageInstaller.loadInstalledSources()
         refreshControl?.endRefreshing()
         tableView.reloadData()
+    }
+
+    // History stores one entry per chapter, so a manga read across several
+    // chapters shows up multiple times. Collapse to the most recent entry per
+    // manga (the store is already sorted newest-first), backfilling a missing
+    // cover from an older entry so the row still shows artwork.
+    private static func dedupedByManga(_ all: [LegacyHistoryEntry]) -> [LegacyHistoryEntry] {
+        var order: [String] = []
+        var byManga: [String: LegacyHistoryEntry] = [:]
+        for entry in all {
+            let mangaKey = "\(entry.sourceKey)::\(entry.manga.key)"
+            if var existing = byManga[mangaKey] {
+                if (existing.manga.cover ?? "").isEmpty,
+                   let cover = entry.manga.cover,
+                   !cover.isEmpty {
+                    existing.manga.cover = cover
+                    byManga[mangaKey] = existing
+                }
+            } else {
+                byManga[mangaKey] = entry
+                order.append(mangaKey)
+            }
+        }
+        return order.compactMap { byManga[$0] }
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -3625,7 +3649,8 @@ final class LegacyHistoryViewController: UITableViewController {
         forRowAt indexPath: IndexPath
     ) {
         guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
-        LegacyHistoryStore.shared.remove(key: entries[indexPath.row].key)
+        let entry = entries[indexPath.row]
+        LegacyHistoryStore.shared.removeManga(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
     }
 
     override func tableView(
@@ -3634,13 +3659,11 @@ final class LegacyHistoryViewController: UITableViewController {
     ) -> [UITableViewRowAction]? {
         guard entries.indices.contains(indexPath.row) else { return nil }
         let entry = entries[indexPath.row]
-        let removeEntry = UITableViewRowAction(style: .destructive, title: "Remove Entry") { _, _ in
-            LegacyHistoryStore.shared.remove(key: entry.key)
-        }
-        let removeManga = UITableViewRowAction(style: .destructive, title: "Remove Manga") { _, _ in
+        // Each row represents a whole manga, so removing clears its history.
+        let removeManga = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
             LegacyHistoryStore.shared.removeManga(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
         }
-        return [removeEntry, removeManga]
+        return [removeManga]
     }
 
     private func source(for entry: LegacyHistoryEntry) -> AidokuRunnerLegacySource? {
