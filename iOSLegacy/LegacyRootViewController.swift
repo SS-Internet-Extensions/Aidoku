@@ -8663,6 +8663,16 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     @objc private func handleReaderTap(_ recognizer: UITapGestureRecognizer) {
+        if isShowingTransitionPage {
+            // Tapping anywhere on the end screen advances; the invisible button
+            // alone is too small a target to rely on.
+            if nextChapter != nil {
+                advanceToNextChapter()
+            } else {
+                toggleBars()
+            }
+            return
+        }
         let location = recognizer.location(in: view)
         if location.x < view.bounds.width * 0.33 {
             movePage(delta: -1)
@@ -8941,6 +8951,15 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
 
     private var nextChapter: AidokuRunnerLegacyChapter? {
         return legacyReaderNextChapter(after: chapter, in: manga.chapters)
+    }
+
+    // True when the end-screen row is the one centered on screen.
+    private var isShowingTransitionPage: Bool {
+        guard showsTransitionPage else { return false }
+        let transitionRow = pages.count
+        let centerY = tableView.contentOffset.y + tableView.bounds.height / 2
+        let point = CGPoint(x: tableView.bounds.midX, y: centerY)
+        return tableView.indexPathForRow(at: point)?.row == transitionRow
     }
 
     private func configureTransitionView(_ transitionView: LegacyReaderTransitionView) {
@@ -9400,6 +9419,19 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         return legacyReaderNextChapter(after: chapter, in: manga.chapters)
     }
 
+    // The visual page currently centered in the paging collection view.
+    private var currentVisualIndex: Int {
+        let width = collectionView.bounds.width
+        guard width > 0 else { return 0 }
+        return Int((collectionView.contentOffset.x + width / 2) / width)
+    }
+
+    private var isShowingTransitionPage: Bool {
+        guard showsTransitionPage else { return false }
+        if case .transition = item(forVisualIndex: currentVisualIndex) { return true }
+        return false
+    }
+
     private func configureTransitionView(_ transitionView: LegacyReaderTransitionView) {
         let next = nextChapter
         transitionView.configure(
@@ -9463,6 +9495,16 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     @objc private func handleReaderTap(_ recognizer: UITapGestureRecognizer) {
+        if isShowingTransitionPage {
+            // Tapping anywhere on the end screen advances; the invisible button
+            // alone is too small a target to rely on.
+            if nextChapter != nil {
+                advanceToNextChapter()
+            } else {
+                toggleBars()
+            }
+            return
+        }
         let location = recognizer.location(in: view)
         // In right-to-left paging the next page sits on the left, so invert the zones.
         let nextOnLeft = mode == .pagedRTL
