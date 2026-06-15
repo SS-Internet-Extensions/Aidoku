@@ -64,6 +64,7 @@
 		1000000000000000000000E5 /* LegacyImageFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D5 /* LegacyImageFallbackTests.swift */; };
 		1000000000000000000000E6 /* LegacyBackupRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D6 /* LegacyBackupRestoreTests.swift */; };
 		1000000000000000000000E7 /* LegacyModelCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D7 /* LegacyModelCodableTests.swift */; };
+		1000000000000000000000E9 /* LegacyNetURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000D8 /* LegacyNetURLTests.swift */; };
 		1000000000000000000000E8 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000C0 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -121,6 +122,7 @@
 		1000000000000000000000D5 /* LegacyImageFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyImageFallbackTests.swift; sourceTree = "<group>"; };
 		1000000000000000000000D6 /* LegacyBackupRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyBackupRestoreTests.swift; sourceTree = "<group>"; };
 		1000000000000000000000D7 /* LegacyModelCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyModelCodableTests.swift; sourceTree = "<group>"; };
+		1000000000000000000000D8 /* LegacyNetURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyNetURLTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -168,6 +170,7 @@
 				1000000000000000000000D5 /* LegacyImageFallbackTests.swift */,
 				1000000000000000000000D6 /* LegacyBackupRestoreTests.swift */,
 				1000000000000000000000D7 /* LegacyModelCodableTests.swift */,
+				1000000000000000000000D8 /* LegacyNetURLTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -479,6 +482,7 @@
 				1000000000000000000000E5 /* LegacyImageFallbackTests.swift in Sources */,
 				1000000000000000000000E6 /* LegacyBackupRestoreTests.swift in Sources */,
 				1000000000000000000000E7 /* LegacyModelCodableTests.swift in Sources */,
+				1000000000000000000000E9 /* LegacyNetURLTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

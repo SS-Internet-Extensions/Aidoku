@@ -1176,13 +1176,32 @@ struct Net: SourceLibrary {
             value >= 0,
             length > 0,
             let urlString = try? memory.readString(offset: UInt32(value), length: UInt32(length)),
-            let url = URL(string: urlString)
+            let url = Self.lenientURL(from: urlString)
         else {
             return Result.invalidUrl.rawValue
         }
         request.url = url
         store.set(at: descriptor, item: request)
         return Result.success.rawValue
+    }
+
+    // iOS 12's `URL(string:)` is a strict RFC 3986 parser and returns nil for URLs
+    // containing characters like `[` `]` `{` `}` `|` `^` or spaces. Newer OSes parse
+    // such strings leniently. Sources like MangaDex build query strings with literal
+    // brackets (e.g. `includes[]=cover_art`, `order[updatedAt]=desc`), so the strict
+    // parser fails and the request is reported as a network error. Fall back to
+    // percent-encoding the rejected characters, preserving existing `%XX` escapes.
+    static func lenientURL(from string: String) -> URL? {
+        if let url = URL(string: string) {
+            return url
+        }
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#@!$&'()*+,;=%")
+        if let encoded = string.addingPercentEncoding(withAllowedCharacters: allowed),
+           let url = URL(string: encoded) {
+            return url
+        }
+        return nil
     }
 
     func setHeader(memory: Memory, descriptor: Int32, key: Int32, keyLength: Int32, value: Int32, valueLength: Int32) -> Int32 {
