@@ -1124,6 +1124,7 @@ struct Net: SourceLibrary {
             return Result.invalidDescriptor.rawValue
         }
         guard let urlRequest = request.toUrlRequest() else {
+            LegacyNetDiagnostics.shared.record("missing url for descriptor \(descriptor)")
             return Result.missingUrl.rawValue
         }
 
@@ -1143,7 +1144,19 @@ struct Net: SourceLibrary {
         request.response = response
         request.responseError = responseError
         store.set(at: descriptor, item: request)
-        return responseError == nil ? Result.success.rawValue : Result.requestError.rawValue
+
+        let urlText = urlRequest.url?.absoluteString ?? "?"
+        if let responseError = responseError {
+            let nsError = responseError as NSError
+            LegacyNetDiagnostics.shared.record("\(urlText) — \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)")
+            return Result.requestError.rawValue
+        }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            // Source code may treat a non-2xx status as a request error; record it
+            // so the surfaced message names the status (e.g. 403, 429).
+            LegacyNetDiagnostics.shared.record("\(urlText) — HTTP \(http.statusCode)")
+        }
+        return Result.success.rawValue
     }
 
     func sendAll(memory: Memory, descriptors: Int32, length: Int32) -> Int32 {

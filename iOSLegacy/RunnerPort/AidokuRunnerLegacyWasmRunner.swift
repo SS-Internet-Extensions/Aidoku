@@ -510,7 +510,11 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
         if result < 0 {
             switch result {
                 case -2: throw SourceError.unimplemented
-                case -3: throw SourceError.networkError
+                case -3:
+                    if let info = LegacyNetDiagnostics.shared.lastFailure {
+                        throw SourceError.message("The source request failed (\(info)).")
+                    }
+                    throw SourceError.networkError
                 default: throw SourceError.missingResult
             }
         }

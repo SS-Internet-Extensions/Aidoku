@@ -33,6 +33,25 @@ enum SourceError: LocalizedError, Equatable {
     }
 }
 
+/// Records the most recent failed/abnormal network response so the generic
+/// "source request failed" error can report a concrete reason (HTTP status,
+/// TLS/DNS error, etc.) for diagnosis on devices without a console.
+final class LegacyNetDiagnostics {
+    static let shared = LegacyNetDiagnostics()
+    private let lock = NSLock()
+    private var _lastFailure: String?
+
+    var lastFailure: String? {
+        lock.lock(); defer { lock.unlock() }
+        return _lastFailure
+    }
+
+    func record(_ message: String) {
+        lock.lock(); _lastFailure = message; lock.unlock()
+        NSLog("[AidokuLegacy] net: %@", message)
+    }
+}
+
 final class GlobalStore {
     private var storage: [Int32: Any] = [:]
     private var pointer: Int32 = 1
