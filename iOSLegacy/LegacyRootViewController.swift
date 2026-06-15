@@ -8975,9 +8975,23 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         }
     }
 
+    private var previousChapter: AidokuRunnerLegacyChapter? {
+        return legacyReaderPreviousChapter(before: chapter, in: manga.chapters)
+    }
+
     private func advanceToNextChapter() {
-        guard let next = nextChapter, let nav = navigationController else { return }
-        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: next)
+        guard let next = nextChapter else { return }
+        openChapter(next)
+    }
+
+    private func goToPreviousChapter() {
+        guard let previous = previousChapter else { return }
+        openChapter(previous)
+    }
+
+    private func openChapter(_ target: AidokuRunnerLegacyChapter) {
+        guard let nav = navigationController else { return }
+        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: target)
         // Replace this reader in the stack so back returns to the manga, not a
         // pile of finished chapters.
         if nav.viewControllers.last === self {
@@ -8986,6 +9000,35 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             nav.setViewControllers(stack, animated: true)
         } else {
             nav.pushViewController(reader, animated: true)
+        }
+    }
+
+    // -1 to load the previous chapter, +1 for the next, set while the user drags
+    // past a vertical edge and acted on when the drag ends.
+    private var pendingChapterChange = 0
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView.isDragging || scrollView.isTracking else { return }
+        let threshold: CGFloat = 90
+        let inset = scrollView.adjustedContentInset
+        let topLimit = -inset.top
+        let bottomLimit = max(topLimit, scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+        if scrollView.contentOffset.y < topLimit - threshold {
+            pendingChapterChange = -1
+        } else if scrollView.contentOffset.y > bottomLimit + threshold {
+            pendingChapterChange = 1
+        } else {
+            pendingChapterChange = 0
+        }
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        let change = pendingChapterChange
+        pendingChapterChange = 0
+        if change > 0 {
+            advanceToNextChapter()
+        } else if change < 0 {
+            goToPreviousChapter()
         }
     }
 
@@ -9445,9 +9488,23 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
     }
 
+    private var previousChapter: AidokuRunnerLegacyChapter? {
+        return legacyReaderPreviousChapter(before: chapter, in: manga.chapters)
+    }
+
     private func advanceToNextChapter() {
-        guard let next = nextChapter, let nav = navigationController else { return }
-        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: next)
+        guard let next = nextChapter else { return }
+        openChapter(next)
+    }
+
+    private func goToPreviousChapter() {
+        guard let previous = previousChapter else { return }
+        openChapter(previous)
+    }
+
+    private func openChapter(_ target: AidokuRunnerLegacyChapter) {
+        guard let nav = navigationController else { return }
+        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: target)
         // Replace this reader in the stack so back returns to the manga, not a
         // pile of finished chapters.
         if nav.viewControllers.last === self {
@@ -9456,6 +9513,35 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             nav.setViewControllers(stack, animated: true)
         } else {
             nav.pushViewController(reader, animated: true)
+        }
+    }
+
+    // -1 to load the previous chapter, +1 for the next, set while the user drags
+    // past a horizontal edge and acted on when the drag ends.
+    private var pendingChapterChange = 0
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView.isDragging || scrollView.isTracking else { return }
+        let threshold: CGFloat = 80
+        let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        if scrollView.contentOffset.x < -threshold {
+            // Left overscroll: previous chapter in LTR, next chapter in RTL.
+            pendingChapterChange = mode == .pagedRTL ? 1 : -1
+        } else if scrollView.contentOffset.x > maxX + threshold {
+            // Right overscroll: next chapter in LTR, previous chapter in RTL.
+            pendingChapterChange = mode == .pagedRTL ? -1 : 1
+        } else {
+            pendingChapterChange = 0
+        }
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        let change = pendingChapterChange
+        pendingChapterChange = 0
+        if change > 0 {
+            advanceToNextChapter()
+        } else if change < 0 {
+            goToPreviousChapter()
         }
     }
 
@@ -9887,6 +9973,23 @@ private func legacyReaderNextChapter(
     let nextIndex = index + 1
     guard sorted.indices.contains(nextIndex) else { return nil }
     let candidate = sorted[nextIndex]
+    return candidate.locked ? nil : candidate
+}
+
+// The chapter that precedes `current` in reading order. Mirrors
+// `legacyReaderNextChapter` but steps backward.
+private func legacyReaderPreviousChapter(
+    before current: AidokuRunnerLegacyChapter,
+    in chapters: [AidokuRunnerLegacyChapter]?
+) -> AidokuRunnerLegacyChapter? {
+    guard let chapters = chapters, !chapters.isEmpty else { return nil }
+    let language = current.normalizedLanguage
+    let pool = chapters.filter { language == nil || $0.normalizedLanguage == language || $0.normalizedLanguage == nil }
+    let sorted = (pool.isEmpty ? chapters : pool).sorted(by: legacyChapterAscending)
+    guard let index = sorted.firstIndex(where: { $0.key == current.key }) else { return nil }
+    let previousIndex = index - 1
+    guard sorted.indices.contains(previousIndex) else { return nil }
+    let candidate = sorted[previousIndex]
     return candidate.locked ? nil : candidate
 }
 
