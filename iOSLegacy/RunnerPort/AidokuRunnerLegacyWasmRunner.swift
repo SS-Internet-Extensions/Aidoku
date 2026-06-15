@@ -515,7 +515,14 @@ final class AidokuRunnerLegacyWasmRunner: AidokuRunnerLegacyRunner {
                         throw SourceError.message("The source request failed (\(info)).")
                     }
                     throw SourceError.networkError
-                default: throw SourceError.missingResult
+                default:
+                    // The source ran but produced no result. If the last network
+                    // call recorded anything (status, byte count, encoding), surface
+                    // it so an unparseable/empty response can be diagnosed on-device.
+                    if let info = LegacyNetDiagnostics.shared.lastFailure {
+                        throw SourceError.message("The source did not return a result (\(info)).")
+                    }
+                    throw SourceError.missingResult
             }
         }
 

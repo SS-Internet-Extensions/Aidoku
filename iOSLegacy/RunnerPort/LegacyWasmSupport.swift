@@ -210,6 +210,14 @@ enum LegacyHTTPSClient {
             )
         }
 
+        // Record the final response shape so a downstream "did not return a
+        // result" (the source parsed but produced nothing) names a concrete
+        // reason — non-2xx status, empty body, or unexpected content-encoding.
+        let encoding = headerValue(responseHeaders, "Content-Encoding") ?? "identity"
+        let contentType = headerValue(responseHeaders, "Content-Type") ?? "?"
+        LegacyNetDiagnostics.shared.record(
+            "\(host) via OpenSSL — HTTP \(status), \(responseBody.count) bytes, enc=\(encoding), type=\(contentType)"
+        )
         return (responseBody, makeResponse(url: url, status: status, headers: responseHeaders))
     }
 
