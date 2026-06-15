@@ -1451,6 +1451,18 @@ final class LegacyHistoryStore {
         return entries.first { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
     }
 
+    /// Chapter keys for this manga that have been read to completion (last page),
+    /// used to dim already-read chapters in the list.
+    func readChapterKeys(sourceKey: String, mangaKey: String) -> Set<String> {
+        var keys: Set<String> = []
+        for entry in entries where entry.sourceKey == sourceKey && entry.manga.key == mangaKey {
+            if entry.pageCount > 0, entry.pageIndex >= entry.pageCount - 1 {
+                keys.insert(entry.chapter.key)
+            }
+        }
+        return keys
+    }
+
     func updateMangaMetadata(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
         var current = entries
         var didChange = false
@@ -7315,6 +7327,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private var isLoading = false
     private var isDownloading = false
     private var errorMessage: String?
+    private var readChapterKeys: Set<String> = []
     private lazy var bookmarkButton = UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
     private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
     private lazy var languageButton = UIBarButtonItem(title: "Language", style: .plain, target: self, action: #selector(showChapterLanguagePicker))
@@ -7347,7 +7360,19 @@ final class LegacyMangaDetailViewController: UITableViewController {
         updateBookmarkButton()
         updateLanguageButton()
         updateTrackerButton()
+        refreshReadChapterKeys()
         loadDetails()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Returning from the reader: refresh read/unread state and resume row.
+        refreshReadChapterKeys()
+        tableView.reloadData()
+    }
+
+    private func refreshReadChapterKeys() {
+        readChapterKeys = LegacyHistoryStore.shared.readChapterKeys(sourceKey: source.key, mangaKey: manga.key)
     }
 
     @objc private func handleDetailLongPress(_ recognizer: UILongPressGestureRecognizer) {
@@ -7519,6 +7544,11 @@ final class LegacyMangaDetailViewController: UITableViewController {
         } else {
             cell.accessoryType = .disclosureIndicator
             cell.selectionStyle = .default
+            // Dim chapters already read to completion (unread stay bright).
+            if readChapterKeys.contains(chapter.key) {
+                cell.textLabel?.textColor = LegacyPalette.disabledText
+                cell.detailTextLabel?.textColor = LegacyPalette.disabledText
+            }
         }
         return cell
     }
