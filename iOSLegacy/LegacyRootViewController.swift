@@ -9007,7 +9007,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     // past a vertical edge and acted on when the drag ends.
     private var pendingChapterChange = 0
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    override func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView.isDragging || scrollView.isTracking else { return }
         let threshold: CGFloat = 90
         let inset = scrollView.adjustedContentInset
@@ -9022,7 +9022,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         }
     }
 
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    override func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         let change = pendingChapterChange
         pendingChapterChange = 0
         if change > 0 {
