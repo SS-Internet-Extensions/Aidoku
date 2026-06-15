@@ -7544,10 +7544,21 @@ final class LegacyMangaDetailViewController: UITableViewController {
         } else {
             cell.accessoryType = .disclosureIndicator
             cell.selectionStyle = .default
-            // Dim chapters already read to completion (unread stay bright).
             if readChapterKeys.contains(chapter.key) {
+                // Read to completion: dim, no unread dot.
                 cell.textLabel?.textColor = LegacyPalette.disabledText
                 cell.detailTextLabel?.textColor = LegacyPalette.disabledText
+            } else {
+                // Unread: bright title with a leading accent dot (Mihon-style).
+                let dot = NSMutableAttributedString(
+                    string: "\u{25CF} ",
+                    attributes: [.foregroundColor: LegacyPalette.accent]
+                )
+                dot.append(NSAttributedString(
+                    string: chapter.legacyFormattedTitle,
+                    attributes: [.foregroundColor: LegacyPalette.primaryText]
+                ))
+                cell.textLabel?.attributedText = dot
             }
         }
         return cell
