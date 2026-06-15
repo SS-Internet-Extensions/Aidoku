@@ -8028,31 +8028,6 @@ final class LegacyMangaDetailViewController: UITableViewController {
         return Locale.current.localizedString(forIdentifier: language) ?? language.uppercased()
     }
 
-    private func legacyChapterAscending(_ lhs: AidokuRunnerLegacyChapter, _ rhs: AidokuRunnerLegacyChapter) -> Bool {
-        if let lhsVolume = lhs.volumeNumber, let rhsVolume = rhs.volumeNumber, lhsVolume != rhsVolume {
-            return lhsVolume < rhsVolume
-        }
-        if lhs.volumeNumber != nil && rhs.volumeNumber == nil {
-            return true
-        }
-        if lhs.volumeNumber == nil && rhs.volumeNumber != nil {
-            return false
-        }
-        if let lhsChapter = lhs.chapterNumber, let rhsChapter = rhs.chapterNumber, lhsChapter != rhsChapter {
-            return lhsChapter < rhsChapter
-        }
-        if lhs.chapterNumber != nil && rhs.chapterNumber == nil {
-            return true
-        }
-        if lhs.chapterNumber == nil && rhs.chapterNumber != nil {
-            return false
-        }
-        if let lhsDate = lhs.dateUploaded, let rhsDate = rhs.dateUploaded, lhsDate != rhsDate {
-            return lhsDate < rhsDate
-        }
-        return lhs.legacyFormattedTitle.localizedStandardCompare(rhs.legacyFormattedTitle) == .orderedAscending
-    }
-
     private func resumeSubtitle(for entry: LegacyHistoryEntry) -> String {
         if entry.pageCount > 0 {
             return "\(entry.chapter.legacyFormattedTitle) - Page \(entry.pageIndex + 1) of \(entry.pageCount)"
@@ -8398,6 +8373,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         tableView.backgroundColor = UIColor.black
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
+        tableView.register(LegacyReaderTransitionTableCell.self, forCellReuseIdentifier: "ReaderTransition")
         let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleReaderTap(_:)))
         tapRecognizer.cancelsTouchesInView = false
         tapRecognizer.delegate = self
@@ -8468,10 +8444,18 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return pages.isEmpty ? 1 : pages.count
+        if pages.isEmpty { return 1 }
+        return pages.count + (showsTransitionPage ? 1 : 0)
+    }
+
+    private func isTransitionRow(_ indexPath: IndexPath) -> Bool {
+        return showsTransitionPage && !pages.isEmpty && indexPath.row == pages.count
     }
 
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        if isTransitionRow(indexPath) {
+            return readerPageSize.height
+        }
         if fitToScreen, isImagePage(at: indexPath) {
             return readerPageSize.height
         }
@@ -8479,6 +8463,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     override func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        if isTransitionRow(indexPath) {
+            return readerPageSize.height
+        }
         if fitToScreen, isImagePage(at: indexPath) {
             return readerPageSize.height
         }
@@ -8494,6 +8481,12 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             cell.textLabel?.textAlignment = .center
             cell.textLabel?.text = message
             cell.selectionStyle = .none
+            return cell
+        }
+
+        if isTransitionRow(indexPath) {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "ReaderTransition", for: indexPath) as! LegacyReaderTransitionTableCell
+            configureTransitionView(cell.transitionView)
             return cell
         }
 
@@ -8514,6 +8507,15 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         if let pageCell = cell as? LegacyPageImageCell {
             readerTapRecognizer?.require(toFail: pageCell.zoomDoubleTapRecognizer)
+        }
+        if isTransitionRow(indexPath) {
+            // Keep history/HUD anchored to the last page while the end screen shows.
+            if let lastPage = pages.indices.last {
+                currentPageIndex = lastPage
+                recordHistory(pageIndex: lastPage, force: false)
+                updatePageHUD()
+            }
+            return
         }
         if !pages.isEmpty, indexPath.row < pages.count {
             currentPageIndex = indexPath.row
@@ -8738,6 +8740,10 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private func shouldHandleReaderTap(from touch: UITouch) -> Bool {
         var view = touch.view
         while let currentView = view {
+            if currentView is UIControl {
+                // Let the end-screen "next chapter" button handle its own tap.
+                return false
+            }
             if let zoomableView = currentView as? LegacyZoomableImageView {
                 return !zoomableView.isZoomed
             }
@@ -8885,6 +8891,41 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             )
             self.currentPageIndex = self.initialPageIndex
             self.updatePageHUD()
+        }
+    }
+
+    private var showsTransitionPage: Bool {
+        return !pages.isEmpty
+    }
+
+    private var nextChapter: AidokuRunnerLegacyChapter? {
+        return legacyReaderNextChapter(after: chapter, in: manga.chapters)
+    }
+
+    private func configureTransitionView(_ transitionView: LegacyReaderTransitionView) {
+        let next = nextChapter
+        transitionView.configure(
+            finishedTitle: chapter.legacyFormattedTitle,
+            finishedUploader: legacyReaderUploaderText(chapter),
+            nextTitle: next?.legacyFormattedTitle,
+            nextUploader: next.flatMap(legacyReaderUploaderText)
+        )
+        transitionView.onTapNext = { [weak self] in
+            self?.advanceToNextChapter()
+        }
+    }
+
+    private func advanceToNextChapter() {
+        guard let next = nextChapter, let nav = navigationController else { return }
+        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: next)
+        // Replace this reader in the stack so back returns to the manga, not a
+        // pile of finished chapters.
+        if nav.viewControllers.last === self {
+            var stack = nav.viewControllers
+            stack[stack.count - 1] = reader
+            nav.setViewControllers(stack, animated: true)
+        } else {
+            nav.pushViewController(reader, animated: true)
         }
     }
 
@@ -9042,6 +9083,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
         collectionView.register(LegacyPagedImageCell.self, forCellWithReuseIdentifier: "PagedImageCell")
         collectionView.register(LegacyPagedMessageCell.self, forCellWithReuseIdentifier: "PagedMessageCell")
+        collectionView.register(LegacyPagedTransitionCell.self, forCellWithReuseIdentifier: "PagedTransitionCell")
         view.addSubview(collectionView)
 
         NSLayoutConstraint.activate([
@@ -9122,7 +9164,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        return pages.isEmpty ? 1 : pages.count
+        if pages.isEmpty { return 1 }
+        return pages.count + (showsTransitionPage ? 1 : 0)
     }
 
     func collectionView(
@@ -9146,13 +9189,22 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             return cell
         }
 
-        let pageIndex = pageIndex(forVisualIndex: indexPath.item)
-        let cell = collectionView.dequeueReusableCell(
-            withReuseIdentifier: "PagedImageCell",
-            for: indexPath
-        ) as! LegacyPagedImageCell
-        cell.configure(page: pages[pageIndex], source: source)
-        return cell
+        switch item(forVisualIndex: indexPath.item) {
+            case .transition:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: "PagedTransitionCell",
+                    for: indexPath
+                ) as! LegacyPagedTransitionCell
+                configureTransitionView(cell.transitionView)
+                return cell
+            case .page(let pageIndex):
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: "PagedImageCell",
+                    for: indexPath
+                ) as! LegacyPagedImageCell
+                cell.configure(page: pages[pageIndex], source: source)
+                return cell
+        }
     }
 
     func collectionView(
@@ -9164,11 +9216,20 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             readerTapRecognizer?.require(toFail: pageCell.zoomDoubleTapRecognizer)
         }
         guard !pages.isEmpty else { return }
-        let pageIndex = pageIndex(forVisualIndex: indexPath.item)
-        currentPageIndex = pageIndex
-        recordHistory(pageIndex: pageIndex, force: false)
-        updatePageHUD()
-        preloadPages(around: pageIndex, includeCurrent: false)
+        switch item(forVisualIndex: indexPath.item) {
+            case .transition:
+                // Keep history/HUD anchored to the last page while the end screen shows.
+                if let lastPage = pages.indices.last {
+                    currentPageIndex = lastPage
+                    recordHistory(pageIndex: lastPage, force: false)
+                }
+                updatePageHUD()
+            case .page(let pageIndex):
+                currentPageIndex = pageIndex
+                recordHistory(pageIndex: pageIndex, force: false)
+                updatePageHUD()
+                preloadPages(around: pageIndex, includeCurrent: false)
+        }
     }
 
     func collectionView(
@@ -9256,18 +9317,73 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         )
     }
 
+    private enum PagedReaderItem {
+        case page(Int)
+        case transition
+    }
+
+    // The end screen is appended once the pages are loaded. In RTL it sits at
+    // the far-left (visual index 0) and shifts the pages right by one.
+    private var showsTransitionPage: Bool {
+        return !pages.isEmpty
+    }
+
+    private func item(forVisualIndex visualIndex: Int) -> PagedReaderItem {
+        if mode == .pagedRTL {
+            if showsTransitionPage {
+                if visualIndex <= 0 { return .transition }
+                let pageIndex = pages.count - visualIndex
+                return pages.indices.contains(pageIndex) ? .page(pageIndex) : .transition
+            }
+            return .page(max(0, pages.count - 1 - visualIndex))
+        }
+        if showsTransitionPage && visualIndex >= pages.count { return .transition }
+        return .page(visualIndex)
+    }
+
     private func visualIndex(forPageIndex pageIndex: Int) -> Int {
         if mode == .pagedRTL {
-            return max(0, pages.count - 1 - pageIndex)
+            return showsTransitionPage ? max(0, pages.count - pageIndex) : max(0, pages.count - 1 - pageIndex)
         }
         return pageIndex
     }
 
     private func pageIndex(forVisualIndex visualIndex: Int) -> Int {
         if mode == .pagedRTL {
-            return max(0, pages.count - 1 - visualIndex)
+            return showsTransitionPage ? (pages.count - visualIndex) : max(0, pages.count - 1 - visualIndex)
         }
         return visualIndex
+    }
+
+    private var nextChapter: AidokuRunnerLegacyChapter? {
+        return legacyReaderNextChapter(after: chapter, in: manga.chapters)
+    }
+
+    private func configureTransitionView(_ transitionView: LegacyReaderTransitionView) {
+        let next = nextChapter
+        transitionView.configure(
+            finishedTitle: chapter.legacyFormattedTitle,
+            finishedUploader: legacyReaderUploaderText(chapter),
+            nextTitle: next?.legacyFormattedTitle,
+            nextUploader: next.flatMap(legacyReaderUploaderText)
+        )
+        transitionView.onTapNext = { [weak self] in
+            self?.advanceToNextChapter()
+        }
+    }
+
+    private func advanceToNextChapter() {
+        guard let next = nextChapter, let nav = navigationController else { return }
+        let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: next)
+        // Replace this reader in the stack so back returns to the manga, not a
+        // pile of finished chapters.
+        if nav.viewControllers.last === self {
+            var stack = nav.viewControllers
+            stack[stack.count - 1] = reader
+            nav.setViewControllers(stack, animated: true)
+        } else {
+            nav.pushViewController(reader, animated: true)
+        }
     }
 
     private func preloadPages(around pageIndex: Int, includeCurrent: Bool) {
@@ -9427,6 +9543,10 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private func shouldHandleReaderTap(from touch: UITouch) -> Bool {
         var view = touch.view
         while let currentView = view {
+            if currentView is UIControl {
+                // Let the end-screen "next chapter" button handle its own tap.
+                return false
+            }
             if let zoomableView = currentView as? LegacyZoomableImageView {
                 return !zoomableView.isZoomed
             }
@@ -9639,6 +9759,255 @@ private final class LegacyPagedMessageCell: UICollectionViewCell {
 
     func configure(_ message: String) {
         label.text = message
+    }
+}
+
+// Sort chapters into reading order (oldest first). Free function so both the
+// detail screen and the readers share one definition.
+func legacyChapterAscending(_ lhs: AidokuRunnerLegacyChapter, _ rhs: AidokuRunnerLegacyChapter) -> Bool {
+    if let lhsVolume = lhs.volumeNumber, let rhsVolume = rhs.volumeNumber, lhsVolume != rhsVolume {
+        return lhsVolume < rhsVolume
+    }
+    if lhs.volumeNumber != nil && rhs.volumeNumber == nil {
+        return true
+    }
+    if lhs.volumeNumber == nil && rhs.volumeNumber != nil {
+        return false
+    }
+    if let lhsChapter = lhs.chapterNumber, let rhsChapter = rhs.chapterNumber, lhsChapter != rhsChapter {
+        return lhsChapter < rhsChapter
+    }
+    if lhs.chapterNumber != nil && rhs.chapterNumber == nil {
+        return true
+    }
+    if lhs.chapterNumber == nil && rhs.chapterNumber != nil {
+        return false
+    }
+    if let lhsDate = lhs.dateUploaded, let rhsDate = rhs.dateUploaded, lhsDate != rhsDate {
+        return lhsDate < rhsDate
+    }
+    return lhs.legacyFormattedTitle.localizedStandardCompare(rhs.legacyFormattedTitle) == .orderedAscending
+}
+
+// The chapter that follows `current` in reading order, honoring the current
+// chapter's language so we do not jump across translations. Returns nil when
+// there is no readable next chapter (end of series, locked, or no list).
+private func legacyReaderNextChapter(
+    after current: AidokuRunnerLegacyChapter,
+    in chapters: [AidokuRunnerLegacyChapter]?
+) -> AidokuRunnerLegacyChapter? {
+    guard let chapters = chapters, !chapters.isEmpty else { return nil }
+    let language = current.normalizedLanguage
+    let pool = chapters.filter { language == nil || $0.normalizedLanguage == language || $0.normalizedLanguage == nil }
+    let sorted = (pool.isEmpty ? chapters : pool).sorted(by: legacyChapterAscending)
+    guard let index = sorted.firstIndex(where: { $0.key == current.key }) else { return nil }
+    let nextIndex = index + 1
+    guard sorted.indices.contains(nextIndex) else { return nil }
+    let candidate = sorted[nextIndex]
+    return candidate.locked ? nil : candidate
+}
+
+private func legacyReaderUploaderText(_ chapter: AidokuRunnerLegacyChapter) -> String? {
+    guard
+        let scanlators = chapter.scanlators?
+            .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter({ !$0.isEmpty }),
+        !scanlators.isEmpty
+    else {
+        return nil
+    }
+    return scanlators.joined(separator: ", ")
+}
+
+// End-of-chapter "transition" screen shown after the last page: which chapter
+// just finished and which one is next (tappable to continue).
+private final class LegacyReaderTransitionView: UIView {
+    private let stack = UIStackView()
+    private let finishedHeader = UILabel()
+    private let finishedTitle = UILabel()
+    private let finishedUploader = UILabel()
+    private let finishedGroup = UIStackView()
+    private let nextHeader = UILabel()
+    private let nextTitle = UILabel()
+    private let nextUploader = UILabel()
+    private let nextGroup = UIStackView()
+    private let noNextLabel = UILabel()
+    private let nextButton = UIButton(type: .custom)
+
+    var onTapNext: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.black
+
+        configureHeader(finishedHeader, text: "Finished:")
+        configureTitle(finishedTitle)
+        configureSubtitle(finishedUploader)
+        configureHeader(nextHeader, text: "Next:")
+        configureTitle(nextTitle)
+        configureSubtitle(nextUploader)
+        configureSubtitle(noNextLabel)
+        noNextLabel.text = "There's no next chapter."
+
+        finishedGroup.axis = .vertical
+        finishedGroup.alignment = .fill
+        finishedGroup.spacing = 6
+        finishedGroup.addArrangedSubview(finishedHeader)
+        finishedGroup.addArrangedSubview(finishedTitle)
+        finishedGroup.addArrangedSubview(finishedUploader)
+
+        nextGroup.axis = .vertical
+        nextGroup.alignment = .fill
+        nextGroup.spacing = 6
+        nextGroup.addArrangedSubview(nextHeader)
+        nextGroup.addArrangedSubview(nextTitle)
+        nextGroup.addArrangedSubview(nextUploader)
+
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 36
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(finishedGroup)
+        stack.addArrangedSubview(nextGroup)
+        stack.addArrangedSubview(noNextLabel)
+        addSubview(stack)
+
+        // Invisible button covering the next-chapter block so a tap there
+        // advances. Sitting on top keeps the labels untouched while still being
+        // a UIControl, which the reader's tap recognizer ignores.
+        nextButton.translatesAutoresizingMaskIntoConstraints = false
+        nextButton.addTarget(self, action: #selector(didTapNext), for: .touchUpInside)
+        addSubview(nextButton)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -28),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 24),
+
+            nextButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            nextButton.topAnchor.constraint(equalTo: nextGroup.topAnchor, constant: -14),
+            nextButton.bottomAnchor.constraint(equalTo: nextGroup.bottomAnchor, constant: 14)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func didTapNext() {
+        onTapNext?()
+    }
+
+    func configure(
+        finishedTitle: String,
+        finishedUploader: String?,
+        nextTitle: String?,
+        nextUploader: String?
+    ) {
+        self.finishedTitle.text = finishedTitle
+        if let finishedUploader = finishedUploader, !finishedUploader.isEmpty {
+            self.finishedUploader.text = "Uploaded by \(finishedUploader)"
+            self.finishedUploader.isHidden = false
+        } else {
+            self.finishedUploader.isHidden = true
+        }
+
+        if let nextTitle = nextTitle {
+            self.nextTitle.text = nextTitle
+            if let nextUploader = nextUploader, !nextUploader.isEmpty {
+                self.nextUploader.text = "Uploaded by \(nextUploader)"
+                self.nextUploader.isHidden = false
+            } else {
+                self.nextUploader.isHidden = true
+            }
+            nextGroup.isHidden = false
+            noNextLabel.isHidden = true
+            nextButton.isHidden = false
+            nextButton.isUserInteractionEnabled = true
+        } else {
+            nextGroup.isHidden = true
+            noNextLabel.isHidden = false
+            nextButton.isHidden = true
+            nextButton.isUserInteractionEnabled = false
+        }
+    }
+
+    private func configureHeader(_ label: UILabel, text: String) {
+        label.text = text
+        label.textColor = UIColor.white
+        label.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        label.numberOfLines = 0
+    }
+
+    private func configureTitle(_ label: UILabel) {
+        label.textColor = UIColor.white
+        label.font = UIFont.systemFont(ofSize: 26, weight: .regular)
+        label.numberOfLines = 0
+    }
+
+    private func configureSubtitle(_ label: UILabel) {
+        label.textColor = UIColor(white: 0.55, alpha: 1)
+        label.font = UIFont.systemFont(ofSize: 15, weight: .regular)
+        label.numberOfLines = 0
+    }
+}
+
+private final class LegacyPagedTransitionCell: UICollectionViewCell {
+    let transitionView = LegacyReaderTransitionView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.black
+        transitionView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(transitionView)
+        NSLayoutConstraint.activate([
+            transitionView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            transitionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            transitionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            transitionView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        transitionView.onTapNext = nil
+    }
+}
+
+private final class LegacyReaderTransitionTableCell: UITableViewCell {
+    let transitionView = LegacyReaderTransitionView()
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = UIColor.black
+        contentView.backgroundColor = UIColor.black
+        selectionStyle = .none
+        transitionView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(transitionView)
+        NSLayoutConstraint.activate([
+            transitionView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            transitionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            transitionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            transitionView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        transitionView.onTapNext = nil
     }
 }
 
