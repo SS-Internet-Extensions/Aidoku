@@ -978,6 +978,159 @@ enum LegacyLibrarySortOption: String, CaseIterable {
     }
 }
 
+/// User-managed library categories: an ordered, named list plus a default
+/// category for new additions and per-category sort overrides. The category
+/// strings live alongside the existing free-text categories on
+/// `LegacyLibraryEntry`; this store owns the explicit list so empty categories
+/// survive and can be reordered/renamed.
+final class LegacyCategoryStore {
+    static let shared = LegacyCategoryStore()
+
+    /// Sentinel sort keys for the non-category library views. The leading
+    /// control character keeps them from colliding with a real category name.
+    static let allKey = "\u{1}all"
+    static let uncategorizedKey = "\u{1}uncategorized"
+
+    private let listKey = "AidokuLegacy.library.categoryList"
+    private let defaultKey = "AidokuLegacy.library.defaultCategory"
+    private let sortMapKey = "AidokuLegacy.library.categorySortMap"
+
+    /// User-managed, ordered category names.
+    var categories: [String] {
+        LegacyLibraryEntry.normalizedList(UserDefaults.standard.stringArray(forKey: listKey) ?? [])
+    }
+
+    /// Managed categories plus any straggler categories that exist only on
+    /// library entries (assigned via free-text before the list existed).
+    func allCategories() -> [String] {
+        var result = categories
+        for value in LegacyLibraryStore.shared.categories()
+        where !result.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) {
+            result.append(value)
+        }
+        return result
+    }
+
+    func contains(_ name: String) -> Bool {
+        categories.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    @discardableResult
+    func add(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !contains(trimmed) else { return false }
+        save(categories + [trimmed])
+        return true
+    }
+
+    func rename(_ old: String, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = categories
+        guard let index = list.firstIndex(where: { $0.caseInsensitiveCompare(old) == .orderedSame }) else { return }
+        if let dup = list.firstIndex(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }), dup != index {
+            // Merging into an existing name: drop the old slot.
+            list.remove(at: index)
+        } else {
+            list[index] = trimmed
+        }
+        save(list)
+        LegacyLibraryStore.shared.renameCategory(old, to: trimmed)
+        if defaultCategory.caseInsensitiveCompare(old) == .orderedSame {
+            defaultCategory = trimmed
+        }
+        migrateSort(from: old, to: trimmed)
+    }
+
+    func remove(_ name: String) {
+        save(categories.filter { $0.caseInsensitiveCompare(name) != .orderedSame })
+        LegacyLibraryStore.shared.renameCategory(name, to: nil)
+        if defaultCategory.caseInsensitiveCompare(name) == .orderedSame {
+            defaultCategory = ""
+        }
+        migrateSort(from: name, to: nil)
+    }
+
+    func move(from: Int, to: Int) {
+        var list = categories
+        guard list.indices.contains(from) else { return }
+        let item = list.remove(at: from)
+        list.insert(item, at: min(max(to, 0), list.count))
+        save(list)
+    }
+
+    /// Category that new library additions are filed under (empty = none).
+    var defaultCategory: String {
+        get { UserDefaults.standard.string(forKey: defaultKey) ?? "" }
+        set {
+            UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: defaultKey)
+            NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
+        }
+    }
+
+    func defaultCategoriesForNewEntry() -> [String] {
+        let value = defaultCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? [] : [value]
+    }
+
+    /// Resolve the sort for a given library view. The "All" view always tracks
+    /// the global `LegacyLibrarySortOption.current`; categories may override it.
+    func sort(forKey key: String) -> LegacyLibrarySortOption {
+        if
+            key != Self.allKey,
+            let raw = sortMap()[key],
+            let option = LegacyLibrarySortOption(rawValue: raw)
+        {
+            return option
+        }
+        return LegacyLibrarySortOption.current
+    }
+
+    func setSort(_ option: LegacyLibrarySortOption, forKey key: String) {
+        if key == Self.allKey {
+            LegacyLibrarySortOption.setCurrent(option)
+            var map = sortMap()
+            map[key] = nil
+            saveSortMap(map)
+        } else {
+            var map = sortMap()
+            map[key] = option.rawValue
+            saveSortMap(map)
+        }
+    }
+
+    func hasSortOverride(forKey key: String) -> Bool {
+        key != Self.allKey && sortMap()[key] != nil
+    }
+
+    func clearSortOverride(forKey key: String) {
+        var map = sortMap()
+        map[key] = nil
+        saveSortMap(map)
+    }
+
+    private func migrateSort(from old: String, to newName: String?) {
+        var map = sortMap()
+        if let raw = map.removeValue(forKey: old), let newName = newName {
+            map[newName] = raw
+        }
+        saveSortMap(map)
+    }
+
+    private func sortMap() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: sortMapKey) as? [String: String] ?? [:]
+    }
+
+    private func saveSortMap(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: sortMapKey)
+    }
+
+    private func save(_ values: [String]) {
+        UserDefaults.standard.set(LegacyLibraryEntry.normalizedList(values), forKey: listKey)
+        NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
+    }
+}
+
 private extension AidokuRunnerLegacyManga {
     func mergedWithUpdate(_ update: AidokuRunnerLegacyManga) -> AidokuRunnerLegacyManga {
         var manga = update
@@ -1280,11 +1433,44 @@ final class LegacyLibraryStore {
 
     func add(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
         var current = rawEntries.filter { !($0.sourceKey == source.key && $0.manga.key == manga.key) }
+        let categories = LegacyCategoryStore.shared.defaultCategoriesForNewEntry()
         current.insert(
-            LegacyLibraryEntry(sourceKey: source.key, sourceName: source.name, manga: manga, dateAdded: Date(), category: nil),
+            LegacyLibraryEntry(
+                sourceKey: source.key,
+                sourceName: source.name,
+                manga: manga,
+                dateAdded: Date(),
+                category: categories.first,
+                categories: categories
+            ),
             at: 0
         )
         save(current)
+    }
+
+    /// Re-tag every entry that uses `old`. Pass `to: nil` to drop the category.
+    func renameCategory(_ old: String, to newName: String?) {
+        var current = rawEntries
+        var didChange = false
+        for index in current.indices {
+            let cats = current[index].displayCategories
+            guard cats.contains(where: { $0.caseInsensitiveCompare(old) == .orderedSame }) else { continue }
+            var updated: [String] = []
+            for category in cats {
+                if category.caseInsensitiveCompare(old) == .orderedSame {
+                    if let newName = newName { updated.append(newName) }
+                } else {
+                    updated.append(category)
+                }
+            }
+            let normalized = LegacyLibraryEntry.normalizedList(updated)
+            current[index].categories = normalized
+            current[index].category = normalized.first
+            didChange = true
+        }
+        if didChange {
+            save(current)
+        }
     }
 
     func update(manga: AidokuRunnerLegacyManga, source: AidokuRunnerLegacySource) {
@@ -3131,8 +3317,17 @@ final class LegacyLibraryViewController: UITableViewController {
         }
     }
 
+    private var currentSortKey: String {
+        if activeFilterGroup != nil { return LegacyCategoryStore.allKey }
+        if let category = activeCategory {
+            return category.isEmpty ? LegacyCategoryStore.uncategorizedKey : category
+        }
+        return LegacyCategoryStore.allKey
+    }
+
     @objc private func reloadData() {
         let query = searchController.searchBar.text
+        sortOption = LegacyCategoryStore.shared.sort(forKey: currentSortKey)
         entries = LegacyLibraryStore.shared.entries(
             category: activeFilterGroup == nil ? activeCategory : nil,
             filterGroup: activeFilterGroup,
@@ -3348,13 +3543,22 @@ final class LegacyLibraryViewController: UITableViewController {
     }
 
     @objc private func showLibraryOptions() {
-        let alert = UIAlertController(title: "Library", message: nil, preferredStyle: .actionSheet)
+        let sortScope: String
+        if activeFilterGroup != nil {
+            sortScope = "All"
+        } else if let category = activeCategory {
+            sortScope = category.isEmpty ? "Uncategorized" : category
+        } else {
+            sortScope = "All"
+        }
+        let alert = UIAlertController(title: "Library", message: "Sort applies to: \(sortScope)", preferredStyle: .actionSheet)
         for option in LegacyLibrarySortOption.allCases {
             let title = option == sortOption ? "Sort: \(option.title) (Current)" : "Sort: \(option.title)"
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
-                self?.sortOption = option
-                LegacyLibrarySortOption.setCurrent(option)
-                self?.reloadData()
+                guard let self = self else { return }
+                LegacyCategoryStore.shared.setSort(option, forKey: self.currentSortKey)
+                self.sortOption = option
+                self.reloadData()
             })
         }
         alert.addAction(UIAlertAction(title: activeCategory == nil ? "All Categories (Current)" : "All Categories", style: .default) { [weak self] _ in
@@ -3367,7 +3571,7 @@ final class LegacyLibraryViewController: UITableViewController {
             self?.activeCategory = ""
             self?.reloadData()
         })
-        for category in LegacyLibraryStore.shared.categories() {
+        for category in LegacyCategoryStore.shared.allCategories() {
             let title = activeFilterGroup == nil && activeCategory == category ? "\(category) (Current)" : category
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 self?.activeFilterGroup = nil
@@ -3375,6 +3579,9 @@ final class LegacyLibraryViewController: UITableViewController {
                 self?.reloadData()
             })
         }
+        alert.addAction(UIAlertAction(title: "Manage Categories", style: .default) { [weak self] _ in
+            self?.navigationController?.pushViewController(LegacyCategoryManagerViewController(), animated: true)
+        })
         let filterGroups = LegacyLibraryFilterGroupStore.shared.groups
         for group in filterGroups {
             let title = activeFilterGroup?.id == group.id ? "Filter: \(group.name) (Current)" : "Filter: \(group.name)"
@@ -3413,10 +3620,14 @@ final class LegacyLibraryViewController: UITableViewController {
             LegacyLibraryStore.shared.setCategories(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, categories: [])
         })
         alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak alert] _ in
+            let categories = aidokuLegacySplitList(alert?.textFields?.first?.text)
+            for category in categories {
+                LegacyCategoryStore.shared.add(category)
+            }
             LegacyLibraryStore.shared.setCategories(
                 sourceKey: entry.sourceKey,
                 mangaKey: entry.manga.key,
-                categories: aidokuLegacySplitList(alert?.textFields?.first?.text)
+                categories: categories
             )
         })
         present(alert, animated: true)
@@ -4223,6 +4434,284 @@ final class LegacyDownloadsViewController: UITableViewController {
     }
 }
 
+final class LegacyCategoryManagerViewController: UITableViewController {
+    private enum SectionKind: Equatable {
+        case categories
+        case add
+        case defaultCategory
+    }
+
+    private let sectionOrder: [SectionKind] = [.categories, .add, .defaultCategory]
+    private var categories: [String] = []
+
+    init() {
+        super.init(style: .grouped)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Library Categories"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        navigationItem.rightBarButtonItem = editButtonItem
+        reloadCategories()
+    }
+
+    private func reloadCategories() {
+        categories = LegacyCategoryStore.shared.categories
+        tableView.reloadData()
+    }
+
+    private func kind(for section: Int) -> SectionKind {
+        sectionOrder[section]
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        sectionOrder.count
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        switch kind(for: section) {
+            case .categories:
+                return max(categories.count, 1)
+            case .add:
+                return 1
+            case .defaultCategory:
+                return categories.count + 1
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        switch kind(for: section) {
+            case .categories:
+                return "Categories"
+            case .add:
+                return nil
+            case .defaultCategory:
+                return "Default Category"
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        switch kind(for: section) {
+            case .categories:
+                return "Tap a category to rename it, set its own sort order, make it the default, or remove it."
+            case .defaultCategory:
+                return "New manga added to the Library are filed under the default category."
+            case .add:
+                return nil
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "CategoryCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "CategoryCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.accessoryType = .none
+        cell.selectionStyle = .default
+
+        switch kind(for: indexPath.section) {
+            case .categories:
+                if categories.isEmpty {
+                    cell.textLabel?.text = "No categories yet"
+                    cell.detailTextLabel?.text = "Add a category to organize your library."
+                    cell.selectionStyle = .none
+                } else {
+                    let name = categories[indexPath.row]
+                    cell.textLabel?.text = name
+                    let sort = LegacyCategoryStore.shared.sort(forKey: name)
+                    let isDefault = LegacyCategoryStore.shared.defaultCategory.caseInsensitiveCompare(name) == .orderedSame
+                    var detail = "Sort: \(sort.title)"
+                    if isDefault { detail += " - Default" }
+                    cell.detailTextLabel?.text = detail
+                    cell.accessoryType = .disclosureIndicator
+                }
+            case .add:
+                cell.textLabel?.text = "Add Category"
+                cell.textLabel?.textColor = LegacyPalette.accent
+                cell.detailTextLabel?.text = nil
+            case .defaultCategory:
+                let isNone = indexPath.row == 0
+                let name = isNone ? "" : categories[indexPath.row - 1]
+                cell.textLabel?.text = isNone ? "None" : name
+                cell.detailTextLabel?.text = nil
+                let current = LegacyCategoryStore.shared.defaultCategory
+                let selected = isNone ? current.isEmpty : current.caseInsensitiveCompare(name) == .orderedSame
+                cell.accessoryType = selected ? .checkmark : .none
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        switch kind(for: indexPath.section) {
+            case .categories:
+                guard !categories.isEmpty else { return }
+                showCategoryOptions(for: categories[indexPath.row], at: indexPath)
+            case .add:
+                promptAddCategory()
+            case .defaultCategory:
+                let value = indexPath.row == 0 ? "" : categories[indexPath.row - 1]
+                LegacyCategoryStore.shared.defaultCategory = value
+                if let section = sectionOrder.firstIndex(of: .defaultCategory) {
+                    tableView.reloadSections(IndexSet(integer: section), with: .automatic)
+                }
+        }
+    }
+
+    // MARK: Editing
+
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        kind(for: indexPath.section) == .categories && !categories.isEmpty
+    }
+
+    override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
+        kind(for: indexPath.section) == .categories && !categories.isEmpty
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        editingStyleForRowAt indexPath: IndexPath
+    ) -> UITableViewCell.EditingStyle {
+        canEditRow(indexPath) ? .delete : .none
+    }
+
+    private func canEditRow(_ indexPath: IndexPath) -> Bool {
+        kind(for: indexPath.section) == .categories && !categories.isEmpty
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        guard editingStyle == .delete, kind(for: indexPath.section) == .categories,
+              categories.indices.contains(indexPath.row) else { return }
+        LegacyCategoryStore.shared.remove(categories[indexPath.row])
+        reloadCategories()
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        targetIndexPathForMoveFromRowAt sourceIndexPath: IndexPath,
+        toProposedIndexPath proposedDestinationIndexPath: IndexPath
+    ) -> IndexPath {
+        // Keep reordering within the categories section.
+        if kind(for: proposedDestinationIndexPath.section) != .categories {
+            let lastRow = max(categories.count - 1, 0)
+            return IndexPath(row: lastRow, section: sourceIndexPath.section)
+        }
+        return proposedDestinationIndexPath
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        moveRowAt sourceIndexPath: IndexPath,
+        to destinationIndexPath: IndexPath
+    ) {
+        LegacyCategoryStore.shared.move(from: sourceIndexPath.row, to: destinationIndexPath.row)
+        categories = LegacyCategoryStore.shared.categories
+    }
+
+    // MARK: Actions
+
+    private func promptAddCategory() {
+        let alert = UIAlertController(title: "Add Category", message: nil, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = "Reading"
+            textField.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+            let name = alert?.textFields?.first?.text ?? ""
+            guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            if !LegacyCategoryStore.shared.add(name) {
+                self?.showAlert(title: "Category Exists", message: "A category with that name already exists.")
+            }
+            self?.reloadCategories()
+        })
+        present(alert, animated: true)
+    }
+
+    private func showCategoryOptions(for name: String, at indexPath: IndexPath) {
+        let alert = UIAlertController(title: name, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak self] _ in
+            self?.promptRenameCategory(name)
+        })
+        let sort = LegacyCategoryStore.shared.sort(forKey: name)
+        alert.addAction(UIAlertAction(title: "Sort: \(sort.title)", style: .default) { [weak self] _ in
+            self?.showSortOptions(for: name, at: indexPath)
+        })
+        let isDefault = LegacyCategoryStore.shared.defaultCategory.caseInsensitiveCompare(name) == .orderedSame
+        alert.addAction(UIAlertAction(title: isDefault ? "Remove as Default" : "Make Default", style: .default) { [weak self] _ in
+            LegacyCategoryStore.shared.defaultCategory = isDefault ? "" : name
+            self?.reloadCategories()
+        })
+        alert.addAction(UIAlertAction(title: "Remove Category", style: .destructive) { [weak self] _ in
+            LegacyCategoryStore.shared.remove(name)
+            self?.reloadCategories()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
+    }
+
+    private func showSortOptions(for name: String, at indexPath: IndexPath) {
+        let current = LegacyCategoryStore.shared.sort(forKey: name)
+        let alert = UIAlertController(title: "Sort - \(name)", message: nil, preferredStyle: .actionSheet)
+        for option in LegacyLibrarySortOption.allCases {
+            let title = option == current ? "\(option.title) (Current)" : option.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                LegacyCategoryStore.shared.setSort(option, forKey: name)
+                self?.reloadCategories()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
+    }
+
+    private func promptRenameCategory(_ name: String) {
+        let alert = UIAlertController(title: "Rename Category", message: name, preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.text = name
+            textField.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            let newName = alert?.textFields?.first?.text ?? ""
+            guard !newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            LegacyCategoryStore.shared.rename(name, to: newName)
+            self?.reloadCategories()
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentSheet(_ alert: UIAlertController, at indexPath: IndexPath) {
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
 final class LegacySettingsViewController: UITableViewController, UIDocumentPickerDelegate {
     private enum Row: Int, CaseIterable {
         case readerMode
@@ -4240,6 +4729,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case automaticSourceUpdates
         case updateNotifications
         case readingInsights
+        case manageCategories
         case downloads
         case localFiles
         case selfHosted
@@ -4265,7 +4755,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         Section(title: "Privacy", rows: [.incognitoMode]),
         Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
         Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
-        Section(title: "Library", rows: [.readingInsights, .downloads, .localFiles, .selfHosted, .trackers]),
+        Section(title: "Library", rows: [.readingInsights, .manageCategories, .downloads, .localFiles, .selfHosted, .trackers]),
         Section(title: "Backup & Restore", rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup]),
         Section(title: "Storage", rows: [.clearImageCache, .clearHistory, .clearLibrary]),
         Section(title: "About", rows: [.about])
@@ -4399,6 +4889,16 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.detailTextLabel?.text = total == 0
                     ? "Track chapters read, active days, and streaks."
                     : (total == 1 ? "1 chapter read all-time" : "\(total) chapters read all-time")
+            case .manageCategories:
+                let count = LegacyCategoryStore.shared.categories.count
+                cell.textLabel?.text = "Library Categories"
+                let defaultCategory = LegacyCategoryStore.shared.defaultCategory
+                if count == 0 {
+                    cell.detailTextLabel?.text = "Create categories, set a default, and per-category sort."
+                } else {
+                    let base = count == 1 ? "1 category" : "\(count) categories"
+                    cell.detailTextLabel?.text = defaultCategory.isEmpty ? base : "\(base) - Default: \(defaultCategory)"
+                }
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
@@ -4506,6 +5006,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 toggleUpdateNotifications(at: indexPath)
             case .readingInsights:
                 navigationController?.pushViewController(LegacyInsightsViewController(), animated: true)
+            case .manageCategories:
+                navigationController?.pushViewController(LegacyCategoryManagerViewController(), animated: true)
             case .downloads:
                 navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
             case .localFiles:
