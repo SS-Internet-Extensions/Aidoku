@@ -978,6 +978,28 @@ enum LegacyLibrarySortOption: String, CaseIterable {
     }
 }
 
+/// Library grid vs. list display mode, persisted across launches.
+enum LegacyLibraryDisplayMode: String {
+    case grid
+    case list
+
+    private static let defaultsKey = "AidokuLegacy.library.displayMode"
+
+    static var current: LegacyLibraryDisplayMode {
+        guard
+            let raw = UserDefaults.standard.string(forKey: defaultsKey),
+            let mode = LegacyLibraryDisplayMode(rawValue: raw)
+        else {
+            return .grid
+        }
+        return mode
+    }
+
+    static func setCurrent(_ mode: LegacyLibraryDisplayMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: defaultsKey)
+    }
+}
+
 /// User-managed library categories: an ordered, named list plus a default
 /// category for new additions and per-category sort overrides. The category
 /// strings live alongside the existing free-text categories on
@@ -3261,13 +3283,21 @@ final class LegacyLibraryBadgeLabel: UILabel {
     }
 }
 
+/// Shared interface for the grid and list cells so cover loading can target
+/// either one.
+protocol LegacyLibraryCoverCell: AnyObject {
+    var entryKey: String? { get set }
+    var coverImageView: UIImageView { get }
+}
+
 /// Mihon-style library grid cell: cover fills the cell, the title is overlaid
 /// at the bottom over a dark gradient, and an unread-count badge sits top-left.
-final class LegacyLibraryGridCell: UICollectionViewCell {
+final class LegacyLibraryGridCell: UICollectionViewCell, LegacyLibraryCoverCell {
     static let reuseID = "LibraryGridCell"
 
     let imageView = UIImageView()
     var entryKey: String?
+    var coverImageView: UIImageView { imageView }
 
     private let titleLabel = UILabel()
     private let gradientLayer = CAGradientLayer()
@@ -3348,6 +3378,105 @@ final class LegacyLibraryGridCell: UICollectionViewCell {
     }
 }
 
+/// Compact list row: small cover thumbnail on the left, title (and source)
+/// in the middle, unread-count badge on the right.
+final class LegacyLibraryListCell: UICollectionViewCell, LegacyLibraryCoverCell {
+    static let reuseID = "LibraryListCell"
+
+    let imageView = UIImageView()
+    var entryKey: String?
+    var coverImageView: UIImageView { imageView }
+
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    private let badgeLabel = LegacyLibraryBadgeLabel()
+    private let separator = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = LegacyPalette.panel
+        contentView.layer.cornerRadius = 6
+        contentView.clipsToBounds = true
+
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.backgroundColor = LegacyPalette.background
+        imageView.layer.cornerRadius = 4
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(imageView)
+
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = LegacyPalette.primaryText
+        titleLabel.numberOfLines = 2
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(titleLabel)
+
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = LegacyPalette.secondaryText
+        subtitleLabel.numberOfLines = 1
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(subtitleLabel)
+
+        badgeLabel.font = .systemFont(ofSize: 12, weight: .bold)
+        badgeLabel.textColor = .white
+        badgeLabel.backgroundColor = LegacyPalette.accent
+        badgeLabel.layer.cornerRadius = 4
+        badgeLabel.clipsToBounds = true
+        badgeLabel.textInsets = UIEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
+        badgeLabel.isHidden = true
+        badgeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(badgeLabel)
+
+        separator.backgroundColor = LegacyPalette.secondaryText.withAlphaComponent(0.15)
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor, multiplier: CGFloat(2) / CGFloat(3)),
+
+            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            titleLabel.trailingAnchor.constraint(equalTo: badgeLabel.leadingAnchor, constant: -8),
+
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+            subtitleLabel.trailingAnchor.constraint(equalTo: badgeLabel.leadingAnchor, constant: -8),
+
+            badgeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            badgeLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(title: String, subtitle: String, unread: Int) {
+        titleLabel.text = title
+        subtitleLabel.text = subtitle
+        if unread > 0 {
+            badgeLabel.text = "\(unread)"
+            badgeLabel.isHidden = false
+        } else {
+            badgeLabel.isHidden = true
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageView.image = nil
+        entryKey = nil
+        badgeLabel.isHidden = true
+    }
+}
+
 final class LegacyLibraryViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private let searchController = UISearchController(searchResultsController: nil)
@@ -3367,6 +3496,8 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
     private var coverRepairAttempts: [String: Int] = [:]
 
     private var collectionView: UICollectionView!
+    private let flowLayout = UICollectionViewFlowLayout()
+    private var displayMode = LegacyLibraryDisplayMode.current
     private let gridRefreshControl = UIRefreshControl()
     private let emptyLabel = UILabel()
 
@@ -3465,11 +3596,10 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
     // MARK: - Collection view
 
     private func setupCollectionView() {
-        let layout = UICollectionViewFlowLayout()
-        layout.minimumInteritemSpacing = 10
-        layout.minimumLineSpacing = 14
-        layout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        flowLayout.minimumInteritemSpacing = 10
+        flowLayout.minimumLineSpacing = displayMode == .grid ? 14 : 8
+        flowLayout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: flowLayout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = LegacyPalette.background
         collectionView.alwaysBounceVertical = true
@@ -3477,6 +3607,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(LegacyLibraryGridCell.self, forCellWithReuseIdentifier: LegacyLibraryGridCell.reuseID)
+        collectionView.register(LegacyLibraryListCell.self, forCellWithReuseIdentifier: LegacyLibraryListCell.reuseID)
         collectionView.refreshControl = gridRefreshControl
         gridRefreshControl.addTarget(self, action: #selector(updateLibraryManually), for: .valueChanged)
 
@@ -3514,15 +3645,28 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         _ collectionView: UICollectionView,
         cellForItemAt indexPath: IndexPath
     ) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(
-            withReuseIdentifier: LegacyLibraryGridCell.reuseID,
-            for: indexPath
-        ) as! LegacyLibraryGridCell
         let entry = entries[indexPath.item]
-        cell.entryKey = entry.key
-        cell.configure(title: entry.manga.title, unread: unreadCount(for: entry))
-        loadCover(for: entry, into: cell)
-        return cell
+        let unread = unreadCount(for: entry)
+        switch displayMode {
+            case .grid:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: LegacyLibraryGridCell.reuseID,
+                    for: indexPath
+                ) as! LegacyLibraryGridCell
+                cell.entryKey = entry.key
+                cell.configure(title: entry.manga.title, unread: unread)
+                loadCover(for: entry, into: cell)
+                return cell
+            case .list:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: LegacyLibraryListCell.reuseID,
+                    for: indexPath
+                ) as! LegacyLibraryListCell
+                cell.entryKey = entry.key
+                cell.configure(title: entry.manga.title, subtitle: entry.sourceName, unread: unread)
+                loadCover(for: entry, into: cell)
+                return cell
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -3544,12 +3688,24 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         layout collectionViewLayout: UICollectionViewLayout,
         sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-        let columns: CGFloat = 3
-        let insets: CGFloat = 12 * 2
-        let spacing: CGFloat = 10 * (columns - 1)
-        let available = collectionView.bounds.width - insets - spacing
-        let width = max(floor(available / columns), 1)
-        return CGSize(width: width, height: width * 1.5)
+        switch displayMode {
+            case .grid:
+                let columns: CGFloat = 3
+                let insets: CGFloat = 12 * 2
+                let spacing: CGFloat = 10 * (columns - 1)
+                let available = collectionView.bounds.width - insets - spacing
+                let width = max(floor(available / columns), 1)
+                return CGSize(width: width, height: width * 1.5)
+            case .list:
+                let width = max(collectionView.bounds.width - 12 * 2, 1)
+                return CGSize(width: width, height: 84)
+        }
+    }
+
+    private func applyDisplayMode() {
+        flowLayout.minimumLineSpacing = displayMode == .grid ? 14 : 8
+        flowLayout.invalidateLayout()
+        collectionView.reloadData()
     }
 
     private func unreadCount(for entry: LegacyLibraryEntry) -> Int {
@@ -3683,8 +3839,8 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         return sources.first { $0.key == entry.sourceKey }
     }
 
-    private func loadCover(for entry: LegacyLibraryEntry, into cell: LegacyLibraryGridCell) {
-        cell.imageView.image = nil
+    private func loadCover(for entry: LegacyLibraryEntry, into cell: LegacyLibraryCoverCell) {
+        cell.coverImageView.image = nil
         guard let source = source(for: entry) else { return }
         let coverURLs = entry.manga.coverURLCandidates(relativeTo: source.urls.first)
         guard !coverURLs.isEmpty else {
@@ -3698,7 +3854,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             targetHeight: 360
         ) { [weak self, weak cell] image in
             guard let self = self, let cell = cell, cell.entryKey == entryKey else { return }
-            cell.imageView.image = image
+            cell.coverImageView.image = image
             if image == nil {
                 LegacyImageLoader.shared.removeCachedImages(for: coverURLs, source: source)
                 self.repairCover(for: entry, source: source)
@@ -3792,6 +3948,16 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             sortScope = "All"
         }
         let alert = UIAlertController(title: "Library", message: "Sort applies to: \(sortScope)", preferredStyle: .actionSheet)
+        let nextMode: LegacyLibraryDisplayMode = displayMode == .grid ? .list : .grid
+        alert.addAction(UIAlertAction(
+            title: displayMode == .grid ? "View: Grid (switch to List)" : "View: List (switch to Grid)",
+            style: .default
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.displayMode = nextMode
+            LegacyLibraryDisplayMode.setCurrent(nextMode)
+            self.applyDisplayMode()
+        })
         for option in LegacyLibrarySortOption.allCases {
             let title = option == sortOption ? "Sort: \(option.title) (Current)" : "Sort: \(option.title)"
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
