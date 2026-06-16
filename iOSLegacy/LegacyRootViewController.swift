@@ -7522,6 +7522,627 @@ final class LegacyChapterDownloadPickerViewController: UITableViewController, UI
     }
 }
 
+// MARK: - Manga detail header (Mihon-style)
+
+/// Monochrome vector glyphs drawn at runtime. iOS 12 has no SF Symbols, so the
+/// detail header draws its icons with bezier paths and renders them as template
+/// images so `tintColor` controls the color.
+enum LegacyDetailGlyph {
+    case person
+    case brush
+    case globe
+    case clock
+    case heartOutline
+    case heartFilled
+    case sync
+    case chevronDown
+    case chevronUp
+
+    func image(size: CGFloat, lineWidth: CGFloat) -> UIImage {
+        let canvas = CGSize(width: size, height: size)
+        let renderer = UIGraphicsImageRenderer(size: canvas)
+        let image = renderer.image { context in
+            let cg = context.cgContext
+            cg.setStrokeColor(UIColor.black.cgColor)
+            cg.setFillColor(UIColor.black.cgColor)
+            cg.setLineWidth(lineWidth)
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+            let r = CGRect(x: 0, y: 0, width: size, height: size)
+                .insetBy(dx: lineWidth + 1.5, dy: lineWidth + 1.5)
+            draw(in: r, lineWidth: lineWidth)
+        }
+        return image.withRenderingMode(.alwaysTemplate)
+    }
+
+    private func draw(in r: CGRect, lineWidth: CGFloat) {
+        switch self {
+            case .person:
+                let headRadius = r.width * 0.16
+                let headCenter = CGPoint(x: r.midX, y: r.minY + headRadius + r.height * 0.04)
+                UIBezierPath(ovalIn: CGRect(
+                    x: headCenter.x - headRadius,
+                    y: headCenter.y - headRadius,
+                    width: headRadius * 2,
+                    height: headRadius * 2
+                )).fill()
+                let body = UIBezierPath()
+                let bodyWidth = r.width * 0.72
+                let bodyCenter = CGPoint(x: r.midX, y: r.maxY)
+                body.move(to: CGPoint(x: bodyCenter.x - bodyWidth / 2, y: bodyCenter.y))
+                body.addArc(
+                    withCenter: bodyCenter,
+                    radius: bodyWidth / 2,
+                    startAngle: .pi,
+                    endAngle: 0,
+                    clockwise: true
+                )
+                body.close()
+                body.fill()
+            case .brush:
+                let tip = CGPoint(x: r.minX + r.width * 0.14, y: r.maxY - r.height * 0.14)
+                let top = CGPoint(x: r.maxX - r.width * 0.14, y: r.minY + r.height * 0.14)
+                let handle = UIBezierPath()
+                handle.lineWidth = lineWidth
+                handle.move(to: tip)
+                handle.addLine(to: top)
+                handle.stroke()
+                // Brush ferrule: a short perpendicular stroke near the top end.
+                let ferrule = UIBezierPath()
+                ferrule.lineWidth = lineWidth
+                let dx = (top.x - tip.x) * 0.16
+                let dy = (top.y - tip.y) * 0.16
+                ferrule.move(to: CGPoint(x: top.x - dx - dy, y: top.y - dy + dx))
+                ferrule.addLine(to: CGPoint(x: top.x - dx + dy, y: top.y - dy - dx))
+                ferrule.stroke()
+            case .globe:
+                let circle = r.insetBy(dx: r.width * 0.04, dy: r.height * 0.04)
+                let ring = UIBezierPath(ovalIn: circle)
+                ring.lineWidth = lineWidth
+                ring.stroke()
+                let meridian = UIBezierPath(ovalIn: CGRect(
+                    x: circle.midX - circle.width * 0.18,
+                    y: circle.minY,
+                    width: circle.width * 0.36,
+                    height: circle.height
+                ))
+                meridian.lineWidth = lineWidth
+                meridian.stroke()
+                let equator = UIBezierPath()
+                equator.lineWidth = lineWidth
+                equator.move(to: CGPoint(x: circle.minX, y: circle.midY))
+                equator.addLine(to: CGPoint(x: circle.maxX, y: circle.midY))
+                equator.stroke()
+            case .clock:
+                let circle = r.insetBy(dx: r.width * 0.04, dy: r.height * 0.04)
+                let ring = UIBezierPath(ovalIn: circle)
+                ring.lineWidth = lineWidth
+                ring.stroke()
+                let center = CGPoint(x: circle.midX, y: circle.midY)
+                let hands = UIBezierPath()
+                hands.lineWidth = lineWidth
+                hands.move(to: center)
+                hands.addLine(to: CGPoint(x: center.x, y: circle.minY + circle.height * 0.22))
+                hands.move(to: center)
+                hands.addLine(to: CGPoint(x: circle.maxX - circle.width * 0.26, y: center.y))
+                hands.stroke()
+            case .heartOutline, .heartFilled:
+                let w = r.width
+                let h = r.height
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: r.midX, y: r.maxY - h * 0.10))
+                path.addCurve(
+                    to: CGPoint(x: r.minX + w * 0.04, y: r.minY + h * 0.34),
+                    controlPoint1: CGPoint(x: r.midX - w * 0.20, y: r.maxY - h * 0.02),
+                    controlPoint2: CGPoint(x: r.minX + w * 0.04, y: r.minY + h * 0.62)
+                )
+                path.addArc(
+                    withCenter: CGPoint(x: r.minX + w * 0.27, y: r.minY + h * 0.32),
+                    radius: w * 0.23,
+                    startAngle: .pi,
+                    endAngle: 0,
+                    clockwise: true
+                )
+                path.addArc(
+                    withCenter: CGPoint(x: r.maxX - w * 0.27, y: r.minY + h * 0.32),
+                    radius: w * 0.23,
+                    startAngle: .pi,
+                    endAngle: 0,
+                    clockwise: true
+                )
+                path.addCurve(
+                    to: CGPoint(x: r.midX, y: r.maxY - h * 0.10),
+                    controlPoint1: CGPoint(x: r.maxX - w * 0.04, y: r.minY + h * 0.62),
+                    controlPoint2: CGPoint(x: r.midX + w * 0.20, y: r.maxY - h * 0.02)
+                )
+                path.close()
+                if self == .heartFilled {
+                    path.fill()
+                } else {
+                    path.lineWidth = lineWidth
+                    path.stroke()
+                }
+            case .sync:
+                let circle = r.insetBy(dx: r.width * 0.08, dy: r.height * 0.08)
+                let center = CGPoint(x: circle.midX, y: circle.midY)
+                let radius = circle.width / 2
+                let top = UIBezierPath(
+                    arcCenter: center,
+                    radius: radius,
+                    startAngle: CGFloat(-0.95 * Double.pi),
+                    endAngle: CGFloat(0.05 * Double.pi),
+                    clockwise: true
+                )
+                top.lineWidth = lineWidth
+                top.stroke()
+                let bottom = UIBezierPath(
+                    arcCenter: center,
+                    radius: radius,
+                    startAngle: CGFloat(0.05 * Double.pi),
+                    endAngle: CGFloat(1.05 * Double.pi),
+                    clockwise: true
+                )
+                bottom.lineWidth = lineWidth
+                bottom.stroke()
+                let arrowSize = radius * 0.5
+                let topTip = CGPoint(x: center.x + radius, y: center.y)
+                let topArrow = UIBezierPath()
+                topArrow.lineWidth = lineWidth
+                topArrow.move(to: CGPoint(x: topTip.x - arrowSize, y: topTip.y - arrowSize * 0.2))
+                topArrow.addLine(to: topTip)
+                topArrow.addLine(to: CGPoint(x: topTip.x - arrowSize * 0.2, y: topTip.y + arrowSize))
+                topArrow.stroke()
+                let bottomTip = CGPoint(x: center.x - radius, y: center.y)
+                let bottomArrow = UIBezierPath()
+                bottomArrow.lineWidth = lineWidth
+                bottomArrow.move(to: CGPoint(x: bottomTip.x + arrowSize, y: bottomTip.y + arrowSize * 0.2))
+                bottomArrow.addLine(to: bottomTip)
+                bottomArrow.addLine(to: CGPoint(x: bottomTip.x + arrowSize * 0.2, y: bottomTip.y - arrowSize))
+                bottomArrow.stroke()
+            case .chevronDown, .chevronUp:
+                let m = r.insetBy(dx: r.width * 0.18, dy: r.height * 0.30)
+                let path = UIBezierPath()
+                path.lineWidth = lineWidth
+                if self == .chevronDown {
+                    path.move(to: CGPoint(x: m.minX, y: m.minY))
+                    path.addLine(to: CGPoint(x: m.midX, y: m.maxY))
+                    path.addLine(to: CGPoint(x: m.maxX, y: m.minY))
+                } else {
+                    path.move(to: CGPoint(x: m.minX, y: m.maxY))
+                    path.addLine(to: CGPoint(x: m.midX, y: m.minY))
+                    path.addLine(to: CGPoint(x: m.maxX, y: m.maxY))
+                }
+                path.stroke()
+        }
+    }
+}
+
+/// A single vertical icon-over-label action in the detail header action row.
+private final class LegacyDetailActionButton: UIControl {
+    private let iconView = UIImageView()
+    private let label = UILabel()
+    var onTap: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        iconView.contentMode = .scaleAspectFit
+        addSubview(iconView)
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.75
+        addSubview(label)
+        addTarget(self, action: #selector(fire), for: .touchUpInside)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func fire() {
+        onTap?()
+    }
+
+    func configure(glyph: LegacyDetailGlyph, title: String, tint: UIColor, enabled: Bool) {
+        iconView.image = glyph.image(size: 26, lineWidth: 1.7)
+        iconView.tintColor = tint
+        label.text = title
+        label.textColor = tint
+        isEnabled = enabled
+        alpha = enabled ? 1 : 0.4
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let iconSize: CGFloat = 26
+        iconView.frame = CGRect(x: (bounds.width - iconSize) / 2, y: 4, width: iconSize, height: iconSize)
+        label.frame = CGRect(x: 2, y: iconView.frame.maxY + 4, width: bounds.width - 4, height: bounds.height - iconView.frame.maxY - 6)
+    }
+
+    override var isHighlighted: Bool {
+        didSet { alpha = isHighlighted ? 0.5 : (isEnabled ? 1 : 0.4) }
+    }
+}
+
+/// Mihon-style header view rendered as the content of the detail screen's first
+/// row. Uses manual frame layout (no Auto Layout) so the owning table cell can
+/// ask for an exact height via `height(forWidth:)` — important for the flowing
+/// tag-chip cloud whose height depends on the available width.
+final class LegacyMangaDetailHeaderView: UIView {
+    var onLibrary: (() -> Void)?
+    var onTracking: (() -> Void)?
+    var onWebView: (() -> Void)?
+    var onToggleDescription: (() -> Void)?
+    var onCover: (() -> Void)?
+
+    private let backdropImageView = UIImageView()
+    private let backdropBlur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    private let backdropScrim = CAGradientLayer()
+    private let coverImageView = UIImageView()
+    private let titleLabel = UILabel()
+    private let authorIcon = UIImageView()
+    private let authorLabel = UILabel()
+    private let artistIcon = UIImageView()
+    private let artistLabel = UILabel()
+    private let sourceIcon = UIImageView()
+    private let sourceLabel = UILabel()
+    private let libraryButton = LegacyDetailActionButton()
+    private let updatedButton = LegacyDetailActionButton()
+    private let trackingButton = LegacyDetailActionButton()
+    private let webViewButton = LegacyDetailActionButton()
+    private let descriptionLabel = UILabel()
+    private let chevronView = UIImageView()
+    private let descriptionTapButton = UIButton(type: .custom)
+    private let coverTapButton = UIButton(type: .custom)
+    private var chipViews: [UILabel] = []
+
+    // Cached configuration.
+    private var tags: [String] = []
+    private var descriptionExpanded = false
+    private var hasDescription = false
+
+    private let horizontalInset: CGFloat = 16
+    private let coverSize = CGSize(width: 104, height: 156)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = LegacyPalette.background
+
+        backdropImageView.contentMode = .scaleAspectFill
+        backdropImageView.clipsToBounds = true
+        addSubview(backdropImageView)
+        addSubview(backdropBlur)
+        backdropScrim.needsDisplayOnBoundsChange = true
+        layer.insertSublayer(backdropScrim, above: backdropBlur.layer)
+
+        coverImageView.contentMode = .scaleAspectFill
+        coverImageView.clipsToBounds = true
+        coverImageView.layer.cornerRadius = 8
+        coverImageView.layer.borderWidth = 1
+        coverImageView.layer.borderColor = UIColor(white: 0.5, alpha: 0.3).cgColor
+        coverImageView.backgroundColor = LegacyPalette.panel
+        addSubview(coverImageView)
+
+        titleLabel.font = .systemFont(ofSize: 21, weight: .bold)
+        titleLabel.numberOfLines = 4
+        titleLabel.textColor = LegacyPalette.primaryText
+        addSubview(titleLabel)
+
+        configureMeta(icon: authorIcon, label: authorLabel)
+        configureMeta(icon: artistIcon, label: artistLabel)
+        configureMeta(icon: sourceIcon, label: sourceLabel)
+
+        addSubview(libraryButton)
+        addSubview(updatedButton)
+        addSubview(trackingButton)
+        addSubview(webViewButton)
+        libraryButton.onTap = { [weak self] in self?.onLibrary?() }
+        trackingButton.onTap = { [weak self] in self?.onTracking?() }
+        webViewButton.onTap = { [weak self] in self?.onWebView?() }
+        updatedButton.isUserInteractionEnabled = false
+
+        descriptionLabel.font = .systemFont(ofSize: 14)
+        descriptionLabel.textColor = LegacyPalette.secondaryText
+        descriptionLabel.numberOfLines = 0
+        addSubview(descriptionLabel)
+
+        chevronView.contentMode = .center
+        chevronView.tintColor = LegacyPalette.secondaryText
+        addSubview(chevronView)
+
+        descriptionTapButton.addTarget(self, action: #selector(toggleDescription), for: .touchUpInside)
+        addSubview(descriptionTapButton)
+
+        coverTapButton.addTarget(self, action: #selector(tapCover), for: .touchUpInside)
+        addSubview(coverTapButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configureMeta(icon: UIImageView, label: UILabel) {
+        icon.contentMode = .scaleAspectFit
+        icon.tintColor = LegacyPalette.secondaryText
+        addSubview(icon)
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = LegacyPalette.secondaryText
+        label.numberOfLines = 1
+        addSubview(label)
+    }
+
+    @objc private func toggleDescription() {
+        onToggleDescription?()
+    }
+
+    @objc private func tapCover() {
+        onCover?()
+    }
+
+    func setCover(_ image: UIImage?) {
+        coverImageView.image = image
+        backdropImageView.image = image
+    }
+
+    struct Config {
+        var title: String
+        var authors: [String]
+        var artists: [String]
+        var sourceName: String
+        var description: String?
+        var descriptionExpanded: Bool
+        var tags: [String]
+        var inLibrary: Bool
+        var updatedText: String?
+        var tracking: Bool
+        var hasURL: Bool
+        var canPickCover: Bool
+        var isError: Bool
+    }
+
+    func configure(_ config: Config) {
+        titleLabel.text = config.title
+
+        let authorText = config.authors.joined(separator: ", ")
+        authorLabel.text = authorText
+        let showAuthor = !authorText.isEmpty
+        authorIcon.isHidden = !showAuthor
+        authorLabel.isHidden = !showAuthor
+        authorIcon.image = LegacyDetailGlyph.person.image(size: 14, lineWidth: 1.4)
+
+        let artistText = config.artists.joined(separator: ", ")
+        // Hide the artist row when it duplicates the author row.
+        let showArtist = !artistText.isEmpty && artistText != authorText
+        artistLabel.text = artistText
+        artistIcon.isHidden = !showArtist
+        artistLabel.isHidden = !showArtist
+        artistIcon.image = LegacyDetailGlyph.brush.image(size: 14, lineWidth: 1.4)
+
+        sourceLabel.text = config.sourceName
+        sourceIcon.image = LegacyDetailGlyph.globe.image(size: 14, lineWidth: 1.4)
+
+        let trimmedDescription = config.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        hasDescription = !(trimmedDescription?.isEmpty ?? true)
+        descriptionLabel.text = trimmedDescription
+        descriptionLabel.textColor = config.isError ? LegacyPalette.accent : LegacyPalette.secondaryText
+        descriptionExpanded = config.descriptionExpanded
+        descriptionLabel.numberOfLines = descriptionExpanded ? 0 : 4
+        chevronView.image = (descriptionExpanded ? LegacyDetailGlyph.chevronUp : LegacyDetailGlyph.chevronDown)
+            .image(size: 18, lineWidth: 1.6)
+        descriptionLabel.isHidden = !hasDescription
+        chevronView.isHidden = !hasDescription
+        descriptionTapButton.isHidden = !hasDescription
+
+        libraryButton.configure(
+            glyph: config.inLibrary ? .heartFilled : .heartOutline,
+            title: config.inLibrary ? "In library" : "Add to library",
+            tint: config.inLibrary ? LegacyPalette.accent : LegacyPalette.primaryText,
+            enabled: true
+        )
+        updatedButton.configure(
+            glyph: .clock,
+            title: config.updatedText ?? "Unknown",
+            tint: LegacyPalette.secondaryText,
+            enabled: config.updatedText != nil
+        )
+        trackingButton.configure(
+            glyph: .sync,
+            title: "Tracking",
+            tint: config.tracking ? LegacyPalette.accent : LegacyPalette.primaryText,
+            enabled: true
+        )
+        webViewButton.configure(
+            glyph: .globe,
+            title: "WebView",
+            tint: LegacyPalette.primaryText,
+            enabled: config.hasURL
+        )
+
+        coverTapButton.isUserInteractionEnabled = config.canPickCover
+
+        tags = config.tags
+        rebuildChips()
+        setNeedsLayout()
+    }
+
+    private func rebuildChips() {
+        while chipViews.count < tags.count {
+            let chip = UILabel()
+            chip.font = .systemFont(ofSize: 12)
+            chip.textAlignment = .center
+            chip.textColor = LegacyPalette.secondaryText
+            chip.layer.cornerRadius = 13
+            chip.layer.borderWidth = 1
+            chip.layer.borderColor = UIColor(white: 0.5, alpha: 0.35).cgColor
+            chip.clipsToBounds = true
+            addSubview(chip)
+            chipViews.append(chip)
+        }
+        for (index, chip) in chipViews.enumerated() {
+            if index < tags.count {
+                chip.text = tags[index]
+                chip.isHidden = false
+            } else {
+                chip.isHidden = true
+            }
+        }
+    }
+
+    // MARK: - Layout
+
+    func height(forWidth width: CGFloat) -> CGFloat {
+        return performLayout(width: width, apply: false)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        _ = performLayout(width: bounds.width, apply: true)
+    }
+
+    private func textHeight(_ text: String?, font: UIFont, width: CGFloat, maxLines: Int) -> CGFloat {
+        guard let text = text, !text.isEmpty, width > 0 else { return 0 }
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        var measured = ceil(bounding.height)
+        if maxLines > 0 {
+            measured = min(measured, ceil(CGFloat(maxLines) * font.lineHeight))
+        }
+        return measured
+    }
+
+    @discardableResult
+    private func performLayout(width: CGFloat, apply: Bool) -> CGFloat {
+        guard width > 0 else { return 0 }
+        let contentWidth = width - horizontalInset * 2
+
+        // Cover + title block.
+        let coverX = horizontalInset
+        let coverY: CGFloat = 20
+        let titleX = coverX + coverSize.width + 14
+        let titleWidth = width - titleX - horizontalInset
+
+        let titleHeight = textHeight(titleLabel.text, font: titleLabel.font, width: titleWidth, maxLines: 4)
+        var metaY = coverY + titleHeight + 8
+        let metaRows: [(UIImageView, UILabel)] = [
+            (authorIcon, authorLabel),
+            (artistIcon, artistLabel),
+            (sourceIcon, sourceLabel)
+        ]
+        let metaIconSize: CGFloat = 14
+        let metaRowHeight: CGFloat = 18
+        var metaFrames: [(icon: CGRect, label: CGRect)] = []
+        for (icon, _) in metaRows {
+            if icon.isHidden {
+                metaFrames.append((.zero, .zero))
+                continue
+            }
+            let iconFrame = CGRect(x: titleX, y: metaY + (metaRowHeight - metaIconSize) / 2, width: metaIconSize, height: metaIconSize)
+            let labelFrame = CGRect(x: titleX + metaIconSize + 6, y: metaY, width: titleWidth - metaIconSize - 6, height: metaRowHeight)
+            metaFrames.append((iconFrame, labelFrame))
+            metaY += metaRowHeight + 2
+        }
+
+        let titleBlockBottom = metaY
+        let topBlockBottom = max(coverY + coverSize.height, titleBlockBottom) + 16
+
+        // Action row.
+        let actionRowY = topBlockBottom
+        let actionRowHeight: CGFloat = 58
+        let actionColumnWidth = contentWidth / 4
+
+        // Description.
+        var cursorY = actionRowY + actionRowHeight + 8
+        var descriptionFrame = CGRect.zero
+        var chevronFrame = CGRect.zero
+        var descriptionTapFrame = CGRect.zero
+        if hasDescription {
+            let maxLines = descriptionExpanded ? 0 : 4
+            let descHeight = textHeight(descriptionLabel.text, font: descriptionLabel.font, width: contentWidth, maxLines: maxLines)
+            descriptionFrame = CGRect(x: horizontalInset, y: cursorY, width: contentWidth, height: descHeight)
+            chevronFrame = CGRect(x: width / 2 - 11, y: descriptionFrame.maxY + 2, width: 22, height: 18)
+            descriptionTapFrame = CGRect(x: horizontalInset, y: cursorY, width: contentWidth, height: descHeight + 22)
+            cursorY = chevronFrame.maxY + 12
+        }
+
+        // Tag chips (flowing rows).
+        var chipFrames: [CGRect] = []
+        if !tags.isEmpty {
+            let chipHeight: CGFloat = 26
+            let chipSpacing: CGFloat = 8
+            let lineSpacing: CGFloat = 8
+            var x = horizontalInset
+            var y = cursorY
+            let chipFont = UIFont.systemFont(ofSize: 12)
+            for tag in tags {
+                let textWidth = (tag as NSString).size(withAttributes: [.font: chipFont]).width
+                var chipWidth = ceil(textWidth) + 22
+                chipWidth = min(chipWidth, contentWidth)
+                if x + chipWidth > horizontalInset + contentWidth && x > horizontalInset {
+                    x = horizontalInset
+                    y += chipHeight + lineSpacing
+                }
+                chipFrames.append(CGRect(x: x, y: y, width: chipWidth, height: chipHeight))
+                x += chipWidth + chipSpacing
+            }
+            cursorY = y + chipHeight + 12
+        }
+
+        let totalHeight = cursorY + 4
+
+        if apply {
+            let backdropBottom = topBlockBottom
+            backdropImageView.frame = CGRect(x: 0, y: 0, width: width, height: backdropBottom)
+            backdropBlur.frame = backdropImageView.frame
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            backdropScrim.frame = backdropImageView.frame
+            let bg = LegacyPalette.background
+            backdropScrim.colors = [
+                bg.withAlphaComponent(0.25).cgColor,
+                bg.withAlphaComponent(0.6).cgColor,
+                bg.cgColor
+            ]
+            backdropScrim.locations = [0, 0.55, 1]
+            CATransaction.commit()
+
+            coverImageView.frame = CGRect(x: coverX, y: coverY, width: coverSize.width, height: coverSize.height)
+            coverTapButton.frame = coverImageView.frame
+            titleLabel.frame = CGRect(x: titleX, y: coverY, width: titleWidth, height: titleHeight)
+            for (index, row) in metaRows.enumerated() {
+                row.0.frame = metaFrames[index].icon
+                row.1.frame = metaFrames[index].label
+            }
+
+            let buttons = [libraryButton, updatedButton, trackingButton, webViewButton]
+            for (index, button) in buttons.enumerated() {
+                button.frame = CGRect(
+                    x: horizontalInset + actionColumnWidth * CGFloat(index),
+                    y: actionRowY,
+                    width: actionColumnWidth,
+                    height: actionRowHeight
+                )
+            }
+
+            descriptionLabel.frame = descriptionFrame
+            chevronView.frame = chevronFrame
+            descriptionTapButton.frame = descriptionTapFrame
+
+            for (index, chip) in chipViews.enumerated() where index < chipFrames.count {
+                chip.frame = chipFrames[index]
+            }
+        }
+
+        return totalHeight
+    }
+}
+
 final class LegacyMangaDetailViewController: UITableViewController {
     private enum ReadingAction {
         case resume(LegacyHistoryEntry)
@@ -7543,6 +8164,19 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
     private lazy var languageButton = UIBarButtonItem(title: "Language", style: .plain, target: self, action: #selector(showChapterLanguagePicker))
     private lazy var trackerButton = UIBarButtonItem(title: "Track", style: .plain, target: self, action: #selector(showTrackerLinkOptions))
+
+    private var descriptionExpanded = false
+    private lazy var headerView = LegacyMangaDetailHeaderView()
+    private lazy var headerCell: UITableViewCell = {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        cell.selectionStyle = .none
+        cell.backgroundColor = LegacyPalette.background
+        cell.contentView.backgroundColor = LegacyPalette.background
+        cell.contentView.addSubview(headerView)
+        headerView.frame = cell.contentView.bounds
+        headerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        return cell
+    }()
 
     private var sourceKey: String { source.key }
     private var mangaKey: String { manga.key }
@@ -7571,6 +8205,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
         updateBookmarkButton()
         updateLanguageButton()
         updateTrackerButton()
+        setupHeaderCallbacks()
+        configureHeader()
         refreshReadChapterKeys()
         loadDetails()
     }
@@ -7579,7 +8215,85 @@ final class LegacyMangaDetailViewController: UITableViewController {
         super.viewWillAppear(animated)
         // Returning from the reader: refresh read/unread state and resume row.
         refreshReadChapterKeys()
+        configureHeader()
         tableView.reloadData()
+    }
+
+    private func setupHeaderCallbacks() {
+        headerView.onLibrary = { [weak self] in
+            self?.toggleBookmark()
+            self?.configureHeader()
+        }
+        headerView.onTracking = { [weak self] in
+            self?.showTrackerLinkOptions()
+        }
+        headerView.onWebView = { [weak self] in
+            self?.openMangaInWebView()
+        }
+        headerView.onCover = { [weak self] in
+            self?.showAlternateCoverPicker(from: self?.headerView)
+        }
+        headerView.onToggleDescription = { [weak self] in
+            guard let self = self else { return }
+            self.descriptionExpanded.toggle()
+            self.configureHeader()
+            self.tableView.beginUpdates()
+            self.tableView.endUpdates()
+        }
+    }
+
+    private var headerDescription: String? {
+        if let errorMessage = errorMessage {
+            return errorMessage
+        }
+        let trimmed = manga.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty ?? true) ? nil : trimmed
+    }
+
+    private var lastUpdatedText: String? {
+        let dates = (manga.chapters ?? []).compactMap { $0.dateUploaded }
+        guard let newest = dates.max() else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: newest, to: Date()).day ?? 0
+        if days <= 0 { return "Today" }
+        if days == 1 { return "Yesterday" }
+        if days < 30 { return "\(days) days" }
+        let months = days / 30
+        if months < 12 { return months == 1 ? "1 month" : "\(months) months" }
+        let years = months / 12
+        return years == 1 ? "1 year" : "\(years) years"
+    }
+
+    private func configureHeader() {
+        let inLibrary = LegacyLibraryStore.shared.contains(sourceKey: source.key, mangaKey: manga.key)
+        let tracking = !LegacyTrackerManager.shared.entries(sourceKey: sourceKey, mangaKey: mangaKey).isEmpty
+        headerView.configure(LegacyMangaDetailHeaderView.Config(
+            title: manga.title,
+            authors: manga.authors ?? [],
+            artists: manga.artists ?? [],
+            sourceName: source.name,
+            description: headerDescription,
+            descriptionExpanded: descriptionExpanded,
+            tags: LegacyLibraryEntry.normalizedList(manga.tags ?? []),
+            inLibrary: inLibrary,
+            updatedText: lastUpdatedText,
+            tracking: tracking,
+            hasURL: manga.url != nil,
+            canPickCover: source.runner.features.providesAlternateCovers,
+            isError: errorMessage != nil
+        ))
+        LegacyImageLoader.shared.loadCover(
+            urls: currentCoverURLs,
+            source: source,
+            targetHeight: 320
+        ) { [weak self] image in
+            self?.headerView.setCover(image ?? LegacyImageLoader.placeholder())
+        }
+    }
+
+    private func openMangaInWebView() {
+        guard let url = manga.url else { return }
+        let webView = LegacySourceWebViewController(url: url, title: manga.title)
+        navigationController?.pushViewController(webView, animated: true)
     }
 
     private func refreshReadChapterKeys() {
@@ -7658,16 +8372,34 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         if section == 0 {
-            return "Details"
+            return nil
         }
         if section == 1 {
             return readingActions.isEmpty ? nil : "Reading"
         }
         let groups = chapterGroups
         if groups.isEmpty {
-            return "Chapters"
+            return isLoading ? "Chapters" : "No Chapters"
+        }
+        if groups.count == 1 {
+            let count = groups[0].chapters.count
+            return count == 1 ? "1 Chapter" : "\(count) Chapters"
         }
         return groups[section - 2].title
+    }
+
+    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        if indexPath.section == 0 {
+            return headerView.height(forWidth: tableView.bounds.width)
+        }
+        return UITableView.automaticDimension
+    }
+
+    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        if section == 0 {
+            return .leastNormalMagnitude
+        }
+        return UITableView.automaticDimension
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -7692,25 +8424,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
         cell.imageView?.image = nil
 
         if indexPath.section == 0 {
-            cell.imageView?.image = LegacyImageLoader.placeholder()
-            LegacyImageLoader.shared.loadCover(
-                urls: currentCoverURLs,
-                source: source,
-                targetHeight: 180
-            ) { image in
-                guard
-                    let visibleIndexPath = tableView.indexPath(for: cell),
-                    visibleIndexPath == indexPath
-                else { return }
-                cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-                cell.setNeedsLayout()
-            }
-            cell.textLabel?.text = manga.title
-            cell.detailTextLabel?.numberOfLines = 5
-            cell.detailTextLabel?.text = errorMessage ?? manga.legacySummaryText ?? "No description."
-            cell.accessoryType = source.runner.features.providesAlternateCovers ? .disclosureIndicator : .none
-            cell.selectionStyle = source.runner.features.providesAlternateCovers ? .default : .none
-            return cell
+            configureHeader()
+            return headerCell
         }
 
         if indexPath.section == 1 {
@@ -7778,7 +8493,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == 0 {
-            showAlternateCoverPicker(from: tableView.cellForRow(at: indexPath))
+            // The header view handles its own taps (cover, action buttons, description).
             return
         }
         if indexPath.section == 1 {
@@ -7903,6 +8618,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 }
                 self.updateBookmarkButton()
                 self.updateLanguageButton()
+                self.configureHeader()
                 self.tableView.reloadData()
             }
         }
