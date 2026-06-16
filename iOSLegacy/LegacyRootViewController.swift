@@ -4232,6 +4232,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case readerTapZones
         case darkTheme
         case incognitoMode
+        case clearCookies
+        case clearWebViewData
+        case dnsOverHttps
+        case defaultUserAgent
         case automaticLibraryUpdates
         case automaticSourceUpdates
         case updateNotifications
@@ -4259,6 +4263,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         Section(title: "Reader", rows: [.readerMode, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
         Section(title: "Appearance", rows: [.darkTheme]),
         Section(title: "Privacy", rows: [.incognitoMode]),
+        Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
         Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
         Section(title: "Library", rows: [.readingInsights, .downloads, .localFiles, .selfHosted, .trackers]),
         Section(title: "Backup & Restore", rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup]),
@@ -4355,6 +4360,22 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                     ? "Reading does not update history, insights, resume, or trackers."
                     : "Reading updates history, insights, resume, and trackers."
                 cell.accessoryType = enabled ? .checkmark : .none
+            case .clearCookies:
+                cell.textLabel?.text = "Clear Cookies"
+                cell.detailTextLabel?.text = "Remove saved source and web view login cookies."
+                cell.accessoryType = .none
+            case .clearWebViewData:
+                cell.textLabel?.text = "Clear Web View Data"
+                cell.detailTextLabel?.text = "Remove web view cache, storage, and cookies."
+                cell.accessoryType = .none
+            case .dnsOverHttps:
+                cell.textLabel?.text = "DNS over HTTPS"
+                cell.detailTextLabel?.text = LegacyNetworkSettings.dohEnabled
+                    ? "On - \(LegacyNetworkSettings.dohProviderDisplayName)"
+                    : "Off - use system DNS for source requests."
+            case .defaultUserAgent:
+                cell.textLabel?.text = "Default User Agent"
+                cell.detailTextLabel?.text = LegacyNetworkSettings.defaultUserAgent
             case .automaticLibraryUpdates:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.library.automaticUpdates")
                 cell.textLabel?.text = "Automatic Library Updates"
@@ -4465,6 +4486,14 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let key = "AidokuLegacy.reader.incognito"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
                 tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .clearCookies:
+                confirmClearCookies(at: indexPath)
+            case .clearWebViewData:
+                confirmClearWebViewData(at: indexPath)
+            case .dnsOverHttps:
+                showDoHOptions(from: indexPath)
+            case .defaultUserAgent:
+                showUserAgentEditor(at: indexPath)
             case .automaticLibraryUpdates:
                 let key = "AidokuLegacy.library.automaticUpdates"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
@@ -4811,6 +4840,160 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             })
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
+    }
+
+    private func confirmClearCookies(at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: "Clear Cookies",
+            message: "Remove all saved cookies, including source and web view logins?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+            self?.clearCookies(at: indexPath)
+        })
+        present(alert, animated: true)
+    }
+
+    private func clearCookies(at indexPath: IndexPath) {
+        let storage = HTTPCookieStorage.shared
+        for cookie in storage.cookies ?? [] {
+            storage.deleteCookie(cookie)
+        }
+        let store = WKWebsiteDataStore.default()
+        store.fetchDataRecords(ofTypes: [WKWebsiteDataTypeCookies]) { records in
+            store.removeData(ofTypes: [WKWebsiteDataTypeCookies], for: records) { [weak self] in
+                self?.tableView.reloadRows(at: [indexPath], with: .automatic)
+                self?.showAlert(title: "Cookies Cleared", message: "All saved cookies were removed.")
+            }
+        }
+    }
+
+    private func confirmClearWebViewData(at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: "Clear Web View Data",
+            message: "Remove all web view cache, storage, and cookies?",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+            self?.clearWebViewData()
+        })
+        present(alert, animated: true)
+    }
+
+    private func clearWebViewData() {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(
+            ofTypes: types,
+            modifiedSince: Date(timeIntervalSince1970: 0)
+        ) { [weak self] in
+            self?.showAlert(title: "Web View Data Cleared", message: "All web view data was removed.")
+        }
+    }
+
+    private func showDoHOptions(from indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: "DNS over HTTPS",
+            message: "Resolve hostnames over HTTPS for source and cover requests on the OpenSSL path (e.g. MangaDex). System requests are unaffected.",
+            preferredStyle: .actionSheet
+        )
+
+        func providerActionTitle(_ provider: String, _ display: String) -> String {
+            let isActive = LegacyNetworkSettings.dohEnabled && LegacyNetworkSettings.dohProvider == provider
+            return isActive ? "\u{2713} \(display)" : display
+        }
+
+        alert.addAction(UIAlertAction(title: providerActionTitle("cloudflare", "Cloudflare"), style: .default) { [weak self] _ in
+            self?.setDoH(enabled: true, provider: "cloudflare", at: indexPath)
+        })
+        alert.addAction(UIAlertAction(title: providerActionTitle("google", "Google"), style: .default) { [weak self] _ in
+            self?.setDoH(enabled: true, provider: "google", at: indexPath)
+        })
+        alert.addAction(UIAlertAction(title: providerActionTitle("custom", "Custom URL..."), style: .default) { [weak self] _ in
+            self?.promptCustomDoHURL(at: indexPath)
+        })
+        if LegacyNetworkSettings.dohEnabled {
+            alert.addAction(UIAlertAction(title: "Turn Off", style: .destructive) { [weak self] _ in
+                self?.setDoH(enabled: false, provider: LegacyNetworkSettings.dohProvider, at: indexPath)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, from: indexPath)
+    }
+
+    private func promptCustomDoHURL(at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: "Custom DoH Resolver",
+            message: "Enter a JSON DoH (\"dns-json\") endpoint, e.g. https://dns.example/dns-query",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "https://dns.example/dns-query"
+            field.text = LegacyNetworkSettings.dohCustomURL
+            field.keyboardType = .URL
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            let value = (alert.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, let url = URL(string: value), url.scheme?.lowercased() == "https" else {
+                self?.showAlert(title: "Invalid URL", message: "Enter an https:// DoH endpoint.")
+                return
+            }
+            UserDefaults.standard.set(value, forKey: LegacyNetworkSettings.dohCustomURLKey)
+            self?.setDoH(enabled: true, provider: "custom", at: indexPath)
+        })
+        present(alert, animated: true)
+    }
+
+    private func setDoH(enabled: Bool, provider: String, at indexPath: IndexPath) {
+        UserDefaults.standard.set(enabled, forKey: LegacyNetworkSettings.dohEnabledKey)
+        UserDefaults.standard.set(provider, forKey: LegacyNetworkSettings.dohProviderKey)
+        tableView.reloadRows(at: [indexPath], with: .automatic)
+    }
+
+    private func showUserAgentEditor(at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: "Default User Agent",
+            message: "Sent when a source sets no User-Agent. Leave blank to use the app default. Note: MangaDex rejects browser-style user agents.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = LegacyNetworkSettings.builtInUserAgent
+            field.text = LegacyNetworkSettings.hasUserAgentOverride ? LegacyNetworkSettings.defaultUserAgent : ""
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Reset to Default", style: .destructive) { [weak self] _ in
+            UserDefaults.standard.removeObject(forKey: LegacyNetworkSettings.userAgentKey)
+            self?.tableView.reloadRows(at: [indexPath], with: .automatic)
+        })
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            let value = (alert.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.isEmpty {
+                UserDefaults.standard.removeObject(forKey: LegacyNetworkSettings.userAgentKey)
+            } else {
+                UserDefaults.standard.set(value, forKey: LegacyNetworkSettings.userAgentKey)
+            }
+            self?.tableView.reloadRows(at: [indexPath], with: .automatic)
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentSheet(_ alert: UIAlertController, from indexPath: IndexPath) {
         if let popover = alert.popoverPresentationController {
             if let cell = tableView.cellForRow(at: indexPath) {
                 popover.sourceView = cell

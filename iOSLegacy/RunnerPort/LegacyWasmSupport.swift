@@ -121,6 +121,172 @@ final class LegacyTLS13Hosts {
     }
 }
 
+/// User-configurable networking preferences exposed in the legacy Settings screen
+/// (default User-Agent, DNS-over-HTTPS). Stored in `UserDefaults`; read from both
+/// the WASM request path and `LegacyHTTPSClient`.
+enum LegacyNetworkSettings {
+    static let userAgentKey = "AidokuLegacy.network.userAgent"
+    static let dohEnabledKey = "AidokuLegacy.network.dohEnabled"
+    static let dohProviderKey = "AidokuLegacy.network.dohProvider"
+    static let dohCustomURLKey = "AidokuLegacy.network.dohCustomURL"
+
+    /// The User-Agent identifying the app when a source sets none. MangaDex's API
+    /// rejects browser-style UAs (anti-scraping), so this is deliberately a
+    /// non-browser token. See `NetRequest.toUrlRequest`.
+    static var builtInUserAgent: String {
+        let version = Bundle.main
+            .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
+        return "Aidoku/\(version) (iOS 12)"
+    }
+
+    /// The user's override if set and non-empty, otherwise `builtInUserAgent`.
+    static var defaultUserAgent: String {
+        let custom = (UserDefaults.standard.string(forKey: userAgentKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? builtInUserAgent : custom
+    }
+
+    static var hasUserAgentOverride: Bool {
+        !(UserDefaults.standard.string(forKey: userAgentKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static var dohEnabled: Bool { UserDefaults.standard.bool(forKey: dohEnabledKey) }
+
+    /// One of `cloudflare`, `google`, `custom`. Defaults to `cloudflare`.
+    static var dohProvider: String {
+        UserDefaults.standard.string(forKey: dohProviderKey) ?? "cloudflare"
+    }
+
+    static var dohCustomURL: String {
+        (UserDefaults.standard.string(forKey: dohCustomURLKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Human-readable name of the active provider for Settings display.
+    static var dohProviderDisplayName: String {
+        switch dohProvider {
+            case "google": return "Google"
+            case "custom": return dohCustomURL.isEmpty ? "Custom" : dohCustomURL
+            default: return "Cloudflare"
+        }
+    }
+
+    /// The JSON DoH ("dns-json") endpoint to query, or nil when DoH is disabled or
+    /// misconfigured. Cloudflare and Google both expose a JSON API.
+    static var dohQueryBaseURL: String? {
+        guard dohEnabled else { return nil }
+        switch dohProvider {
+            case "google": return "https://dns.google/resolve"
+            case "custom": return dohCustomURL.isEmpty ? nil : dohCustomURL
+            default: return "https://cloudflare-dns.com/dns-query"
+        }
+    }
+}
+
+/// Resolves hostnames over HTTPS (DNS-over-HTTPS, JSON "dns-json" API) so the
+/// OpenSSL request path can avoid plaintext system DNS. iOS 12 has no native DoH,
+/// and `URLSession` requests can't be intercepted, so this only covers the
+/// custom-socket `LegacyHTTPSClient` path (source + cover requests on TLS-1.3
+/// hosts such as MangaDex). When DoH is off, fails, or the host is already a
+/// numeric address, callers fall back to the system resolver.
+enum LegacyDoHResolver {
+    private static let lock = NSLock()
+    private static var cache: [String: (ips: [String], expiry: Date)] = [:]
+
+    /// Ordered connection candidates for `host`: DoH-resolved IPs first (when
+    /// enabled and successful), otherwise the original hostname for system DNS.
+    static func candidates(for host: String) -> [String] {
+        guard !isNumericHost(host),
+              LegacyNetworkSettings.dohEnabled,
+              let base = LegacyNetworkSettings.dohQueryBaseURL else {
+            return [host]
+        }
+        if let ips = resolve(host: host, base: base), !ips.isEmpty {
+            LegacyNetDiagnostics.shared.record(
+                "DoH resolved \(host) -> \(ips.joined(separator: ", ")) via \(LegacyNetworkSettings.dohProviderDisplayName)"
+            )
+            return ips + [host]  // keep hostname as a final fallback
+        }
+        return [host]
+    }
+
+    private static func resolve(host: String, base: String) -> [String]? {
+        lock.lock()
+        if let entry = cache[host], entry.expiry > Date() {
+            let ips = entry.ips
+            lock.unlock()
+            return ips
+        }
+        lock.unlock()
+
+        var ips: [String] = []
+        var ttl = 300
+        for type in ["A", "AAAA"] {
+            let (got, gotTTL) = query(host: host, type: type, base: base)
+            ips.append(contentsOf: got)
+            if let gotTTL = gotTTL { ttl = min(ttl, gotTTL) }
+            // Prefer IPv4; only ask for AAAA if no A record came back.
+            if !ips.isEmpty { break }
+        }
+        guard !ips.isEmpty else { return nil }
+
+        let expiry = Date().addingTimeInterval(TimeInterval(max(30, ttl)))
+        lock.lock(); cache[host] = (ips, expiry); lock.unlock()
+        return ips
+    }
+
+    private static func query(host: String, type: String, base: String) -> ([String], Int?) {
+        guard var components = URLComponents(string: base) else { return ([], nil) }
+        var items = components.queryItems ?? []
+        items.append(URLQueryItem(name: "name", value: host))
+        items.append(URLQueryItem(name: "type", value: type))
+        components.queryItems = items
+        guard let url = components.url else { return ([], nil) }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/dns-json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 8
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var payload: Data?
+        // Use the trust-tolerant session: the resolver host (cloudflare-dns.com,
+        // dns.google) may chain to a root missing from the iOS 12 store.
+        LegacyURLSession.shared.dataTask(with: request) { data, _, _ in
+            payload = data
+            semaphore.signal()
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 9)
+
+        guard let data = payload,
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let answers = json["Answer"] as? [[String: Any]] else {
+            return ([], nil)
+        }
+        let wantedType = (type == "A") ? 1 : 28  // RFC 1035: A=1, AAAA=28
+        var ips: [String] = []
+        var minTTL: Int?
+        for answer in answers {
+            guard let recordType = answer["type"] as? Int, recordType == wantedType,
+                  let value = answer["data"] as? String else { continue }
+            ips.append(value)
+            if let recordTTL = answer["TTL"] as? Int {
+                minTTL = min(minTTL ?? recordTTL, recordTTL)
+            }
+        }
+        return (ips, minTTL)
+    }
+
+    /// True if `host` is already a numeric IPv4/IPv6 literal (no DNS needed).
+    private static func isNumericHost(_ host: String) -> Bool {
+        var v4 = in_addr()
+        if host.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 { return true }
+        var v6 = in6_addr()
+        if host.withCString({ inet_pton(AF_INET6, $0, &v6) }) == 1 { return true }
+        return false
+    }
+}
+
 /// Minimal blocking HTTPS client built on OpenSSL so iOS 12 can reach servers
 /// that only speak TLS 1.3. iOS 12's `URLSession`/Secure Transport caps at TLS
 /// 1.2, so such servers abort the handshake with NSURLErrorDomain -1200 before
@@ -285,19 +451,34 @@ enum LegacyHTTPSClient {
     }
 
     private static func connectSocket(host: String, port: Int, timeout: TimeInterval) throws -> Int32 {
+        // When DoH is enabled, try the HTTPS-resolved IPs first, then fall back to
+        // the hostname via system DNS. The TLS SNI and Host header still use the
+        // original hostname (see `roundTrip`/`buildRequest`), so connecting to a
+        // resolved IP is transparent to the server.
+        for node in LegacyDoHResolver.candidates(for: host) {
+            if let fd = connectResolved(node: node, port: port, timeout: timeout) {
+                return fd
+            }
+        }
+        throw makeError("could not connect to \(host)")
+    }
+
+    /// Resolves a single node (hostname or numeric IP) via `getaddrinfo` and
+    /// returns a connected socket, or nil if resolution/connection fails.
+    private static func connectResolved(node: String, port: Int, timeout: TimeInterval) -> Int32? {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_STREAM
         hints.ai_protocol = IPPROTO_TCP
 
         var info: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, String(port), &hints, &info) == 0, info != nil else {
-            throw makeError("DNS lookup failed for \(host)")
+        guard getaddrinfo(node, String(port), &hints, &info) == 0, info != nil else {
+            return nil
         }
         defer { freeaddrinfo(info) }
 
-        var node = info
-        while let addr = node {
+        var addrNode = info
+        while let addr = addrNode {
             let ai = addr.pointee
             let fd = socket(ai.ai_family, ai.ai_socktype, ai.ai_protocol)
             if fd >= 0 {
@@ -307,9 +488,9 @@ enum LegacyHTTPSClient {
                 }
                 close(fd)
             }
-            node = ai.ai_next
+            addrNode = ai.ai_next
         }
-        throw makeError("could not connect to \(host)")
+        return nil
     }
 
     private static func connectWithTimeout(
@@ -626,11 +807,10 @@ struct NetRequest {
             // non-browser token is accepted (verified: `Aidoku/x` -> 200). Sources
             // that genuinely need a browser UA to clear a Cloudflare JS challenge
             // set one themselves or run through the web view path, which keeps its
-            // browser UA.
-            let appVersion = Bundle.main
-                .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
+            // browser UA. The user can override this default in Settings ›
+            // Networking.
             request.setValue(
-                "Aidoku/\(appVersion) (iOS 12)",
+                LegacyNetworkSettings.defaultUserAgent,
                 forHTTPHeaderField: "User-Agent"
             )
         }
