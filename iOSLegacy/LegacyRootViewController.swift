@@ -15,6 +15,23 @@ import ZIPFoundation
 
 private let aidokuLegacyImageUserAgent = "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 private let aidokuLegacyImageAcceptHeader = "image/avif,image/webp,image/*,*/*;q=0.8"
+
+/// MangaDex's API and upload CDN reject browser-style `Mozilla/...` user agents
+/// with an HTTP 400 (anti-scraping: they require a unique, identifying,
+/// non-browser UA). Covers come from `uploads.mangadex.org`, so a browser image
+/// UA leaves them blank. Other image hosts keep the browser UA — some gate
+/// hotlinking on it. `*.mangadex.network` (reader pages) is intentionally not
+/// matched: it serves over TLS 1.2 and does not gate on UA.
+private func aidokuLegacyIsMangaDexHost(_ host: String?) -> Bool {
+    guard let host = host?.lowercased() else { return false }
+    return host == "mangadex.org" || host.hasSuffix(".mangadex.org")
+}
+
+private func aidokuLegacyResolveImageUserAgent(for url: URL) -> String {
+    guard aidokuLegacyIsMangaDexHost(url.host) else { return aidokuLegacyImageUserAgent }
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
+    return "Aidoku/\(version) (iOS 12)"
+}
 private let aidokuLegacyImageDecodeQueue = DispatchQueue(label: "AidokuLegacy.imageDecode", qos: .utility)
 private var aidokuLegacyLastMemoryPressureDate = Date.distantPast
 
@@ -2811,62 +2828,110 @@ final class LegacyImageLoader {
         fallbackRequests: [URLRequest] = [],
         retriesRemaining: Int = 1,
         completion: @escaping (UIImage?) -> Void
-    ) -> URLSessionDataTask {
-        let task = session.dataTask(with: request) { [weak self] data, response, _ in
-            let image = data.flatMap { data -> UIImage? in
-                if let statusCode = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(statusCode) {
-                    return nil
-                }
-                return autoreleasepool {
-                    self?.makeImage(
-                        from: data,
-                        maxPixelHeight: targetHeight * UIScreen.main.scale,
-                        forceDownsample: forceDownsample
-                    )
-                }
-            }
-            if image == nil, let fallbackRequest = fallbackRequests.first, let self = self {
-                self.session.configuration.urlCache?.removeCachedResponse(for: request)
-                let remainingFallbackRequests = Array(fallbackRequests.dropFirst())
-                self.load(
-                    request: fallbackRequest,
+    ) -> URLSessionDataTask? {
+        // iOS 12 URLSession caps at TLS 1.2, so TLS-1.3-only hosts (notably
+        // uploads.mangadex.org, which serves MangaDex covers) can't be fetched
+        // through it and the image stays blank. Route those through the OpenSSL
+        // client, mirroring the WASM source request path. The OpenSSL fetch is
+        // blocking, so run it off the main thread; it returns no data task.
+        if request.url?.scheme?.lowercased() == "https",
+           LegacyTLS13Hosts.shared.contains(request.url?.host) {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let (data, response, _) = LegacyHTTPSClient.send(request)
+                self?.handleImageResponse(
+                    data: data,
+                    response: response,
+                    request: request,
                     cacheKey: key,
                     targetHeight: targetHeight,
                     forceDownsample: forceDownsample,
-                    fallbackRequests: remainingFallbackRequests,
+                    fallbackRequests: fallbackRequests,
                     retriesRemaining: retriesRemaining,
                     completion: completion
                 )
-                return
             }
-            if image == nil, retriesRemaining > 0, let self = self {
-                self.session.configuration.urlCache?.removeCachedResponse(for: request)
-                var retryRequest = request
-                retryRequest.cachePolicy = .reloadIgnoringLocalCacheData
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.35) {
-                    self.load(
-                        request: retryRequest,
-                        cacheKey: key,
-                        targetHeight: targetHeight,
-                        forceDownsample: forceDownsample,
-                        fallbackRequests: [],
-                        retriesRemaining: retriesRemaining - 1,
-                        completion: completion
-                    )
-                }
-                return
-            }
-            if let image = image {
-                self?.store(image, forKey: key)
-            } else {
-                self?.session.configuration.urlCache?.removeCachedResponse(for: request)
-            }
-            DispatchQueue.main.async {
-                completion(image)
-            }
+            return nil
+        }
+
+        let task = session.dataTask(with: request) { [weak self] data, response, _ in
+            self?.handleImageResponse(
+                data: data,
+                response: response,
+                request: request,
+                cacheKey: key,
+                targetHeight: targetHeight,
+                forceDownsample: forceDownsample,
+                fallbackRequests: fallbackRequests,
+                retriesRemaining: retriesRemaining,
+                completion: completion
+            )
         }
         task.resume()
         return task
+    }
+
+    private func handleImageResponse(
+        data: Data?,
+        response: URLResponse?,
+        request: URLRequest,
+        cacheKey key: NSURL,
+        targetHeight: CGFloat,
+        forceDownsample: Bool,
+        fallbackRequests: [URLRequest],
+        retriesRemaining: Int,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        let image = data.flatMap { data -> UIImage? in
+            if let statusCode = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(statusCode) {
+                return nil
+            }
+            return autoreleasepool {
+                makeImage(
+                    from: data,
+                    maxPixelHeight: targetHeight * UIScreen.main.scale,
+                    forceDownsample: forceDownsample
+                )
+            }
+        }
+        if image == nil, let fallbackRequest = fallbackRequests.first {
+            session.configuration.urlCache?.removeCachedResponse(for: request)
+            let remainingFallbackRequests = Array(fallbackRequests.dropFirst())
+            load(
+                request: fallbackRequest,
+                cacheKey: key,
+                targetHeight: targetHeight,
+                forceDownsample: forceDownsample,
+                fallbackRequests: remainingFallbackRequests,
+                retriesRemaining: retriesRemaining,
+                completion: completion
+            )
+            return
+        }
+        if image == nil, retriesRemaining > 0 {
+            session.configuration.urlCache?.removeCachedResponse(for: request)
+            var retryRequest = request
+            retryRequest.cachePolicy = .reloadIgnoringLocalCacheData
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                self?.load(
+                    request: retryRequest,
+                    cacheKey: key,
+                    targetHeight: targetHeight,
+                    forceDownsample: forceDownsample,
+                    fallbackRequests: [],
+                    retriesRemaining: retriesRemaining - 1,
+                    completion: completion
+                )
+            }
+            return
+        }
+        if let image = image {
+            store(image, forKey: key)
+        } else {
+            session.configuration.urlCache?.removeCachedResponse(for: request)
+        }
+        DispatchQueue.main.async {
+            completion(image)
+        }
     }
 
     private func store(_ image: UIImage, forKey key: NSURL) {
@@ -8266,7 +8331,7 @@ private extension AidokuRunnerLegacyImageRequest {
 private extension URLRequest {
     mutating func applyLegacyImageDefaults(for url: URL) {
         if value(forHTTPHeaderField: "User-Agent") == nil {
-            setValue(aidokuLegacyImageUserAgent, forHTTPHeaderField: "User-Agent")
+            setValue(aidokuLegacyResolveImageUserAgent(for: url), forHTTPHeaderField: "User-Agent")
         }
         if value(forHTTPHeaderField: "Accept") == nil {
             setValue(aidokuLegacyImageAcceptHeader, forHTTPHeaderField: "Accept")
