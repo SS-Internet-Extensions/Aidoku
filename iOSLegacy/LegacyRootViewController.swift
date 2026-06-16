@@ -1622,14 +1622,56 @@ final class LegacyHistoryStore {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
+    // In-memory cache of the decoded, sorted history. `entries` was previously
+    // decoding the entire UserDefaults blob (up to 250 entries, each carrying a
+    // full manga + chapters) and sorting it on every access. `readChapterKeys`
+    // calls it, the library grid's `unreadCount` calls `readChapterKeys` once per
+    // cell, so scrolling the library re-decoded the whole history for every cover
+    // — the main source of scroll jank. Decode once and reuse, mirroring
+    // LegacyLibraryStore.
+    private let cacheLock = NSLock()
+    private var cachedEntries: [LegacyHistoryEntry]?
+
+    init() {
+        // External writers mutate the stored history without going through `save`
+        // but post this notification, so invalidate whenever history changes.
+        NotificationCenter.default.addObserver(
+            forName: .legacyHistoryDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.invalidateCache()
+        }
+    }
+
+    private func invalidateCache() {
+        cacheLock.lock()
+        cachedEntries = nil
+        cacheLock.unlock()
+    }
+
     var entries: [LegacyHistoryEntry] {
-        guard
+        cacheLock.lock()
+        if let cached = cachedEntries {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let decoded: [LegacyHistoryEntry]
+        if
             let data = UserDefaults.standard.data(forKey: defaultsKey),
             let entries = try? decoder.decode([LegacyHistoryEntry].self, from: data)
-        else {
-            return []
+        {
+            decoded = entries.sorted { $0.dateRead > $1.dateRead }
+        } else {
+            decoded = []
         }
-        return entries.sorted { $0.dateRead > $1.dateRead }
+
+        cacheLock.lock()
+        cachedEntries = decoded
+        cacheLock.unlock()
+        return decoded
     }
 
     func update(
