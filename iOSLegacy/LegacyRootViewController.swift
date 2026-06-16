@@ -3243,7 +3243,112 @@ final class LegacyImageLoader {
     }
 }
 
-final class LegacyLibraryViewController: UITableViewController {
+/// A label that draws its text with padding, used for the unread-count badge
+/// drawn over library covers (iOS 12 has no SF Symbols / padded badge view).
+final class LegacyLibraryBadgeLabel: UILabel {
+    var textInsets: UIEdgeInsets = .zero { didSet { invalidateIntrinsicContentSize() } }
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: textInsets))
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(
+            width: size.width + textInsets.left + textInsets.right,
+            height: size.height + textInsets.top + textInsets.bottom
+        )
+    }
+}
+
+/// Mihon-style library grid cell: cover fills the cell, the title is overlaid
+/// at the bottom over a dark gradient, and an unread-count badge sits top-left.
+final class LegacyLibraryGridCell: UICollectionViewCell {
+    static let reuseID = "LibraryGridCell"
+
+    let imageView = UIImageView()
+    var entryKey: String?
+
+    private let titleLabel = UILabel()
+    private let gradientLayer = CAGradientLayer()
+    private let badgeLabel = LegacyLibraryBadgeLabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.clipsToBounds = true
+        contentView.layer.cornerRadius = 6
+        contentView.backgroundColor = LegacyPalette.panel
+
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.backgroundColor = LegacyPalette.panel
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(imageView)
+
+        gradientLayer.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.75).cgColor
+        ]
+        gradientLayer.locations = [0.45, 1]
+        imageView.layer.addSublayer(gradientLayer)
+
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.numberOfLines = 2
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(titleLabel)
+
+        badgeLabel.font = .systemFont(ofSize: 12, weight: .bold)
+        badgeLabel.textColor = .white
+        badgeLabel.backgroundColor = LegacyPalette.accent
+        badgeLabel.layer.cornerRadius = 4
+        badgeLabel.clipsToBounds = true
+        badgeLabel.textInsets = UIEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
+        badgeLabel.isHidden = true
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(badgeLabel)
+
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+
+            badgeLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            badgeLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = imageView.bounds
+    }
+
+    func configure(title: String, unread: Int) {
+        titleLabel.text = title
+        if unread > 0 {
+            badgeLabel.text = "\(unread)"
+            badgeLabel.isHidden = false
+        } else {
+            badgeLabel.isHidden = true
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageView.image = nil
+        entryKey = nil
+        badgeLabel.isHidden = true
+    }
+}
+
+final class LegacyLibraryViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private let searchController = UISearchController(searchResultsController: nil)
     private let automaticUpdateDefaultsKey = "AidokuLegacy.library.automaticUpdates"
@@ -3261,13 +3366,23 @@ final class LegacyLibraryViewController: UITableViewController {
     private var pendingCoverRepairs = Set<String>()
     private var coverRepairAttempts: [String: Int] = [:]
 
+    private var collectionView: UICollectionView!
+    private let gridRefreshControl = UIRefreshControl()
+    private let emptyLabel = UILabel()
+
+    // Category tab bar (hidden when there are no categories).
+    private let tabScrollView = UIScrollView()
+    private let tabStack = UIStackView()
+    private let tabIndicator = UIView()
+    private var tabTitles: [String] = []
+    private var tabHeightConstraint: NSLayoutConstraint!
+    private var tabIndicatorLeading: NSLayoutConstraint?
+    private var tabIndicatorWidth: NSLayoutConstraint?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Library"
         view.backgroundColor = LegacyPalette.background
-        tableView.backgroundColor = LegacyPalette.background
-        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
-        tableView.rowHeight = 94
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = LegacyPalette.accent
 
@@ -3283,8 +3398,9 @@ final class LegacyLibraryViewController: UITableViewController {
             UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateLibraryManually))
         ]
 
-        refreshControl = UIRefreshControl()
-        refreshControl?.addTarget(self, action: #selector(updateLibraryManually), for: .valueChanged)
+        setupTabBar()
+        setupCollectionView()
+
         libraryObserver = NotificationCenter.default.addObserver(
             forName: .legacyLibraryDidChange,
             object: nil,
@@ -3338,46 +3454,81 @@ final class LegacyLibraryViewController: UITableViewController {
         if let activeFilterGroup = activeFilterGroup {
             title = activeFilterGroup.name
         } else {
-            title = activeCategory.map { $0.isEmpty ? "Uncategorized" : $0 } ?? "Library"
+            title = "Library"
         }
-        refreshControl?.endRefreshing()
-        tableView.reloadData()
+        rebuildTabs()
+        gridRefreshControl.endRefreshing()
+        emptyLabel.isHidden = !entries.isEmpty
+        collectionView.reloadData()
     }
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return entries.isEmpty ? 1 : entries.count
+    // MARK: - Collection view
+
+    private func setupCollectionView() {
+        let layout = UICollectionViewFlowLayout()
+        layout.minimumInteritemSpacing = 10
+        layout.minimumLineSpacing = 14
+        layout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.backgroundColor = LegacyPalette.background
+        collectionView.alwaysBounceVertical = true
+        collectionView.keyboardDismissMode = .onDrag
+        collectionView.dataSource = self
+        collectionView.delegate = self
+        collectionView.register(LegacyLibraryGridCell.self, forCellWithReuseIdentifier: LegacyLibraryGridCell.reuseID)
+        collectionView.refreshControl = gridRefreshControl
+        gridRefreshControl.addTarget(self, action: #selector(updateLibraryManually), for: .valueChanged)
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        collectionView.addGestureRecognizer(longPress)
+
+        view.addSubview(collectionView)
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: tabScrollView.bottomAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        emptyLabel.numberOfLines = 0
+        emptyLabel.textAlignment = .center
+        emptyLabel.textColor = LegacyPalette.secondaryText
+        emptyLabel.font = .systemFont(ofSize: 15)
+        emptyLabel.text = "No manga in Library.\nOpen Sources, browse manga, then tap Add."
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(emptyLabel)
+        NSLayoutConstraint.activate([
+            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: collectionView.centerYAnchor),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
+        ])
     }
 
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "LibraryCell")
-            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "LibraryCell")
-        cell.backgroundColor = LegacyPalette.panel
-        cell.textLabel?.textColor = LegacyPalette.primaryText
-        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
-        cell.detailTextLabel?.numberOfLines = 2
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return entries.count
+    }
 
-        guard !entries.isEmpty else {
-            cell.imageView?.image = nil
-            cell.textLabel?.text = "No manga in Library."
-            cell.detailTextLabel?.text = "Open Sources, browse manga, then tap Add."
-            cell.accessoryType = .none
-            cell.selectionStyle = .none
-            return cell
-        }
-
-        let entry = entries[indexPath.row]
-        loadCover(for: entry, into: cell, at: indexPath)
-        cell.textLabel?.text = entry.manga.title
-        cell.detailTextLabel?.text = librarySubtitle(for: entry)
-        cell.accessoryType = .disclosureIndicator
-        cell.selectionStyle = .default
+    func collectionView(
+        _ collectionView: UICollectionView,
+        cellForItemAt indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: LegacyLibraryGridCell.reuseID,
+            for: indexPath
+        ) as! LegacyLibraryGridCell
+        let entry = entries[indexPath.item]
+        cell.entryKey = entry.key
+        cell.configure(title: entry.manga.title, unread: unreadCount(for: entry))
+        loadCover(for: entry, into: cell)
         return cell
     }
 
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        guard !entries.isEmpty else { return }
-        let entry = entries[indexPath.row]
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        guard entries.indices.contains(indexPath.item) else { return }
+        let entry = entries[indexPath.item]
         guard let source = source(for: entry) else {
             showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to open this manga.")
             return
@@ -3388,55 +3539,152 @@ final class LegacyLibraryViewController: UITableViewController {
         )
     }
 
-    override func tableView(
-        _ tableView: UITableView,
-        commit editingStyle: UITableViewCell.EditingStyle,
-        forRowAt indexPath: IndexPath
-    ) {
-        guard editingStyle == .delete, entries.indices.contains(indexPath.row) else { return }
-        let entry = entries[indexPath.row]
-        LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout collectionViewLayout: UICollectionViewLayout,
+        sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+        let columns: CGFloat = 3
+        let insets: CGFloat = 12 * 2
+        let spacing: CGFloat = 10 * (columns - 1)
+        let available = collectionView.bounds.width - insets - spacing
+        let width = max(floor(available / columns), 1)
+        return CGSize(width: width, height: width * 1.5)
     }
 
-    override func tableView(
-        _ tableView: UITableView,
-        editActionsForRowAt indexPath: IndexPath
-    ) -> [UITableViewRowAction]? {
-        guard entries.indices.contains(indexPath.row) else { return nil }
-        let entry = entries[indexPath.row]
-        let remove = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
-            LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
-        }
-        let category = UITableViewRowAction(style: .normal, title: "Categories") { [weak self] _, _ in
+    private func unreadCount(for entry: LegacyLibraryEntry) -> Int {
+        guard let chapters = entry.manga.chapters, !chapters.isEmpty else { return 0 }
+        let readKeys = LegacyHistoryStore.shared.readChapterKeys(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        return chapters.filter { !$0.locked && !readKeys.contains($0.key) }.count
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        let point = gesture.location(in: collectionView)
+        guard
+            let indexPath = collectionView.indexPathForItem(at: point),
+            entries.indices.contains(indexPath.item)
+        else { return }
+        let entry = entries[indexPath.item]
+        let alert = UIAlertController(title: entry.manga.title, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Categories", style: .default) { [weak self] _ in
             self?.showCategoriesPrompt(for: entry)
+        })
+        alert.addAction(UIAlertAction(title: "Remove from Library", style: .destructive) { _ in
+            LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = collectionView
+            popover.sourceRect = CGRect(origin: point, size: .zero)
         }
-        return [remove, category]
+        present(alert, animated: true)
+    }
+
+    // MARK: - Category tabs
+
+    private func setupTabBar() {
+        tabScrollView.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.showsHorizontalScrollIndicator = false
+        tabScrollView.backgroundColor = LegacyPalette.background
+        view.addSubview(tabScrollView)
+
+        tabStack.axis = .horizontal
+        tabStack.alignment = .fill
+        tabStack.spacing = 18
+        tabStack.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.addSubview(tabStack)
+
+        tabIndicator.backgroundColor = LegacyPalette.accent
+        tabIndicator.layer.cornerRadius = 1
+        tabIndicator.isHidden = true
+        tabIndicator.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.addSubview(tabIndicator)
+
+        tabHeightConstraint = tabScrollView.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            tabScrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tabScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tabScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tabHeightConstraint,
+
+            tabStack.topAnchor.constraint(equalTo: tabScrollView.topAnchor),
+            tabStack.bottomAnchor.constraint(equalTo: tabScrollView.bottomAnchor),
+            tabStack.leadingAnchor.constraint(equalTo: tabScrollView.leadingAnchor, constant: 16),
+            tabStack.trailingAnchor.constraint(equalTo: tabScrollView.trailingAnchor, constant: -16),
+            tabStack.heightAnchor.constraint(equalTo: tabScrollView.heightAnchor),
+
+            tabIndicator.heightAnchor.constraint(equalToConstant: 2),
+            tabIndicator.bottomAnchor.constraint(equalTo: tabScrollView.bottomAnchor)
+        ])
+    }
+
+    private func rebuildTabs() {
+        let categories = LegacyCategoryStore.shared.allCategories()
+        let titles = categories.isEmpty ? [] : (["All"] + categories)
+        if titles != tabTitles {
+            tabTitles = titles
+            tabStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            for (index, label) in titles.enumerated() {
+                let button = UIButton(type: .system)
+                button.setTitle(label, for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+                button.tag = index
+                button.addTarget(self, action: #selector(selectTab(_:)), for: .touchUpInside)
+                tabStack.addArrangedSubview(button)
+            }
+        }
+        tabHeightConstraint.constant = titles.isEmpty ? 0 : 44
+        tabScrollView.isHidden = titles.isEmpty
+        updateTabSelection()
+    }
+
+    private var selectedTabIndex: Int? {
+        guard !tabTitles.isEmpty, activeFilterGroup == nil else { return nil }
+        guard let category = activeCategory, !category.isEmpty else { return 0 }
+        return tabTitles.firstIndex { $0.caseInsensitiveCompare(category) == .orderedSame }
+    }
+
+    @objc private func selectTab(_ sender: UIButton) {
+        let index = sender.tag
+        activeFilterGroup = nil
+        if index == 0 {
+            activeCategory = nil
+        } else if tabTitles.indices.contains(index) {
+            activeCategory = tabTitles[index]
+        }
+        reloadData()
+    }
+
+    private func updateTabSelection() {
+        let selected = selectedTabIndex
+        for case let button as UIButton in tabStack.arrangedSubviews {
+            let isSelected = button.tag == selected
+            button.setTitleColor(isSelected ? LegacyPalette.accent : LegacyPalette.secondaryText, for: .normal)
+        }
+        tabIndicatorLeading?.isActive = false
+        tabIndicatorWidth?.isActive = false
+        guard
+            let selected = selected,
+            let button = tabStack.arrangedSubviews.first(where: { ($0 as? UIButton)?.tag == selected })
+        else {
+            tabIndicator.isHidden = true
+            return
+        }
+        tabIndicator.isHidden = false
+        let leading = tabIndicator.leadingAnchor.constraint(equalTo: button.leadingAnchor)
+        let width = tabIndicator.widthAnchor.constraint(equalTo: button.widthAnchor)
+        tabIndicatorLeading = leading
+        tabIndicatorWidth = width
+        NSLayoutConstraint.activate([leading, width])
     }
 
     private func source(for entry: LegacyLibraryEntry) -> AidokuRunnerLegacySource? {
         return sources.first { $0.key == entry.sourceKey }
     }
 
-    private func librarySubtitle(for entry: LegacyLibraryEntry) -> String {
-        var components = [entry.sourceName]
-        let categories = entry.displayCategories
-        if !categories.isEmpty {
-            components.append(categories.joined(separator: ", "))
-        }
-        if let tags = entry.manga.tags, !tags.isEmpty {
-            components.append("Tags: \(tags.prefix(4).joined(separator: ", "))")
-        }
-        let downloadedCount = LegacyDownloadStore.shared.downloadedChapters.filter {
-            $0.sourceKey == entry.sourceKey && $0.manga.key == entry.manga.key
-        }.count
-        if downloadedCount > 0 {
-            components.append("\(downloadedCount) downloaded")
-        }
-        return components.joined(separator: " - ")
-    }
-
-    private func loadCover(for entry: LegacyLibraryEntry, into cell: UITableViewCell, at indexPath: IndexPath) {
-        cell.imageView?.image = LegacyImageLoader.placeholder()
+    private func loadCover(for entry: LegacyLibraryEntry, into cell: LegacyLibraryGridCell) {
+        cell.imageView.image = nil
         guard let source = source(for: entry) else { return }
         let coverURLs = entry.manga.coverURLCandidates(relativeTo: source.urls.first)
         guard !coverURLs.isEmpty else {
@@ -3447,18 +3695,10 @@ final class LegacyLibraryViewController: UITableViewController {
         LegacyImageLoader.shared.loadCover(
             urls: coverURLs,
             source: source,
-            targetHeight: 130
+            targetHeight: 360
         ) { [weak self, weak cell] image in
-            guard
-                let self = self,
-                let cell = cell,
-                let visibleIndexPath = self.tableView.indexPath(for: cell),
-                visibleIndexPath == indexPath,
-                self.entries.indices.contains(indexPath.row),
-                self.entries[indexPath.row].key == entryKey
-            else { return }
-            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
-            cell.setNeedsLayout()
+            guard let self = self, let cell = cell, cell.entryKey == entryKey else { return }
+            cell.imageView.image = image
             if image == nil {
                 LegacyImageLoader.shared.removeCachedImages(for: coverURLs, source: source)
                 self.repairCover(for: entry, source: source)
@@ -3533,9 +3773,9 @@ final class LegacyLibraryViewController: UITableViewController {
             return
         }
         entries[row] = refreshedEntry
-        let indexPath = IndexPath(row: row, section: 0)
-        guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
-        tableView.reloadRows(at: [indexPath], with: .none)
+        let indexPath = IndexPath(item: row, section: 0)
+        guard collectionView.indexPathsForVisibleItems.contains(indexPath) else { return }
+        collectionView.reloadItems(at: [indexPath])
     }
 
     @objc private func openUpdates() {
@@ -3704,7 +3944,7 @@ final class LegacyLibraryViewController: UITableViewController {
         }
         let items = automatic && aidokuLegacyIsLowMemoryMode() ? Array(updateItems.prefix(25)) : updateItems
         guard !items.isEmpty else {
-            refreshControl?.endRefreshing()
+            gridRefreshControl.endRefreshing()
             return
         }
         isUpdatingLibrary = true
@@ -3718,7 +3958,7 @@ final class LegacyLibraryViewController: UITableViewController {
         guard index < items.count else {
             isUpdatingLibrary = false
             navigationItem.prompt = nil
-            refreshControl?.endRefreshing()
+            gridRefreshControl.endRefreshing()
             reloadData()
             LegacyUpdateNotificationManager.shared.notifyLibraryUpdateSummary(
                 updatedMangaCount: updateNewMangaCount,
