@@ -350,6 +350,7 @@ private enum LegacyReaderColorDefaults {
     static let cropBorders = "AidokuLegacy.reader.cropBorders"
     static let animatePageTransitions = "AidokuLegacy.reader.animatePageTransitions"
     static let webtoonSidePadding = "AidokuLegacy.reader.webtoonSidePadding"
+    static let invertTapZones = "AidokuLegacy.reader.invertTapZones"
 }
 
 func aidokuLegacyReaderColorFilterEnabled() -> Bool {
@@ -461,6 +462,105 @@ func aidokuLegacyReaderWebtoonSidePadding() -> CGFloat {
 
 func aidokuLegacySetReaderWebtoonSidePaddingPercent(_ value: Int) {
     UserDefaults.standard.set(min(max(value, 0), 25), forKey: LegacyReaderColorDefaults.webtoonSidePadding)
+}
+
+// MARK: - Reader navigation layout (tap zones)
+
+/// Horizontal tap-zone preset. The legacy reader maps taps to three bands:
+/// a previous zone, a center menu zone, and a next zone.
+enum LegacyReaderNavLayout: String, CaseIterable {
+    case standard
+    case edge
+    case wide
+    case disabled
+
+    static let defaultsKey = "AidokuLegacy.reader.navLayout"
+
+    static var current: LegacyReaderNavLayout {
+        if
+            let raw = UserDefaults.standard.string(forKey: defaultsKey),
+            let value = LegacyReaderNavLayout(rawValue: raw)
+        {
+            return value
+        }
+        return .standard
+    }
+
+    static func setCurrent(_ value: LegacyReaderNavLayout) {
+        UserDefaults.standard.set(value.rawValue, forKey: defaultsKey)
+    }
+
+    var title: String {
+        switch self {
+            case .standard: return "Standard"
+            case .edge: return "Edge"
+            case .wide: return "Large Zones"
+            case .disabled: return "Disabled"
+        }
+    }
+
+    var detail: String {
+        switch self {
+            case .standard: return "Left/right thirds turn pages; center opens the menu."
+            case .edge: return "Small left/right edges turn pages; large center menu."
+            case .wide: return "Large left/right zones; small center menu."
+            case .disabled: return "Tapping only toggles the menu."
+        }
+    }
+
+    /// Right edge of the previous-page zone, as a fraction of width.
+    var previousZoneEnd: CGFloat {
+        switch self {
+            case .standard: return 0.33
+            case .edge: return 0.20
+            case .wide: return 0.42
+            case .disabled: return 0
+        }
+    }
+
+    /// Left edge of the next-page zone, as a fraction of width.
+    var nextZoneStart: CGFloat {
+        switch self {
+            case .standard: return 0.67
+            case .edge: return 0.80
+            case .wide: return 0.58
+            case .disabled: return 1
+        }
+    }
+}
+
+enum LegacyReaderTapAction {
+    case previous
+    case next
+    case menu
+}
+
+func aidokuLegacyReaderInvertTapZones() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.invertTapZones)
+}
+
+func aidokuLegacySetReaderInvertTapZones(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.invertTapZones)
+}
+
+/// Resolves a horizontal tap into a page/menu action for the current nav
+/// layout. `nextOnLeft` is true for right-to-left paging, where the next page
+/// sits on the left.
+func aidokuLegacyReaderTapAction(xFraction: CGFloat, nextOnLeft: Bool) -> LegacyReaderTapAction {
+    let layout = LegacyReaderNavLayout.current
+    if layout == .disabled { return .menu }
+    let inPreviousZone = xFraction < layout.previousZoneEnd
+    let inNextZone = xFraction > layout.nextZoneStart
+    guard inPreviousZone || inNextZone else { return .menu }
+
+    // Base: left zone = previous, right zone = next. RTL paging and the invert
+    // toggle each flip which side advances.
+    var leftIsPrevious = !nextOnLeft
+    if aidokuLegacyReaderInvertTapZones() { leftIsPrevious.toggle() }
+    if inPreviousZone {
+        return leftIsPrevious ? .previous : .next
+    }
+    return leftIsPrevious ? .next : .previous
 }
 
 /// Cache-key fragment so toggling grayscale or crop-borders never serves a
@@ -11163,12 +11263,14 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             return
         }
         let location = recognizer.location(in: view)
-        if location.x < view.bounds.width * 0.33 {
-            movePage(delta: -1)
-        } else if location.x > view.bounds.width * 0.67 {
-            movePage(delta: 1)
-        } else {
-            toggleBars()
+        let fraction = location.x / max(view.bounds.width, 1)
+        switch aidokuLegacyReaderTapAction(xFraction: fraction, nextOnLeft: false) {
+            case .previous:
+                movePage(delta: -1)
+            case .next:
+                movePage(delta: 1)
+            case .menu:
+                toggleBars()
         }
     }
 
@@ -11341,7 +11443,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     private func showTapOverlayIfNeeded() {
-        guard aidokuLegacyReaderShowsTapZones(), !didShowTapOverlay else { return }
+        guard aidokuLegacyReaderShowsTapZones(), LegacyReaderNavLayout.current != .disabled, !didShowTapOverlay else { return }
         didShowTapOverlay = true
         overlayView.showGuide(modeTitle: LegacyReaderMode.current.title)
     }
@@ -12133,14 +12235,15 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             return
         }
         let location = recognizer.location(in: view)
-        // In right-to-left paging the next page sits on the left, so invert the zones.
-        let nextOnLeft = mode == .pagedRTL
-        if location.x < view.bounds.width * 0.33 {
-            movePage(delta: nextOnLeft ? 1 : -1)
-        } else if location.x > view.bounds.width * 0.67 {
-            movePage(delta: nextOnLeft ? -1 : 1)
-        } else {
-            toggleBars()
+        let fraction = location.x / max(view.bounds.width, 1)
+        // In right-to-left paging the next page sits on the left.
+        switch aidokuLegacyReaderTapAction(xFraction: fraction, nextOnLeft: mode == .pagedRTL) {
+            case .previous:
+                movePage(delta: -1)
+            case .next:
+                movePage(delta: 1)
+            case .menu:
+                toggleBars()
         }
     }
 
@@ -12314,7 +12417,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     private func showTapOverlayIfNeeded() {
-        guard aidokuLegacyReaderShowsTapZones(), !didShowTapOverlay else { return }
+        guard aidokuLegacyReaderShowsTapZones(), LegacyReaderNavLayout.current != .disabled, !didShowTapOverlay else { return }
         didShowTapOverlay = true
         overlayView.showGuide(modeTitle: mode.title, nextOnLeft: mode == .pagedRTL)
     }
@@ -12942,6 +13045,8 @@ private final class LegacyReaderToggleCell: UITableViewCell {
 private final class LegacyReaderSettingsViewController: UITableViewController {
     private enum Item {
         case background
+        case navLayout
+        case invertTapZones
         case brightness
         case colorFilterEnabled
         case colorRed
@@ -12992,6 +13097,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
         }
         sections = [
             Section(title: "Background", footer: nil, items: [.background]),
+            Section(
+                title: "Navigation",
+                footer: "How taps turn pages in the reader.",
+                items: [.navLayout, .invertTapZones]
+            ),
             Section(
                 title: "Color Filter",
                 footer: "Tint or dim pages. Blend modes mix the tint with the page color.",
@@ -13054,6 +13164,19 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 let percent = aidokuLegacyReaderWebtoonSidePaddingPercent()
                 cell.textLabel?.text = "Side Padding"
                 cell.detailTextLabel?.text = percent == 0 ? "Off" : "\(percent)%"
+                return cell
+            case .navLayout:
+                let cell = valueCell()
+                cell.textLabel?.text = "Tap Zones Layout"
+                cell.detailTextLabel?.text = LegacyReaderNavLayout.current.title
+                return cell
+            case .invertTapZones:
+                let cell = toggleCell()
+                cell.configure(title: "Invert Tap Zones", subtitle: "Swap the previous/next sides.", isOn: aidokuLegacyReaderInvertTapZones())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderInvertTapZones(isOn)
+                    self?.notifyChange()
+                }
                 return cell
             case .brightness:
                 let cell = sliderCell()
@@ -13156,9 +13279,25 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 presentBlendModePicker(at: indexPath)
             case .sidePadding:
                 presentSidePaddingPicker(at: indexPath)
+            case .navLayout:
+                presentNavLayoutPicker(at: indexPath)
             default:
                 break
         }
+    }
+
+    private func presentNavLayoutPicker(at indexPath: IndexPath) {
+        let alert = UIAlertController(title: "Tap Zones Layout", message: nil, preferredStyle: .actionSheet)
+        for layout in LegacyReaderNavLayout.allCases {
+            let title = layout == LegacyReaderNavLayout.current ? "\(layout.title) (Current)" : layout.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                LegacyReaderNavLayout.setCurrent(layout)
+                self.tableView.reloadRows(at: [indexPath], with: .automatic)
+                self.notifyChange()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
     }
 
     private func presentSidePaddingPicker(at indexPath: IndexPath) {
