@@ -8,6 +8,7 @@
 import UIKit
 import WebKit
 import ImageIO
+import CoreImage
 import SDWebImage
 import SDWebImageWebPCoder
 import avif
@@ -81,8 +82,22 @@ func aidokuLegacyIncognitoEnabled() -> Bool {
     return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.incognito")
 }
 
+/// Applies the opt-in reader image transforms (upscale, grayscale) that must be
+/// baked into the cached bitmap. Cheap color transforms (brightness, color
+/// filter, invert) are applied live as overlay layers instead — see
+/// `LegacyReaderFilterOverlayView`.
 private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIImage {
-    guard aidokuLegacyReaderUpscaleImages() else { return image }
+    var result = image
+    if aidokuLegacyReaderUpscaleImages() {
+        result = aidokuLegacyUpscaleReaderImage(result)
+    }
+    if aidokuLegacyReaderGrayscale() {
+        result = aidokuLegacyGrayscaleReaderImage(result) ?? result
+    }
+    return result
+}
+
+private func aidokuLegacyUpscaleReaderImage(_ image: UIImage) -> UIImage {
     let maxPixelHeight = aidokuLegacyReaderMaxPixelHeight()
     let pixelHeight = image.size.height * image.scale
     let pixelWidth = image.size.width * image.scale
@@ -102,6 +117,23 @@ private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIIma
     let upscaledImage = UIGraphicsGetImageFromCurrentImageContext()
     UIGraphicsEndImageContext()
     return upscaledImage ?? image
+}
+
+/// Shared CoreImage context for reader page transforms. Created lazily so the
+/// GPU context is only allocated when grayscale rendering is actually used.
+private let aidokuLegacyReaderCIContext = CIContext(options: nil)
+
+private func aidokuLegacyGrayscaleReaderImage(_ image: UIImage) -> UIImage? {
+    guard let cgImage = image.cgImage else { return nil }
+    let ciImage = CIImage(cgImage: cgImage)
+    guard let filter = CIFilter(name: "CIColorControls") else { return nil }
+    filter.setValue(ciImage, forKey: kCIInputImageKey)
+    filter.setValue(0, forKey: kCIInputSaturationKey)
+    guard
+        let output = filter.outputImage,
+        let rendered = aidokuLegacyReaderCIContext.createCGImage(output, from: output.extent)
+    else { return nil }
+    return UIImage(cgImage: rendered, scale: image.scale, orientation: image.imageOrientation)
 }
 
 private func aidokuLegacyReaderPrefetchCount() -> Int {
@@ -132,6 +164,194 @@ private func aidokuLegacyReaderShowsPageNumber() -> Bool {
 
 private func aidokuLegacyReaderShowsTapZones() -> Bool {
     return UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.showTapZones")
+}
+
+// MARK: - Reader color & display settings (Mihon parity)
+
+/// Page background shown behind aspect-fit pages and in the gaps between them.
+enum LegacyReaderBackground: String, CaseIterable {
+    case system
+    case white
+    case black
+    case gray
+
+    static let defaultsKey = "AidokuLegacy.reader.backgroundColor"
+
+    static var current: LegacyReaderBackground {
+        if
+            let raw = UserDefaults.standard.string(forKey: defaultsKey),
+            let value = LegacyReaderBackground(rawValue: raw)
+        {
+            return value
+        }
+        return .black
+    }
+
+    static func setCurrent(_ value: LegacyReaderBackground) {
+        UserDefaults.standard.set(value.rawValue, forKey: defaultsKey)
+    }
+
+    var title: String {
+        switch self {
+            case .system: return "Automatic"
+            case .white: return "White"
+            case .black: return "Black"
+            case .gray: return "Gray"
+        }
+    }
+
+    var color: UIColor {
+        switch self {
+            case .system: return LegacyPalette.isDarkTheme ? .black : .white
+            case .white: return .white
+            case .black: return .black
+            case .gray: return UIColor(white: 0.13, alpha: 1)
+        }
+    }
+}
+
+/// Blend mode used to mix the color filter tint with the page underneath.
+enum LegacyReaderBlendMode: String, CaseIterable {
+    case normal
+    case multiply
+    case screen
+    case overlay
+    case lighten
+    case darken
+
+    static let defaultsKey = "AidokuLegacy.reader.colorFilterBlend"
+
+    static var current: LegacyReaderBlendMode {
+        if
+            let raw = UserDefaults.standard.string(forKey: defaultsKey),
+            let value = LegacyReaderBlendMode(rawValue: raw)
+        {
+            return value
+        }
+        return .normal
+    }
+
+    static func setCurrent(_ value: LegacyReaderBlendMode) {
+        UserDefaults.standard.set(value.rawValue, forKey: defaultsKey)
+    }
+
+    var title: String {
+        switch self {
+            case .normal: return "Default"
+            case .multiply: return "Multiply"
+            case .screen: return "Screen"
+            case .overlay: return "Overlay"
+            case .lighten: return "Lighten"
+            case .darken: return "Darken"
+        }
+    }
+
+    /// CoreImage compositing-filter name for the overlay layer. `nil` keeps a
+    /// plain alpha tint (the default blend).
+    var compositingFilterName: String? {
+        switch self {
+            case .normal: return nil
+            case .multiply: return "multiplyBlendMode"
+            case .screen: return "screenBlendMode"
+            case .overlay: return "overlayBlendMode"
+            case .lighten: return "lightenBlendMode"
+            case .darken: return "darkenBlendMode"
+        }
+    }
+}
+
+private enum LegacyReaderColorDefaults {
+    static let colorFilterEnabled = "AidokuLegacy.reader.colorFilterEnabled"
+    static let colorFilterRed = "AidokuLegacy.reader.colorFilterRed"
+    static let colorFilterGreen = "AidokuLegacy.reader.colorFilterGreen"
+    static let colorFilterBlue = "AidokuLegacy.reader.colorFilterBlue"
+    static let colorFilterAlpha = "AidokuLegacy.reader.colorFilterAlpha"
+    static let brightness = "AidokuLegacy.reader.brightness"
+    static let grayscale = "AidokuLegacy.reader.grayscale"
+    static let invert = "AidokuLegacy.reader.invert"
+    static let keepScreenOn = "AidokuLegacy.reader.keepScreenOn"
+}
+
+func aidokuLegacyReaderColorFilterEnabled() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.colorFilterEnabled)
+}
+
+/// Reads a stored 0...255 color channel, returning `defaultValue` when unset.
+private func aidokuLegacyReaderColorComponent(_ key: String, default defaultValue: Int) -> Int {
+    guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
+    return min(max(UserDefaults.standard.integer(forKey: key), 0), 255)
+}
+
+/// Stored color filter as (red, green, blue, alpha) channels in 0...255.
+func aidokuLegacyReaderColorComponents() -> (red: Int, green: Int, blue: Int, alpha: Int) {
+    return (
+        aidokuLegacyReaderColorComponent(LegacyReaderColorDefaults.colorFilterRed, default: 0),
+        aidokuLegacyReaderColorComponent(LegacyReaderColorDefaults.colorFilterGreen, default: 0),
+        aidokuLegacyReaderColorComponent(LegacyReaderColorDefaults.colorFilterBlue, default: 0),
+        aidokuLegacyReaderColorComponent(LegacyReaderColorDefaults.colorFilterAlpha, default: 102)
+    )
+}
+
+func aidokuLegacySetReaderColorComponent(_ key: String, value: Int) {
+    UserDefaults.standard.set(min(max(value, 0), 255), forKey: key)
+}
+
+let aidokuLegacyReaderColorFilterRedKey = LegacyReaderColorDefaults.colorFilterRed
+let aidokuLegacyReaderColorFilterGreenKey = LegacyReaderColorDefaults.colorFilterGreen
+let aidokuLegacyReaderColorFilterBlueKey = LegacyReaderColorDefaults.colorFilterBlue
+let aidokuLegacyReaderColorFilterAlphaKey = LegacyReaderColorDefaults.colorFilterAlpha
+
+func aidokuLegacyReaderColorFilterColor() -> UIColor {
+    let components = aidokuLegacyReaderColorComponents()
+    return UIColor(
+        red: CGFloat(components.red) / 255,
+        green: CGFloat(components.green) / 255,
+        blue: CGFloat(components.blue) / 255,
+        alpha: CGFloat(components.alpha) / 255
+    )
+}
+
+func aidokuLegacySetReaderColorFilterEnabled(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.colorFilterEnabled)
+}
+
+/// Darkening overlay strength, 0 (off) ... 0.9 (darkest).
+func aidokuLegacyReaderBrightness() -> CGFloat {
+    let value = UserDefaults.standard.double(forKey: LegacyReaderColorDefaults.brightness)
+    return CGFloat(min(max(value, 0), 0.9))
+}
+
+func aidokuLegacySetReaderBrightness(_ value: CGFloat) {
+    UserDefaults.standard.set(Double(min(max(value, 0), 0.9)), forKey: LegacyReaderColorDefaults.brightness)
+}
+
+func aidokuLegacyReaderGrayscale() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.grayscale)
+}
+
+func aidokuLegacySetReaderGrayscale(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.grayscale)
+}
+
+func aidokuLegacyReaderInvert() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.invert)
+}
+
+func aidokuLegacySetReaderInvert(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.invert)
+}
+
+func aidokuLegacyReaderKeepScreenOn() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.keepScreenOn)
+}
+
+func aidokuLegacySetReaderKeepScreenOn(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.keepScreenOn)
+}
+
+/// Cache-key fragment so toggling grayscale never serves a stale colored bitmap.
+private func aidokuLegacyReaderImageProcessingSignature() -> String {
+    return aidokuLegacyReaderGrayscale() ? "gray=1" : "gray=0"
 }
 
 private func aidokuLegacyApplicationSupportDirectory() throws -> URL {
@@ -685,7 +905,8 @@ private final class LegacyReaderImagePipeline {
             "\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)",
             contextKey(context),
             "\(Int(aidokuLegacyReaderMaxPixelHeight()))",
-            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0"
+            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0",
+            aidokuLegacyReaderImageProcessingSignature()
         ].joined(separator: "\n")
     }
 
@@ -700,7 +921,8 @@ private final class LegacyReaderImagePipeline {
             url.absoluteString,
             contextKey(context),
             "\(Int(aidokuLegacyReaderMaxPixelHeight()))",
-            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0"
+            aidokuLegacyReaderUpscaleImages() ? "upscale=1" : "upscale=0",
+            aidokuLegacyReaderImageProcessingSignature()
         ].joined(separator: "\n")
     }
 
@@ -839,6 +1061,7 @@ extension Notification.Name {
     static let legacyAppDidEnterBackground = Notification.Name("AidokuLegacyAppDidEnterBackground")
     static let legacyAppWillEnterForeground = Notification.Name("AidokuLegacyAppWillEnterForeground")
     static let legacyMemoryTrimRequested = Notification.Name("AidokuLegacyMemoryTrimRequested")
+    static let legacyReaderColorSettingsDidChange = Notification.Name("AidokuLegacyReaderColorSettingsDidChange")
 }
 
 final class LegacyTabBarController: UITabBarController {
@@ -5167,6 +5390,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case readerUpscale
         case readerPageNumber
         case readerTapZones
+        case readerColors
         case darkTheme
         case incognitoMode
         case clearCookies
@@ -5198,7 +5422,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     }
 
     private let sections: [Section] = [
-        Section(title: "Reader", rows: [.readerMode, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
+        Section(title: "Reader", rows: [.readerMode, .readerColors, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
         Section(title: "Appearance", rows: [.darkTheme]),
         Section(title: "Privacy", rows: [.incognitoMode]),
         Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
@@ -5260,6 +5484,9 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 let mode = LegacyReaderMode.current
                 cell.textLabel?.text = "Reader Layout"
                 cell.detailTextLabel?.text = "\(mode.title) - \(mode.detail)"
+            case .readerColors:
+                cell.textLabel?.text = "Reader Colors & Display"
+                cell.detailTextLabel?.text = "Background, brightness, color filter, grayscale, invert."
             case .readerMemory:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
                 cell.textLabel?.text = "Reader Memory Mode"
@@ -5405,6 +5632,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         switch row {
             case .readerMode:
                 showReaderModePicker(from: indexPath)
+            case .readerColors:
+                navigationController?.pushViewController(LegacyReaderSettingsViewController(), animated: true)
             case .readerMemory:
                 let key = "AidokuLegacy.reader.downsampleImages"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
@@ -8670,6 +8899,7 @@ enum LegacyDetailGlyph {
     case sync
     case chevronDown
     case chevronUp
+    case sliders
 
     func image(size: CGFloat, lineWidth: CGFloat) -> UIImage {
         let canvas = CGSize(width: size, height: size)
@@ -8846,6 +9076,33 @@ enum LegacyDetailGlyph {
                     path.addLine(to: CGPoint(x: m.maxX, y: m.maxY))
                 }
                 path.stroke()
+            case .sliders:
+                // "Tune" icon: three horizontal tracks each with a filled knob.
+                let rows: [CGFloat] = [
+                    r.minY + r.height * 0.20,
+                    r.midY,
+                    r.maxY - r.height * 0.20
+                ]
+                let knobCenters: [CGFloat] = [
+                    r.minX + r.width * 0.66,
+                    r.minX + r.width * 0.34,
+                    r.minX + r.width * 0.58
+                ]
+                let knobRadius = r.width * 0.09
+                for (index, y) in rows.enumerated() {
+                    let track = UIBezierPath()
+                    track.lineWidth = lineWidth
+                    track.move(to: CGPoint(x: r.minX, y: y))
+                    track.addLine(to: CGPoint(x: r.maxX, y: y))
+                    track.stroke()
+                    let knobX = knobCenters[index]
+                    UIBezierPath(ovalIn: CGRect(
+                        x: knobX - knobRadius,
+                        y: y - knobRadius,
+                        width: knobRadius * 2,
+                        height: knobRadius * 2
+                    )).fill()
+                }
         }
     }
 }
@@ -10409,6 +10666,8 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var lastHistorySaveDate = Date.distantPast
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
     private let overlayView = LegacyReaderOverlayView()
+    private let filterOverlayView = LegacyReaderFilterOverlayView()
+    private var appliedGrayscale = aidokuLegacyReaderGrayscale()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -10462,16 +10721,23 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             target: self,
             action: #selector(showCurrentPageActions)
         )
+        let settingsButton = UIBarButtonItem(
+            image: LegacyDetailGlyph.sliders.image(size: 22, lineWidth: 1.8),
+            style: .plain,
+            target: self,
+            action: #selector(showReaderSettings)
+        )
         if aidokuLegacyChapterWebURL(chapter) != nil {
             navigationItem.rightBarButtonItems = [
+                settingsButton,
                 pageButton,
                 UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
             ]
         } else {
-            navigationItem.rightBarButtonItem = pageButton
+            navigationItem.rightBarButtonItems = [settingsButton, pageButton]
         }
         navigationController?.navigationBar.isTranslucent = false
-        tableView.backgroundColor = UIColor.black
+        tableView.backgroundColor = LegacyReaderBackground.current.color
         tableView.separatorStyle = .none
         tableView.register(LegacyPageImageCell.self, forCellReuseIdentifier: "PageImageCell")
         tableView.register(LegacyReaderTransitionTableCell.self, forCellReuseIdentifier: "ReaderTransition")
@@ -10494,6 +10760,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
         updateReaderMode()
         installOverlayIfNeeded()
+        applyReaderColorSettings()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -10518,10 +10785,44 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
         overlayView.removeFromSuperview()
+        filterOverlayView.removeFromSuperview()
+        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     override var prefersStatusBarHidden: Bool {
         return barsHidden
+    }
+
+    @objc private func showReaderSettings() {
+        navigationController?.pushViewController(LegacyReaderSettingsViewController(), animated: true)
+    }
+
+    /// Applies live reader color/display settings: page background, color filter
+    /// overlay, keep-screen-on, and (when grayscale toggles) a cache flush +
+    /// reload so pages re-decode in the new color space.
+    private func applyReaderColorSettings() {
+        let background = LegacyReaderBackground.current.color
+        tableView.backgroundColor = background
+        for case let cell as LegacyPageImageCell in tableView.visibleCells {
+            cell.applyReaderBackground(background)
+        }
+        filterOverlayView.applySettings()
+        UIApplication.shared.isIdleTimerDisabled = aidokuLegacyReaderKeepScreenOn()
+
+        let grayscale = aidokuLegacyReaderGrayscale()
+        if grayscale != appliedGrayscale {
+            appliedGrayscale = grayscale
+            LegacyReaderImagePipeline.shared.clear()
+            let page = currentPageIndex
+            tableView.reloadData()
+            if let page = page, pages.indices.contains(page) {
+                DispatchQueue.main.async {
+                    self.tableView.scrollToRow(at: IndexPath(row: page, section: 0), at: .top, animated: false)
+                    self.currentPageIndex = page
+                    self.updatePageHUD()
+                }
+            }
+        }
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -10887,6 +11188,13 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     }
 
     private func installOverlayIfNeeded() {
+        if let hostView = navigationController?.view ?? view {
+            aidokuLegacyInstallReaderFilterOverlay(
+                filterOverlayView,
+                host: hostView,
+                navigationBar: navigationController?.navigationBar
+            )
+        }
         guard overlayView.superview == nil else { return }
         guard let hostView = navigationController?.view ?? view else { return }
         overlayView.onPageSelected = { [weak self] pageIndex in
@@ -10916,6 +11224,11 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
 
     private func registerAppStateObservers() {
         let center = NotificationCenter.default
+        appStateObservers.append(
+            center.addObserver(forName: .legacyReaderColorSettingsDidChange, object: nil, queue: .main) { [weak self] _ in
+                self?.applyReaderColorSettings()
+            }
+        )
         appStateObservers.append(
             center.addObserver(forName: .legacyMemoryTrimRequested, object: nil, queue: .main) { [weak self] _ in
                 self?.trimReaderMemory(keepCurrentPage: true)
@@ -11169,6 +11482,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var lastHistorySaveDate = Date.distantPast
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
     private let overlayView = LegacyReaderOverlayView()
+    private let filterOverlayView = LegacyReaderFilterOverlayView()
+    private var appliedGrayscale = aidokuLegacyReaderGrayscale()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -11215,16 +11530,23 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             target: self,
             action: #selector(showCurrentPageActions)
         )
+        let settingsButton = UIBarButtonItem(
+            image: LegacyDetailGlyph.sliders.image(size: 22, lineWidth: 1.8),
+            style: .plain,
+            target: self,
+            action: #selector(showReaderSettings)
+        )
         if aidokuLegacyChapterWebURL(chapter) != nil {
             navigationItem.rightBarButtonItems = [
+                settingsButton,
                 pageButton,
                 UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
             ]
         } else {
-            navigationItem.rightBarButtonItem = pageButton
+            navigationItem.rightBarButtonItems = [settingsButton, pageButton]
         }
         navigationController?.navigationBar.isTranslucent = false
-        view.backgroundColor = UIColor.black
+        view.backgroundColor = LegacyReaderBackground.current.color
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
@@ -11233,7 +11555,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.backgroundColor = UIColor.black
+        collectionView.backgroundColor = LegacyReaderBackground.current.color
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.isPagingEnabled = true
@@ -11274,6 +11596,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         enforceReaderContainer()
         navigationController?.setNavigationBarHidden(barsHidden, animated: animated)
         installOverlayIfNeeded()
+        applyReaderColorSettings()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -11298,10 +11621,40 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         navigationController?.setNavigationBarHidden(false, animated: animated)
         tabBarController?.tabBar.isHidden = false
         overlayView.removeFromSuperview()
+        filterOverlayView.removeFromSuperview()
+        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     override var prefersStatusBarHidden: Bool {
         return barsHidden
+    }
+
+    @objc private func showReaderSettings() {
+        navigationController?.pushViewController(LegacyReaderSettingsViewController(), animated: true)
+    }
+
+    private func applyReaderColorSettings() {
+        let background = LegacyReaderBackground.current.color
+        view.backgroundColor = background
+        collectionView.backgroundColor = background
+        for case let cell as LegacyPagedImageCell in collectionView.visibleCells {
+            cell.applyReaderBackground(background)
+        }
+        filterOverlayView.applySettings()
+        UIApplication.shared.isIdleTimerDisabled = aidokuLegacyReaderKeepScreenOn()
+
+        let grayscale = aidokuLegacyReaderGrayscale()
+        if grayscale != appliedGrayscale {
+            appliedGrayscale = grayscale
+            LegacyReaderImagePipeline.shared.clear()
+            let page = currentPageIndex
+            collectionView.reloadData()
+            if let page = page {
+                DispatchQueue.main.async {
+                    self.scrollTo(pageIndex: page, animated: false)
+                }
+            }
+        }
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -11808,6 +12161,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     private func installOverlayIfNeeded() {
+        if let hostView = navigationController?.view ?? view {
+            aidokuLegacyInstallReaderFilterOverlay(
+                filterOverlayView,
+                host: hostView,
+                navigationBar: navigationController?.navigationBar
+            )
+        }
         guard overlayView.superview == nil else { return }
         guard let hostView = navigationController?.view ?? view else { return }
         overlayView.onPageSelected = { [weak self] pageIndex in
@@ -11837,6 +12197,11 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
     private func registerAppStateObservers() {
         let center = NotificationCenter.default
+        appStateObservers.append(
+            center.addObserver(forName: .legacyReaderColorSettingsDidChange, object: nil, queue: .main) { [weak self] _ in
+                self?.applyReaderColorSettings()
+            }
+        )
         appStateObservers.append(
             center.addObserver(forName: .legacyMemoryTrimRequested, object: nil, queue: .main) { [weak self] _ in
                 self?.trimReaderMemory(keepCurrentPage: true)
@@ -12257,6 +12622,465 @@ private final class LegacyReaderTransitionTableCell: UITableViewCell {
     }
 }
 
+/// Full-screen, non-interactive overlay that applies the cheap reader color
+/// effects (brightness dimming, color filter tint, invert) as blended layers
+/// above the page content and below the navigation bar / reader controls.
+private final class LegacyReaderFilterOverlayView: UIView {
+    private let colorTintView = UIView()
+    private let brightnessView = UIView()
+    private let invertView = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        for effect in [colorTintView, brightnessView, invertView] {
+            effect.translatesAutoresizingMaskIntoConstraints = false
+            effect.isUserInteractionEnabled = false
+            effect.isHidden = true
+            addSubview(effect)
+            NSLayoutConstraint.activate([
+                effect.topAnchor.constraint(equalTo: topAnchor),
+                effect.leadingAnchor.constraint(equalTo: leadingAnchor),
+                effect.trailingAnchor.constraint(equalTo: trailingAnchor),
+                effect.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+        }
+        invertView.backgroundColor = .white
+        applySettings()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func applySettings() {
+        if aidokuLegacyReaderColorFilterEnabled() {
+            colorTintView.isHidden = false
+            colorTintView.backgroundColor = aidokuLegacyReaderColorFilterColor()
+            if let blendName = LegacyReaderBlendMode.current.compositingFilterName {
+                colorTintView.layer.compositingFilter = blendName
+            } else {
+                colorTintView.layer.compositingFilter = nil
+            }
+        } else {
+            colorTintView.isHidden = true
+            colorTintView.layer.compositingFilter = nil
+        }
+
+        let brightness = aidokuLegacyReaderBrightness()
+        if brightness > 0.001 {
+            brightnessView.isHidden = false
+            brightnessView.backgroundColor = UIColor(white: 0, alpha: brightness)
+        } else {
+            brightnessView.isHidden = true
+        }
+
+        if aidokuLegacyReaderInvert() {
+            invertView.isHidden = false
+            invertView.layer.compositingFilter = "differenceBlendMode"
+        } else {
+            invertView.isHidden = true
+            invertView.layer.compositingFilter = nil
+        }
+    }
+}
+
+/// Installs the reader color filter overlay into the host view, below the
+/// navigation bar so the bar and reader controls stay un-tinted.
+private func aidokuLegacyInstallReaderFilterOverlay(
+    _ overlay: LegacyReaderFilterOverlayView,
+    host hostView: UIView,
+    navigationBar: UINavigationBar?
+) {
+    guard overlay.superview == nil else { return }
+    overlay.translatesAutoresizingMaskIntoConstraints = false
+    if let navBar = navigationBar, navBar.superview === hostView {
+        hostView.insertSubview(overlay, belowSubview: navBar)
+    } else {
+        hostView.addSubview(overlay)
+    }
+    NSLayoutConstraint.activate([
+        overlay.topAnchor.constraint(equalTo: hostView.topAnchor),
+        overlay.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
+        overlay.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
+        overlay.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
+    ])
+    overlay.applySettings()
+}
+
+/// A labeled slider row used by the reader settings screen.
+private final class LegacyReaderSliderCell: UITableViewCell {
+    private let titleLabel = UILabel()
+    private let valueLabel = UILabel()
+    private let slider = UISlider()
+    var onChange: ((Float) -> Void)?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = LegacyPalette.panel
+        selectionStyle = .none
+        titleLabel.font = .systemFont(ofSize: 15)
+        titleLabel.textColor = LegacyPalette.primaryText
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.font = .systemFont(ofSize: 13)
+        valueLabel.textColor = LegacyPalette.secondaryText
+        valueLabel.textAlignment = .right
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(titleLabel)
+        contentView.addSubview(valueLabel)
+        contentView.addSubview(slider)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
+            valueLabel.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            valueLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 8),
+            slider.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            slider.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            slider.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            slider.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
+        ])
+        slider.addTarget(self, action: #selector(sliderChanged), for: .valueChanged)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(
+        title: String,
+        value: Float,
+        minimumValue: Float,
+        maximumValue: Float,
+        tint: UIColor,
+        display: @escaping (Float) -> String
+    ) {
+        titleLabel.text = title
+        slider.minimumValue = minimumValue
+        slider.maximumValue = maximumValue
+        slider.value = value
+        slider.minimumTrackTintColor = tint
+        valueLabel.text = display(value)
+        self.display = display
+    }
+
+    private var display: ((Float) -> String)?
+
+    @objc private func sliderChanged() {
+        valueLabel.text = display?(slider.value)
+        onChange?(slider.value)
+    }
+}
+
+/// A labeled switch row used by the reader settings screen.
+private final class LegacyReaderToggleCell: UITableViewCell {
+    private let toggle = UISwitch()
+    var onToggle: ((Bool) -> Void)?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
+        backgroundColor = LegacyPalette.panel
+        textLabel?.textColor = LegacyPalette.primaryText
+        detailTextLabel?.textColor = LegacyPalette.secondaryText
+        detailTextLabel?.numberOfLines = 0
+        selectionStyle = .none
+        toggle.onTintColor = LegacyPalette.accent
+        toggle.addTarget(self, action: #selector(toggled), for: .valueChanged)
+        accessoryView = toggle
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(title: String, subtitle: String?, isOn: Bool) {
+        textLabel?.text = title
+        detailTextLabel?.text = subtitle
+        toggle.isOn = isOn
+    }
+
+    @objc private func toggled() {
+        onToggle?(toggle.isOn)
+    }
+}
+
+/// Mihon-style in-reader settings: page background, brightness, color filter
+/// (RGBA + blend mode), grayscale, invert, page number, tap zones, keep screen on.
+private final class LegacyReaderSettingsViewController: UITableViewController {
+    private enum Item {
+        case background
+        case brightness
+        case colorFilterEnabled
+        case colorRed
+        case colorGreen
+        case colorBlue
+        case colorAlpha
+        case blendMode
+        case grayscale
+        case invert
+        case pageNumber
+        case tapZones
+        case keepScreenOn
+    }
+
+    private struct Section {
+        let title: String?
+        let footer: String?
+        let items: [Item]
+    }
+
+    private var sections: [Section] = []
+
+    init() {
+        super.init(style: .grouped)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Reader Settings"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        navigationController?.navigationBar.tintColor = LegacyPalette.accent
+        rebuildSections(reload: false)
+    }
+
+    private func rebuildSections(reload: Bool) {
+        var colorItems: [Item] = [.brightness, .colorFilterEnabled]
+        if aidokuLegacyReaderColorFilterEnabled() {
+            colorItems += [.colorRed, .colorGreen, .colorBlue, .colorAlpha, .blendMode]
+        }
+        sections = [
+            Section(title: "Background", footer: nil, items: [.background]),
+            Section(
+                title: "Color Filter",
+                footer: "Tint or dim pages. Blend modes mix the tint with the page color.",
+                items: colorItems
+            ),
+            Section(
+                title: "Display",
+                footer: "Grayscale re-decodes pages and uses more CPU.",
+                items: [.grayscale, .invert, .pageNumber, .tapZones, .keepScreenOn]
+            )
+        ]
+        if reload {
+            tableView.reloadData()
+        }
+    }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(name: .legacyReaderColorSettingsDidChange, object: nil)
+    }
+
+    private func item(at indexPath: IndexPath) -> Item {
+        return sections[indexPath.section].items[indexPath.row]
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return sections[section].items.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return sections[section].title
+    }
+
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        return sections[section].footer
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        switch item(at: indexPath) {
+            case .background:
+                let cell = valueCell()
+                cell.textLabel?.text = "Page Background"
+                cell.detailTextLabel?.text = LegacyReaderBackground.current.title
+                return cell
+            case .blendMode:
+                let cell = valueCell()
+                cell.textLabel?.text = "Blend Mode"
+                cell.detailTextLabel?.text = LegacyReaderBlendMode.current.title
+                return cell
+            case .brightness:
+                let cell = sliderCell()
+                cell.configure(
+                    title: "Brightness",
+                    value: Float(aidokuLegacyReaderBrightness()),
+                    minimumValue: 0,
+                    maximumValue: 0.9,
+                    tint: LegacyPalette.accent,
+                    display: { $0 < 0.005 ? "Off" : "\(Int(($0 / 0.9) * 100))%" }
+                )
+                cell.onChange = { [weak self] value in
+                    aidokuLegacySetReaderBrightness(CGFloat(value))
+                    self?.notifyChange()
+                }
+                return cell
+            case .colorRed:
+                return colorSliderCell(title: "Red", key: aidokuLegacyReaderColorFilterRedKey, value: aidokuLegacyReaderColorComponents().red, tint: UIColor(red: 0.85, green: 0.2, blue: 0.2, alpha: 1))
+            case .colorGreen:
+                return colorSliderCell(title: "Green", key: aidokuLegacyReaderColorFilterGreenKey, value: aidokuLegacyReaderColorComponents().green, tint: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1))
+            case .colorBlue:
+                return colorSliderCell(title: "Blue", key: aidokuLegacyReaderColorFilterBlueKey, value: aidokuLegacyReaderColorComponents().blue, tint: UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1))
+            case .colorAlpha:
+                return colorSliderCell(title: "Strength", key: aidokuLegacyReaderColorFilterAlphaKey, value: aidokuLegacyReaderColorComponents().alpha, tint: LegacyPalette.accent)
+            case .colorFilterEnabled:
+                let cell = toggleCell()
+                cell.configure(title: "Color Filter", subtitle: nil, isOn: aidokuLegacyReaderColorFilterEnabled())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderColorFilterEnabled(isOn)
+                    self?.rebuildSections(reload: false)
+                    self?.tableView.reloadSections(IndexSet(integer: 1), with: .automatic)
+                    self?.notifyChange()
+                }
+                return cell
+            case .grayscale:
+                let cell = toggleCell()
+                cell.configure(title: "Grayscale", subtitle: "Show pages in black and white.", isOn: aidokuLegacyReaderGrayscale())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderGrayscale(isOn)
+                    self?.notifyChange()
+                }
+                return cell
+            case .invert:
+                let cell = toggleCell()
+                cell.configure(title: "Invert Colors", subtitle: "Invert page colors (useful for dark scans).", isOn: aidokuLegacyReaderInvert())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderInvert(isOn)
+                    self?.notifyChange()
+                }
+                return cell
+            case .pageNumber:
+                let cell = toggleCell()
+                cell.configure(title: "Page Number", subtitle: "Show the page count in the reader.", isOn: aidokuLegacyReaderShowsPageNumber())
+                cell.onToggle = { [weak self] isOn in
+                    UserDefaults.standard.set(isOn, forKey: "AidokuLegacy.reader.showPageNumber")
+                    self?.notifyChange()
+                }
+                return cell
+            case .tapZones:
+                let cell = toggleCell()
+                cell.configure(title: "Tap Zones Overlay", subtitle: "Briefly show previous and next tap zones.", isOn: aidokuLegacyReaderShowsTapZones())
+                cell.onToggle = { [weak self] isOn in
+                    UserDefaults.standard.set(isOn, forKey: "AidokuLegacy.reader.showTapZones")
+                    self?.notifyChange()
+                }
+                return cell
+            case .keepScreenOn:
+                let cell = toggleCell()
+                cell.configure(title: "Keep Screen On", subtitle: "Prevent the screen from sleeping while reading.", isOn: aidokuLegacyReaderKeepScreenOn())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderKeepScreenOn(isOn)
+                    self?.notifyChange()
+                }
+                return cell
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        switch item(at: indexPath) {
+            case .background:
+                presentBackgroundPicker(at: indexPath)
+            case .blendMode:
+                presentBlendModePicker(at: indexPath)
+            default:
+                break
+        }
+    }
+
+    private func presentBackgroundPicker(at indexPath: IndexPath) {
+        let alert = UIAlertController(title: "Page Background", message: nil, preferredStyle: .actionSheet)
+        for option in LegacyReaderBackground.allCases {
+            let title = option == LegacyReaderBackground.current ? "\(option.title) (Current)" : option.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                LegacyReaderBackground.setCurrent(option)
+                self.tableView.reloadRows(at: [indexPath], with: .automatic)
+                self.notifyChange()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
+    }
+
+    private func presentBlendModePicker(at indexPath: IndexPath) {
+        let alert = UIAlertController(title: "Blend Mode", message: nil, preferredStyle: .actionSheet)
+        for option in LegacyReaderBlendMode.allCases {
+            let title = option == LegacyReaderBlendMode.current ? "\(option.title) (Current)" : option.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                LegacyReaderBlendMode.setCurrent(option)
+                self.tableView.reloadRows(at: [indexPath], with: .automatic)
+                self.notifyChange()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
+    }
+
+    private func presentSheet(_ alert: UIAlertController, at indexPath: IndexPath) {
+        if let popover = alert.popoverPresentationController {
+            if let cell = tableView.cellForRow(at: indexPath) {
+                popover.sourceView = cell
+                popover.sourceRect = cell.bounds
+            } else {
+                popover.sourceView = tableView
+                popover.sourceRect = tableView.rectForRow(at: indexPath)
+            }
+        }
+        present(alert, animated: true)
+    }
+
+    private func valueCell() -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "value")
+            ?? UITableViewCell(style: .value1, reuseIdentifier: "value")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    private func sliderCell() -> LegacyReaderSliderCell {
+        return (tableView.dequeueReusableCell(withIdentifier: "slider") as? LegacyReaderSliderCell)
+            ?? LegacyReaderSliderCell(style: .default, reuseIdentifier: "slider")
+    }
+
+    private func toggleCell() -> LegacyReaderToggleCell {
+        return (tableView.dequeueReusableCell(withIdentifier: "toggle") as? LegacyReaderToggleCell)
+            ?? LegacyReaderToggleCell(style: .subtitle, reuseIdentifier: "toggle")
+    }
+
+    private func colorSliderCell(title: String, key: String, value: Int, tint: UIColor) -> LegacyReaderSliderCell {
+        let cell = sliderCell()
+        cell.configure(
+            title: title,
+            value: Float(value),
+            minimumValue: 0,
+            maximumValue: 255,
+            tint: tint,
+            display: { "\(Int($0.rounded()))" }
+        )
+        cell.onChange = { [weak self] newValue in
+            aidokuLegacySetReaderColorComponent(key, value: Int(newValue.rounded()))
+            self?.notifyChange()
+        }
+        return cell
+    }
+}
+
 private final class LegacyReaderOverlayView: UIView {
     private static let prevZoneColor = UIColor.orange.withAlphaComponent(0.55)
     private static let nextZoneColor = UIColor.green.withAlphaComponent(0.50)
@@ -12616,11 +13440,12 @@ private final class LegacyPageImageCell: UITableViewCell {
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
-        backgroundColor = UIColor.black
+        let readerBackground = LegacyReaderBackground.current.color
+        backgroundColor = readerBackground
         selectionStyle = .none
         pageImageView.translatesAutoresizingMaskIntoConstraints = false
         pageImageView.contentMode = .scaleAspectFit
-        pageImageView.backgroundColor = UIColor.black
+        pageImageView.backgroundColor = readerBackground
         pageLabel.translatesAutoresizingMaskIntoConstraints = false
         pageLabel.textColor = UIColor.white
         pageLabel.textAlignment = .center
@@ -12656,6 +13481,11 @@ private final class LegacyPageImageCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func applyReaderBackground(_ color: UIColor) {
+        backgroundColor = color
+        pageImageView.backgroundColor = color
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         releaseDecodedImage()
@@ -12668,6 +13498,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         fitsViewport = false
         heightConstraint.constant = 420
         onHeightChange = nil
+        applyReaderBackground(LegacyReaderBackground.current.color)
     }
 
     var currentLoadID: UUID {
@@ -13127,11 +13958,12 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor.black
-        contentView.backgroundColor = UIColor.black
+        let readerBackground = LegacyReaderBackground.current.color
+        backgroundColor = readerBackground
+        contentView.backgroundColor = readerBackground
         pageImageView.translatesAutoresizingMaskIntoConstraints = false
         pageImageView.contentMode = .scaleAspectFit
-        pageImageView.backgroundColor = UIColor.black
+        pageImageView.backgroundColor = readerBackground
         pageLabel.translatesAutoresizingMaskIntoConstraints = false
         pageLabel.textColor = UIColor.white
         pageLabel.textAlignment = .center
@@ -13166,6 +13998,12 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func applyReaderBackground(_ color: UIColor) {
+        backgroundColor = color
+        contentView.backgroundColor = color
+        pageImageView.backgroundColor = color
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         releaseDecodedImage()
@@ -13174,6 +14012,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         representedPage = nil
         representedSource = nil
         pageImageView.isHidden = false
+        applyReaderBackground(LegacyReaderBackground.current.color)
     }
 
     var currentLoadID: UUID {
