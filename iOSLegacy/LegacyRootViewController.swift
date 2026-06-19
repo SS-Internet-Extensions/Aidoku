@@ -91,10 +91,87 @@ private func aidokuLegacyPrepareReaderImageForDisplay(_ image: UIImage) -> UIIma
     if aidokuLegacyReaderUpscaleImages() {
         result = aidokuLegacyUpscaleReaderImage(result)
     }
+    if aidokuLegacyReaderCropBorders() {
+        result = aidokuLegacyCropBordersReaderImage(result) ?? result
+    }
     if aidokuLegacyReaderGrayscale() {
         result = aidokuLegacyGrayscaleReaderImage(result) ?? result
     }
     return result
+}
+
+/// Trims uniform (solid-color) margins around a page. Detection runs on a
+/// downscaled copy to keep memory/CPU low on iPad Air 1-class devices; the
+/// resulting crop ratios are mapped back onto the full-resolution image.
+private func aidokuLegacyCropBordersReaderImage(_ image: UIImage) -> UIImage? {
+    guard let cgImage = image.cgImage else { return nil }
+    let fullWidth = cgImage.width
+    let fullHeight = cgImage.height
+    guard fullWidth > 16, fullHeight > 16 else { return nil }
+
+    let maxScanDimension = 320
+    let scanScale = min(1.0, Double(maxScanDimension) / Double(max(fullWidth, fullHeight)))
+    let scanWidth = max(8, Int(Double(fullWidth) * scanScale))
+    let scanHeight = max(8, Int(Double(fullHeight) * scanScale))
+    let bytesPerPixel = 4
+    let bytesPerRow = scanWidth * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: scanWidth * scanHeight * bytesPerPixel)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let context = CGContext(
+        data: &pixels,
+        width: scanWidth,
+        height: scanHeight,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    // Flip so buffer row 0 == top of the image, matching CGImage crop coords.
+    context.translateBy(x: 0, y: CGFloat(scanHeight))
+    context.scaleBy(x: 1, y: -1)
+    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: scanWidth, height: scanHeight))
+
+    func luma(_ x: Int, _ y: Int) -> Int {
+        let offset = y * bytesPerRow + x * bytesPerPixel
+        return (Int(pixels[offset]) * 299 + Int(pixels[offset + 1]) * 587 + Int(pixels[offset + 2]) * 114) / 1000
+    }
+    let corners = [luma(0, 0), luma(scanWidth - 1, 0), luma(0, scanHeight - 1), luma(scanWidth - 1, scanHeight - 1)]
+    let background = corners.reduce(0, +) / corners.count
+    let threshold = 28
+
+    func rowHasContent(_ y: Int) -> Bool {
+        for x in 0..<scanWidth where abs(luma(x, y) - background) > threshold { return true }
+        return false
+    }
+    func columnHasContent(_ x: Int) -> Bool {
+        for y in 0..<scanHeight where abs(luma(x, y) - background) > threshold { return true }
+        return false
+    }
+
+    var top = 0
+    while top < scanHeight - 1, !rowHasContent(top) { top += 1 }
+    var bottom = scanHeight - 1
+    while bottom > top, !rowHasContent(bottom) { bottom -= 1 }
+    var left = 0
+    while left < scanWidth - 1, !columnHasContent(left) { left += 1 }
+    var right = scanWidth - 1
+    while right > left, !columnHasContent(right) { right -= 1 }
+
+    let cropX = Int(Double(left) / Double(scanWidth) * Double(fullWidth))
+    let cropY = Int(Double(top) / Double(scanHeight) * Double(fullHeight))
+    let cropRight = Int(Double(right + 1) / Double(scanWidth) * Double(fullWidth))
+    let cropBottom = Int(Double(bottom + 1) / Double(scanHeight) * Double(fullHeight))
+    let cropWidth = cropRight - cropX
+    let cropHeight = cropBottom - cropY
+
+    // Bail out on no-op or implausibly aggressive crops (near-uniform pages).
+    guard cropWidth > fullWidth / 3, cropHeight > fullHeight / 3 else { return image }
+    guard cropWidth < fullWidth || cropHeight < fullHeight else { return image }
+
+    guard let cropped = cgImage.cropping(to: CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)) else {
+        return nil
+    }
+    return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
 }
 
 private func aidokuLegacyUpscaleReaderImage(_ image: UIImage) -> UIImage {
@@ -270,6 +347,8 @@ private enum LegacyReaderColorDefaults {
     static let grayscale = "AidokuLegacy.reader.grayscale"
     static let invert = "AidokuLegacy.reader.invert"
     static let keepScreenOn = "AidokuLegacy.reader.keepScreenOn"
+    static let cropBorders = "AidokuLegacy.reader.cropBorders"
+    static let animatePageTransitions = "AidokuLegacy.reader.animatePageTransitions"
 }
 
 func aidokuLegacyReaderColorFilterEnabled() -> Bool {
@@ -349,9 +428,32 @@ func aidokuLegacySetReaderKeepScreenOn(_ enabled: Bool) {
     UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.keepScreenOn)
 }
 
-/// Cache-key fragment so toggling grayscale never serves a stale colored bitmap.
+func aidokuLegacyReaderCropBorders() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.cropBorders)
+}
+
+func aidokuLegacySetReaderCropBorders(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.cropBorders)
+}
+
+/// Whether tap-driven page jumps animate. Defaults to true.
+func aidokuLegacyReaderAnimatePageTransitions() -> Bool {
+    guard UserDefaults.standard.object(forKey: LegacyReaderColorDefaults.animatePageTransitions) != nil else {
+        return true
+    }
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.animatePageTransitions)
+}
+
+func aidokuLegacySetReaderAnimatePageTransitions(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.animatePageTransitions)
+}
+
+/// Cache-key fragment so toggling grayscale or crop-borders never serves a
+/// stale bitmap, and so the reader can detect a re-decode is needed.
 private func aidokuLegacyReaderImageProcessingSignature() -> String {
-    return aidokuLegacyReaderGrayscale() ? "gray=1" : "gray=0"
+    let grayscale = aidokuLegacyReaderGrayscale() ? "1" : "0"
+    let crop = aidokuLegacyReaderCropBorders() ? "1" : "0"
+    return "gray=\(grayscale),crop=\(crop)"
 }
 
 private func aidokuLegacyApplicationSupportDirectory() throws -> URL {
@@ -10667,7 +10769,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
     private let overlayView = LegacyReaderOverlayView()
     private let filterOverlayView = LegacyReaderFilterOverlayView()
-    private var appliedGrayscale = aidokuLegacyReaderGrayscale()
+    private var appliedImageSignature = aidokuLegacyReaderImageProcessingSignature()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -10809,9 +10911,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         filterOverlayView.applySettings()
         UIApplication.shared.isIdleTimerDisabled = aidokuLegacyReaderKeepScreenOn()
 
-        let grayscale = aidokuLegacyReaderGrayscale()
-        if grayscale != appliedGrayscale {
-            appliedGrayscale = grayscale
+        let signature = aidokuLegacyReaderImageProcessingSignature()
+        if signature != appliedImageSignature {
+            appliedImageSignature = signature
             LegacyReaderImagePipeline.shared.clear()
             let page = currentPageIndex
             tableView.reloadData()
@@ -11172,7 +11274,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             overlayView.showGuide(modeTitle: LegacyReaderMode.current.title)
             return
         }
-        tableView.scrollToRow(at: IndexPath(row: next, section: 0), at: .top, animated: true)
+        tableView.scrollToRow(at: IndexPath(row: next, section: 0), at: .top, animated: aidokuLegacyReaderAnimatePageTransitions())
         currentPageIndex = next
         recordHistory(pageIndex: next, force: false)
         updatePageHUD()
@@ -11483,7 +11585,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var pendingHistorySaveWorkItem: DispatchWorkItem?
     private let overlayView = LegacyReaderOverlayView()
     private let filterOverlayView = LegacyReaderFilterOverlayView()
-    private var appliedGrayscale = aidokuLegacyReaderGrayscale()
+    private var appliedImageSignature = aidokuLegacyReaderImageProcessingSignature()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -11643,9 +11745,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         filterOverlayView.applySettings()
         UIApplication.shared.isIdleTimerDisabled = aidokuLegacyReaderKeepScreenOn()
 
-        let grayscale = aidokuLegacyReaderGrayscale()
-        if grayscale != appliedGrayscale {
-            appliedGrayscale = grayscale
+        let signature = aidokuLegacyReaderImageProcessingSignature()
+        if signature != appliedImageSignature {
+            appliedImageSignature = signature
             LegacyReaderImagePipeline.shared.clear()
             let page = currentPageIndex
             collectionView.reloadData()
@@ -12145,7 +12247,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             overlayView.showGuide(modeTitle: mode.title, nextOnLeft: mode == .pagedRTL)
             return
         }
-        scrollTo(pageIndex: next, animated: true)
+        scrollTo(pageIndex: next, animated: aidokuLegacyReaderAnimatePageTransitions())
         currentPageIndex = next
         recordHistory(pageIndex: next, force: false)
         updatePageHUD()
@@ -12823,8 +12925,10 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
         case blendMode
         case grayscale
         case invert
+        case cropBorders
         case pageNumber
         case tapZones
+        case pageTransitions
         case keepScreenOn
     }
 
@@ -12868,8 +12972,8 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
             ),
             Section(
                 title: "Display",
-                footer: "Grayscale re-decodes pages and uses more CPU.",
-                items: [.grayscale, .invert, .pageNumber, .tapZones, .keepScreenOn]
+                footer: "Grayscale and crop borders re-decode pages and use more CPU.",
+                items: [.grayscale, .invert, .cropBorders, .pageNumber, .tapZones, .pageTransitions, .keepScreenOn]
             )
         ]
         if reload {
@@ -12962,6 +13066,14 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                     self?.notifyChange()
                 }
                 return cell
+            case .cropBorders:
+                let cell = toggleCell()
+                cell.configure(title: "Crop Borders", subtitle: "Trim solid margins around each page.", isOn: aidokuLegacyReaderCropBorders())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderCropBorders(isOn)
+                    self?.notifyChange()
+                }
+                return cell
             case .pageNumber:
                 let cell = toggleCell()
                 cell.configure(title: "Page Number", subtitle: "Show the page count in the reader.", isOn: aidokuLegacyReaderShowsPageNumber())
@@ -12975,6 +13087,14 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 cell.configure(title: "Tap Zones Overlay", subtitle: "Briefly show previous and next tap zones.", isOn: aidokuLegacyReaderShowsTapZones())
                 cell.onToggle = { [weak self] isOn in
                     UserDefaults.standard.set(isOn, forKey: "AidokuLegacy.reader.showTapZones")
+                    self?.notifyChange()
+                }
+                return cell
+            case .pageTransitions:
+                let cell = toggleCell()
+                cell.configure(title: "Animate Page Transitions", subtitle: "Slide when tapping to the next or previous page.", isOn: aidokuLegacyReaderAnimatePageTransitions())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderAnimatePageTransitions(isOn)
                     self?.notifyChange()
                 }
                 return cell
