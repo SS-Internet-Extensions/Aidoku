@@ -349,6 +349,7 @@ private enum LegacyReaderColorDefaults {
     static let keepScreenOn = "AidokuLegacy.reader.keepScreenOn"
     static let cropBorders = "AidokuLegacy.reader.cropBorders"
     static let animatePageTransitions = "AidokuLegacy.reader.animatePageTransitions"
+    static let webtoonSidePadding = "AidokuLegacy.reader.webtoonSidePadding"
 }
 
 func aidokuLegacyReaderColorFilterEnabled() -> Bool {
@@ -446,6 +447,20 @@ func aidokuLegacyReaderAnimatePageTransitions() -> Bool {
 
 func aidokuLegacySetReaderAnimatePageTransitions(_ enabled: Bool) {
     UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.animatePageTransitions)
+}
+
+/// Per-side webtoon padding as a percentage (0...25) of the strip width.
+/// Applies only to the vertical-scroll reader.
+func aidokuLegacyReaderWebtoonSidePaddingPercent() -> Int {
+    return min(max(UserDefaults.standard.integer(forKey: LegacyReaderColorDefaults.webtoonSidePadding), 0), 25)
+}
+
+func aidokuLegacyReaderWebtoonSidePadding() -> CGFloat {
+    return CGFloat(aidokuLegacyReaderWebtoonSidePaddingPercent()) / 100
+}
+
+func aidokuLegacySetReaderWebtoonSidePaddingPercent(_ value: Int) {
+    UserDefaults.standard.set(min(max(value, 0), 25), forKey: LegacyReaderColorDefaults.webtoonSidePadding)
 }
 
 /// Cache-key fragment so toggling grayscale or crop-borders never serves a
@@ -10770,6 +10785,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private let overlayView = LegacyReaderOverlayView()
     private let filterOverlayView = LegacyReaderFilterOverlayView()
     private var appliedImageSignature = aidokuLegacyReaderImageProcessingSignature()
+    private var appliedSidePaddingPercent = aidokuLegacyReaderWebtoonSidePaddingPercent()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -10915,14 +10931,24 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         if signature != appliedImageSignature {
             appliedImageSignature = signature
             LegacyReaderImagePipeline.shared.clear()
-            let page = currentPageIndex
-            tableView.reloadData()
-            if let page = page, pages.indices.contains(page) {
-                DispatchQueue.main.async {
-                    self.tableView.scrollToRow(at: IndexPath(row: page, section: 0), at: .top, animated: false)
-                    self.currentPageIndex = page
-                    self.updatePageHUD()
-                }
+            reloadPreservingCurrentPage()
+        }
+
+        let sidePadding = aidokuLegacyReaderWebtoonSidePaddingPercent()
+        if sidePadding != appliedSidePaddingPercent {
+            appliedSidePaddingPercent = sidePadding
+            reloadPreservingCurrentPage()
+        }
+    }
+
+    private func reloadPreservingCurrentPage() {
+        let page = currentPageIndex
+        tableView.reloadData()
+        if let page = page, pages.indices.contains(page) {
+            DispatchQueue.main.async {
+                self.tableView.scrollToRow(at: IndexPath(row: page, section: 0), at: .top, animated: false)
+                self.currentPageIndex = page
+                self.updatePageHUD()
             }
         }
     }
@@ -12930,6 +12956,7 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
         case tapZones
         case pageTransitions
         case keepScreenOn
+        case sidePadding
     }
 
     private struct Section {
@@ -12974,6 +13001,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 title: "Display",
                 footer: "Grayscale and crop borders re-decode pages and use more CPU.",
                 items: [.grayscale, .invert, .cropBorders, .pageNumber, .tapZones, .pageTransitions, .keepScreenOn]
+            ),
+            Section(
+                title: "Vertical Scroll",
+                footer: "Narrows continuous-scroll pages on wide screens like iPad.",
+                items: [.sidePadding]
             )
         ]
         if reload {
@@ -13016,6 +13048,12 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 let cell = valueCell()
                 cell.textLabel?.text = "Blend Mode"
                 cell.detailTextLabel?.text = LegacyReaderBlendMode.current.title
+                return cell
+            case .sidePadding:
+                let cell = valueCell()
+                let percent = aidokuLegacyReaderWebtoonSidePaddingPercent()
+                cell.textLabel?.text = "Side Padding"
+                cell.detailTextLabel?.text = percent == 0 ? "Off" : "\(percent)%"
                 return cell
             case .brightness:
                 let cell = sliderCell()
@@ -13116,9 +13154,27 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 presentBackgroundPicker(at: indexPath)
             case .blendMode:
                 presentBlendModePicker(at: indexPath)
+            case .sidePadding:
+                presentSidePaddingPicker(at: indexPath)
             default:
                 break
         }
+    }
+
+    private func presentSidePaddingPicker(at indexPath: IndexPath) {
+        let alert = UIAlertController(title: "Side Padding", message: nil, preferredStyle: .actionSheet)
+        let current = aidokuLegacyReaderWebtoonSidePaddingPercent()
+        for percent in [0, 5, 10, 15, 25] {
+            let label = percent == 0 ? "Off" : "\(percent)%"
+            let title = percent == current ? "\(label) (Current)" : label
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                aidokuLegacySetReaderWebtoonSidePaddingPercent(percent)
+                self.tableView.reloadRows(at: [indexPath], with: .automatic)
+                self.notifyChange()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSheet(alert, at: indexPath)
     }
 
     private func presentBackgroundPicker(at indexPath: IndexPath) {
@@ -13548,6 +13604,8 @@ private final class LegacyPageImageCell: UITableViewCell {
     private let pageLabel = UILabel()
     private let reloadButton = UIButton(type: .system)
     private var heightConstraint: NSLayoutConstraint!
+    private var leadingConstraint: NSLayoutConstraint!
+    private var trailingConstraint: NSLayoutConstraint!
     private var task: URLSessionDataTask?
     private var representedLoadID = UUID()
     private var representedPage: AidokuRunnerLegacyPage?
@@ -13580,10 +13638,12 @@ private final class LegacyPageImageCell: UITableViewCell {
         messageStack.addArrangedSubview(pageLabel)
         messageStack.addArrangedSubview(reloadButton)
         heightConstraint = pageImageView.heightAnchor.constraint(equalToConstant: 420)
+        leadingConstraint = pageImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
+        trailingConstraint = pageImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
         NSLayoutConstraint.activate([
             pageImageView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            pageImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            pageImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            leadingConstraint,
+            trailingConstraint,
             heightConstraint,
             pageImageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             messageStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
@@ -13617,6 +13677,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         availableSize = CGSize(width: UIScreen.main.bounds.width, height: 420)
         fitsViewport = false
         heightConstraint.constant = 420
+        setSidePadding(0)
         onHeightChange = nil
         applyReaderBackground(LegacyReaderBackground.current.color)
     }
@@ -13910,6 +13971,11 @@ private final class LegacyPageImageCell: UITableViewCell {
         }
     }
 
+    private func setSidePadding(_ padding: CGFloat) {
+        leadingConstraint.constant = padding
+        trailingConstraint.constant = -padding
+    }
+
     private func setImage(_ image: UIImage, loadID: UUID) {
         guard representedLoadID == loadID else { return }
         pageLabel.text = nil
@@ -13917,9 +13983,13 @@ private final class LegacyPageImageCell: UITableViewCell {
         pageImageView.isHidden = false
         pageImageView.image = image
         if fitsViewport {
+            setSidePadding(0)
             heightConstraint.constant = max(320, availableSize.height)
         } else {
-            let width = max(availableSize.width, 1)
+            // Webtoon-style side padding narrows the strip on wide screens.
+            let padding = availableSize.width * aidokuLegacyReaderWebtoonSidePadding()
+            setSidePadding(padding)
+            let width = max(availableSize.width - 2 * padding, 1)
             let ratio = image.size.height / max(image.size.width, 1)
             let maximumHeight: CGFloat = aidokuLegacyIsLowMemoryMode() ? max(availableSize.height, 768) : 2600
             let targetHeight = min(max(width * ratio, 320), maximumHeight)
