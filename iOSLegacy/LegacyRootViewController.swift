@@ -1428,6 +1428,9 @@ enum LegacyLibrarySortOption: String, CaseIterable {
     case recentlyAdded
     case title
     case source
+    case unread
+    case lastRead
+    case totalChapters
 
     private static let defaultsKey = "AidokuLegacy.library.sortOption"
 
@@ -1453,7 +1456,83 @@ enum LegacyLibrarySortOption: String, CaseIterable {
                 return "Title"
             case .source:
                 return "Source"
+            case .unread:
+                return "Unread Count"
+            case .lastRead:
+                return "Last Read"
+            case .totalChapters:
+                return "Total Chapters"
         }
+    }
+}
+
+/// Tri-state library filter (Mihon parity): off, include-only, or exclude.
+enum LegacyLibraryFilterState: Int {
+    case off = 0
+    case include = 1
+    case exclude = 2
+
+    var next: LegacyLibraryFilterState {
+        switch self {
+            case .off: return .include
+            case .include: return .exclude
+            case .exclude: return .off
+        }
+    }
+
+    var indicator: String {
+        switch self {
+            case .off: return ""
+            case .include: return " — Include"
+            case .exclude: return " — Exclude"
+        }
+    }
+}
+
+/// Mihon-style library status filters.
+enum LegacyLibraryStatusFilter: String, CaseIterable {
+    case downloaded
+    case unread
+    case started
+    case tracked
+
+    var title: String {
+        switch self {
+            case .downloaded: return "Downloaded"
+            case .unread: return "Unread"
+            case .started: return "Started"
+            case .tracked: return "Tracked"
+        }
+    }
+}
+
+enum LegacyLibraryStatusFilterStore {
+    private static let key = "AidokuLegacy.library.statusFilters"
+
+    static func states() -> [String: Int] {
+        return UserDefaults.standard.dictionary(forKey: key) as? [String: Int] ?? [:]
+    }
+
+    static func state(_ filter: LegacyLibraryStatusFilter) -> LegacyLibraryFilterState {
+        return LegacyLibraryFilterState(rawValue: states()[filter.rawValue] ?? 0) ?? .off
+    }
+
+    static func setState(_ state: LegacyLibraryFilterState, for filter: LegacyLibraryStatusFilter) {
+        var map = states()
+        if state == .off {
+            map.removeValue(forKey: filter.rawValue)
+        } else {
+            map[filter.rawValue] = state.rawValue
+        }
+        UserDefaults.standard.set(map, forKey: key)
+    }
+
+    static func clearAll() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    static var hasActiveFilters: Bool {
+        return !states().isEmpty
     }
 }
 
@@ -1899,6 +1978,7 @@ final class LegacyLibraryStore {
         if let filterGroup = filterGroup {
             filteredEntries = filteredEntries.filter { matchesFilterGroup(filterGroup, entry: $0) }
         }
+        filteredEntries = applyStatusFilters(filteredEntries)
         let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedQuery.isEmpty {
             filteredEntries = filteredEntries.filter {
@@ -2052,6 +2132,50 @@ final class LegacyLibraryStore {
                     }
                     return $0.manga.title.localizedCaseInsensitiveCompare($1.manga.title) == .orderedAscending
                 }
+            case .unread:
+                return entries.sorted { unreadCount(for: $0) > unreadCount(for: $1) }
+            case .lastRead:
+                return entries.sorted {
+                    let lhs = LegacyHistoryStore.shared.latest(sourceKey: $0.sourceKey, mangaKey: $0.manga.key)?.dateRead ?? .distantPast
+                    let rhs = LegacyHistoryStore.shared.latest(sourceKey: $1.sourceKey, mangaKey: $1.manga.key)?.dateRead ?? .distantPast
+                    return lhs > rhs
+                }
+            case .totalChapters:
+                return entries.sorted { ($0.manga.chapters?.count ?? 0) > ($1.manga.chapters?.count ?? 0) }
+        }
+    }
+
+    private func unreadCount(for entry: LegacyLibraryEntry) -> Int {
+        guard let chapters = entry.manga.chapters, !chapters.isEmpty else { return 0 }
+        let readKeys = LegacyHistoryStore.shared.readChapterKeys(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+        return chapters.filter { !$0.locked && !readKeys.contains($0.key) }.count
+    }
+
+    /// Applies the active Mihon-style status filters (downloaded/unread/started/
+    /// tracked), each tri-state include/exclude.
+    private func applyStatusFilters(_ entries: [LegacyLibraryEntry]) -> [LegacyLibraryEntry] {
+        var result = entries
+        for filter in LegacyLibraryStatusFilter.allCases {
+            let state = LegacyLibraryStatusFilterStore.state(filter)
+            guard state != .off else { continue }
+            result = result.filter { entry in
+                let matches = entryMatchesStatus(filter, entry: entry)
+                return state == .include ? matches : !matches
+            }
+        }
+        return result
+    }
+
+    private func entryMatchesStatus(_ filter: LegacyLibraryStatusFilter, entry: LegacyLibraryEntry) -> Bool {
+        switch filter {
+            case .downloaded:
+                return LegacyDownloadStore.shared.hasDownloads(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
+            case .unread:
+                return unreadCount(for: entry) > 0
+            case .started:
+                return LegacyHistoryStore.shared.latest(sourceKey: entry.sourceKey, mangaKey: entry.manga.key) != nil
+            case .tracked:
+                return !LegacyTrackerManager.shared.entries(sourceKey: entry.sourceKey, mangaKey: entry.manga.key).isEmpty
         }
     }
 
@@ -2767,6 +2891,16 @@ final class LegacyDownloadStore {
     func hasChapter(sourceKey: String, mangaKey: String, chapterKey: String) -> Bool {
         let directory = chapterDirectory(sourceKey: sourceKey, mangaKey: mangaKey, chapterKey: chapterKey)
         return fileManager.fileExists(atPath: directory.appendingPathComponent(manifestFileName).path)
+    }
+
+    /// Whether any chapter of the manga has been downloaded.
+    func hasDownloads(sourceKey: String, mangaKey: String) -> Bool {
+        let root = (try? downloadsDirectory()) ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let mangaDirectory = root
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(sourceKey), isDirectory: true)
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(mangaKey), isDirectory: true)
+        let contents = (try? fileManager.contentsOfDirectory(atPath: mangaDirectory.path)) ?? []
+        return !contents.isEmpty
     }
 
     func pages(sourceKey: String, mangaKey: String, chapterKey: String) -> [AidokuRunnerLegacyPage]? {
@@ -4488,6 +4622,10 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
                 self.reloadData()
             })
         }
+        let filtersTitle = LegacyLibraryStatusFilterStore.hasActiveFilters ? "Filters… (Active)" : "Filters…"
+        alert.addAction(UIAlertAction(title: filtersTitle, style: .default) { [weak self] _ in
+            self?.showLibraryFilters()
+        })
         alert.addAction(UIAlertAction(title: activeCategory == nil ? "All Categories (Current)" : "All Categories", style: .default) { [weak self] _ in
             self?.activeFilterGroup = nil
             self?.activeCategory = nil
@@ -4529,6 +4667,34 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             })
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItems?.first
+        }
+        present(alert, animated: true)
+    }
+
+    private func showLibraryFilters() {
+        let alert = UIAlertController(
+            title: "Library Filters",
+            message: "Tap to cycle: off → include → exclude.",
+            preferredStyle: .actionSheet
+        )
+        for filter in LegacyLibraryStatusFilter.allCases {
+            let state = LegacyLibraryStatusFilterStore.state(filter)
+            alert.addAction(UIAlertAction(title: "\(filter.title)\(state.indicator)", style: .default) { [weak self] _ in
+                LegacyLibraryStatusFilterStore.setState(state.next, for: filter)
+                self?.reloadData()
+                // Re-present so multiple filters can be set in one pass.
+                self?.showLibraryFilters()
+            })
+        }
+        if LegacyLibraryStatusFilterStore.hasActiveFilters {
+            alert.addAction(UIAlertAction(title: "Clear Filters", style: .destructive) { [weak self] _ in
+                LegacyLibraryStatusFilterStore.clearAll()
+                self?.reloadData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Done", style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = navigationItem.rightBarButtonItems?.first
         }
