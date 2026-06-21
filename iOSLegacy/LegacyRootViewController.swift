@@ -1320,9 +1320,24 @@ extension Notification.Name {
     static let legacyReaderColorSettingsDidChange = Notification.Name("AidokuLegacyReaderColorSettingsDidChange")
 }
 
+private enum LegacyPrivacyDefaults {
+    static let privacyShield = "AidokuLegacy.privacy.privacyShield"
+}
+
+func aidokuLegacyPrivacyShieldEnabled() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyPrivacyDefaults.privacyShield)
+}
+
+func aidokuLegacySetPrivacyShieldEnabled(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyPrivacyDefaults.privacyShield)
+}
+
 final class LegacyTabBarController: UITabBarController {
     private let packageInstaller = AidokuRunnerLegacyPackageInstaller()
     private var appearanceObserver: NSObjectProtocol?
+    private var privacyResignObserver: NSObjectProtocol?
+    private var privacyActiveObserver: NSObjectProtocol?
+    private var privacyShieldView: UIView?
     private var didAttemptReaderRestore = false
     private var didStartAutomaticSourceUpdate = false
 
@@ -1359,6 +1374,7 @@ final class LegacyTabBarController: UITabBarController {
         ) { [weak self] _ in
             self?.applyAppearance()
         }
+        registerPrivacyShieldObservers()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -1370,6 +1386,12 @@ final class LegacyTabBarController: UITabBarController {
     deinit {
         if let appearanceObserver = appearanceObserver {
             NotificationCenter.default.removeObserver(appearanceObserver)
+        }
+        if let privacyResignObserver = privacyResignObserver {
+            NotificationCenter.default.removeObserver(privacyResignObserver)
+        }
+        if let privacyActiveObserver = privacyActiveObserver {
+            NotificationCenter.default.removeObserver(privacyActiveObserver)
         }
     }
 
@@ -1421,6 +1443,61 @@ final class LegacyTabBarController: UITabBarController {
         guard !didStartAutomaticSourceUpdate else { return }
         didStartAutomaticSourceUpdate = true
         LegacySourceUpdateManager.shared.updateInstalledSourcesIfNeeded(automatic: true)
+    }
+
+    private func registerPrivacyShieldObservers() {
+        let center = NotificationCenter.default
+        privacyResignObserver = center.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.showPrivacyShieldIfNeeded()
+        }
+        privacyActiveObserver = center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hidePrivacyShield()
+        }
+    }
+
+    private func showPrivacyShieldIfNeeded() {
+        guard aidokuLegacyPrivacyShieldEnabled(), privacyShieldView == nil else { return }
+        let hostView: UIView
+        if let window = view.window ?? UIApplication.shared.keyWindow {
+            hostView = window
+        } else {
+            hostView = view
+        }
+        let shield = UIView(frame: hostView.bounds)
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        shield.backgroundColor = LegacyPalette.background
+
+        let label = UILabel()
+        label.text = "Aidoku"
+        label.textColor = LegacyPalette.accent
+        label.font = .systemFont(ofSize: 32, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        shield.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: shield.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: shield.centerYAnchor)
+        ])
+
+        hostView.addSubview(shield)
+        privacyShieldView = shield
+    }
+
+    private func hidePrivacyShield() {
+        guard let shield = privacyShieldView else { return }
+        privacyShieldView = nil
+        UIView.animate(
+            withDuration: 0.15,
+            animations: { shield.alpha = 0 },
+            completion: { _ in shield.removeFromSuperview() }
+        )
     }
 }
 
@@ -6019,6 +6096,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case readerColors
         case darkTheme
         case incognitoMode
+        case privacyShield
         case clearCookies
         case clearWebViewData
         case dnsOverHttps
@@ -6050,7 +6128,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     private let sections: [Section] = [
         Section(title: "Reader", rows: [.readerMode, .readerColors, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
         Section(title: "Appearance", rows: [.darkTheme]),
-        Section(title: "Privacy", rows: [.incognitoMode]),
+        Section(title: "Privacy", rows: [.incognitoMode, .privacyShield]),
         Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
         Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
         Section(title: "Library", rows: [.readingInsights, .manageCategories, .downloads, .localFiles, .selfHosted, .trackers]),
@@ -6150,6 +6228,13 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 cell.detailTextLabel?.text = enabled
                     ? "Reading does not update history, insights, resume, or trackers."
                     : "Reading updates history, insights, resume, and trackers."
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .privacyShield:
+                let enabled = aidokuLegacyPrivacyShieldEnabled()
+                cell.textLabel?.text = "Privacy Shield"
+                cell.detailTextLabel?.text = enabled
+                    ? "Hide app contents in the app switcher."
+                    : "Show app contents in the app switcher."
                 cell.accessoryType = enabled ? .checkmark : .none
             case .clearCookies:
                 cell.textLabel?.text = "Clear Cookies"
@@ -6295,6 +6380,9 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             case .incognitoMode:
                 let key = "AidokuLegacy.reader.incognito"
                 UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: key), forKey: key)
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .privacyShield:
+                aidokuLegacySetPrivacyShieldEnabled(!aidokuLegacyPrivacyShieldEnabled())
                 tableView.reloadRows(at: [indexPath], with: .automatic)
             case .clearCookies:
                 confirmClearCookies(at: indexPath)
@@ -10746,6 +10834,20 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 }
             })
         }
+        alert.addAction(UIAlertAction(title: "Set Score... (\(trackerScoreText(entry.score, trackerId: entry.trackerId)))", style: .default) { [weak self] _ in
+            self?.presentTrackerScoreEditor(entry: entry)
+        })
+        if entry.score > 0 {
+            alert.addAction(UIAlertAction(title: "Clear Score", style: .default) { [weak self] _ in
+                LegacyTrackerManager.shared.updateEntry(entry, status: nil, score: 0) { result in
+                    DispatchQueue.main.async {
+                        if case .failure(let error) = result {
+                            self?.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                        }
+                    }
+                }
+            })
+        }
         alert.addAction(UIAlertAction(title: "Unlink", style: .destructive) { [weak self] _ in
             guard let self = self else { return }
             LegacyTrackerManager.shared.unlink(
@@ -10760,6 +10862,57 @@ final class LegacyMangaDetailViewController: UITableViewController {
             popover.barButtonItem = trackerButton
         }
         present(alert, animated: true)
+    }
+
+    private func presentTrackerScoreEditor(entry: LegacyTrackEntry) {
+        let maxScore: Float = entry.trackerId == .anilist ? 100 : 10
+        let alert = UIAlertController(
+            title: "Set \(entry.trackerId.displayName) Score",
+            message: "Enter a score from 0 to \(trackerScoreText(maxScore, trackerId: entry.trackerId)).",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.keyboardType = .decimalPad
+            textField.placeholder = "0-\(self.trackerScoreText(maxScore, trackerId: entry.trackerId))"
+            textField.text = entry.score > 0 ? self.trackerScoreText(entry.score, trackerId: entry.trackerId) : nil
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            guard let self = self else { return }
+            let raw = alert?.textFields?.first?.text?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: ",", with: ".") ?? ""
+            guard let value = Float(raw), value >= 0, value <= maxScore else {
+                self.presentDetailAlert(
+                    title: "Invalid Score",
+                    message: "Enter a score from 0 to \(self.trackerScoreText(maxScore, trackerId: entry.trackerId))."
+                )
+                return
+            }
+            LegacyTrackerManager.shared.updateEntry(entry, status: nil, score: value) { result in
+                DispatchQueue.main.async {
+                    if case .failure(let error) = result {
+                        self.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                    }
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func trackerScoreText(_ score: Float, trackerId: LegacyTrackerId) -> String {
+        guard score > 0 else { return "Not set" }
+        let clamped: Float
+        switch trackerId {
+            case .anilist:
+                clamped = min(max(score, 0), 100)
+            case .myanimelist:
+                clamped = min(max(score, 0), 10)
+        }
+        if clamped.rounded() == clamped {
+            return String(Int(clamped))
+        }
+        return String(format: "%.1f", clamped)
     }
 
     private func presentDetailAlert(title: String, message: String?) {
