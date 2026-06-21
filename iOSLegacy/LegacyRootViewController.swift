@@ -2860,6 +2860,27 @@ private struct LegacyDownloadedChapterManifest: Codable {
     var pages: [LegacyDownloadedPageRecord]
 }
 
+private enum LegacyDownloadAutomationDefaults {
+    static let deleteAfterReading = "AidokuLegacy.downloads.deleteAfterReading"
+    static let downloadNextUnreadAfterReading = "AidokuLegacy.downloads.downloadNextUnreadAfterReading"
+}
+
+func aidokuLegacyDownloadsDeleteAfterReading() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyDownloadAutomationDefaults.deleteAfterReading)
+}
+
+func aidokuLegacySetDownloadsDeleteAfterReading(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyDownloadAutomationDefaults.deleteAfterReading)
+}
+
+func aidokuLegacyDownloadsDownloadNextUnreadAfterReading() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyDownloadAutomationDefaults.downloadNextUnreadAfterReading)
+}
+
+func aidokuLegacySetDownloadsDownloadNextUnreadAfterReading(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyDownloadAutomationDefaults.downloadNextUnreadAfterReading)
+}
+
 final class LegacyDownloadStore {
     static let shared = LegacyDownloadStore()
 
@@ -3335,6 +3356,56 @@ final class LegacyDownloadManager {
             writer.cancel()
             completion(.failure(error))
         }
+    }
+}
+
+final class LegacyDownloadAutomation {
+    static let shared = LegacyDownloadAutomation()
+
+    private var inFlightDownloadKeys = Set<String>()
+
+    private init() {}
+
+    func chapterDidComplete(
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        nextUnreadChapter: AidokuRunnerLegacyChapter?
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.chapterDidComplete(
+                    source: source,
+                    manga: manga,
+                    chapter: chapter,
+                    nextUnreadChapter: nextUnreadChapter
+                )
+            }
+            return
+        }
+
+        if aidokuLegacyDownloadsDeleteAfterReading(),
+           LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
+            LegacyDownloadStore.shared.delete(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key)
+        }
+
+        guard aidokuLegacyDownloadsDownloadNextUnreadAfterReading(), let next = nextUnreadChapter else { return }
+        guard !LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: next.key) else { return }
+        let key = "\(source.key)::\(manga.key)::\(next.key)"
+        guard !inFlightDownloadKeys.contains(key) else { return }
+        inFlightDownloadKeys.insert(key)
+
+        LegacyDownloadManager.shared.download(
+            source: source,
+            manga: manga,
+            chapter: next,
+            progress: { _, _ in },
+            completion: { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.inFlightDownloadKeys.remove(key)
+                }
+            }
+        )
     }
 }
 
@@ -5527,6 +5598,139 @@ final class LegacyDownloadsViewController: UITableViewController {
     }
 }
 
+final class LegacyDownloadSettingsViewController: UITableViewController {
+    private enum Row {
+        case deleteAfterReading
+        case downloadNextUnread
+        case downloads
+        case clearDownloads
+    }
+
+    private struct Section {
+        let title: String
+        let footer: String?
+        let rows: [Row]
+    }
+
+    private let sections: [Section] = [
+        Section(
+            title: "Automation",
+            footer: "Automation runs only when the reader reaches the end of a chapter. Incognito reading skips these actions.",
+            rows: [.deleteAfterReading, .downloadNextUnread]
+        ),
+        Section(
+            title: "Manage",
+            footer: nil,
+            rows: [.downloads, .clearDownloads]
+        )
+    ]
+
+    init() {
+        super.init(style: .grouped)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Downloads"
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        tableView.reloadData()
+    }
+
+    private func row(at indexPath: IndexPath) -> Row {
+        return sections[indexPath.section].rows[indexPath.row]
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return sections[section].rows.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return sections[section].title
+    }
+
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        return sections[section].footer
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "DownloadSettingsCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "DownloadSettingsCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 0
+        cell.selectionStyle = .default
+        cell.accessoryType = .none
+
+        switch row(at: indexPath) {
+            case .deleteAfterReading:
+                let enabled = aidokuLegacyDownloadsDeleteAfterReading()
+                cell.textLabel?.text = "Delete After Reading"
+                cell.detailTextLabel?.text = enabled
+                    ? "Downloaded chapters are removed after completion."
+                    : "Keep downloads after completion."
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .downloadNextUnread:
+                let enabled = aidokuLegacyDownloadsDownloadNextUnreadAfterReading()
+                cell.textLabel?.text = "Download Next Unread"
+                cell.detailTextLabel?.text = enabled
+                    ? "Queue the next unread chapter after completion."
+                    : "Do not queue chapters automatically."
+                cell.accessoryType = enabled ? .checkmark : .none
+            case .downloads:
+                let count = LegacyDownloadStore.shared.downloadedChapters.count
+                cell.textLabel?.text = "Downloaded Chapters"
+                cell.detailTextLabel?.text = count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"
+                cell.accessoryType = .disclosureIndicator
+            case .clearDownloads:
+                cell.textLabel?.text = "Clear Downloads"
+                cell.textLabel?.textColor = UIColor.red
+                cell.detailTextLabel?.text = "Remove all downloaded chapters."
+        }
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        switch row(at: indexPath) {
+            case .deleteAfterReading:
+                aidokuLegacySetDownloadsDeleteAfterReading(!aidokuLegacyDownloadsDeleteAfterReading())
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .downloadNextUnread:
+                aidokuLegacySetDownloadsDownloadNextUnreadAfterReading(!aidokuLegacyDownloadsDownloadNextUnreadAfterReading())
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            case .downloads:
+                navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
+            case .clearDownloads:
+                confirmClearDownloads()
+        }
+    }
+
+    private func confirmClearDownloads() {
+        let alert = UIAlertController(title: "Clear Downloads", message: "Remove all downloaded chapters?", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+            LegacyDownloadStore.shared.clear()
+            self?.tableView.reloadData()
+        })
+        present(alert, animated: true)
+    }
+}
+
 final class LegacyCategoryManagerViewController: UITableViewController {
     private enum SectionKind: Equatable {
         case categories
@@ -5999,7 +6203,14 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
                 cell.textLabel?.text = "Downloads"
-                cell.detailTextLabel?.text = count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"
+                var details = [count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"]
+                if aidokuLegacyDownloadsDeleteAfterReading() {
+                    details.append("delete after reading")
+                }
+                if aidokuLegacyDownloadsDownloadNextUnreadAfterReading() {
+                    details.append("download next unread")
+                }
+                cell.detailTextLabel?.text = details.joined(separator: " - ")
             case .localFiles:
                 let count = LegacyLocalFileStore.shared.mangaList.count
                 cell.textLabel?.text = "Local Files"
@@ -6108,7 +6319,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             case .manageCategories:
                 navigationController?.pushViewController(LegacyCategoryManagerViewController(), animated: true)
             case .downloads:
-                navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
+                navigationController?.pushViewController(LegacyDownloadSettingsViewController(), animated: true)
             case .localFiles:
                 openLocalFiles()
             case .selfHosted:
@@ -11096,6 +11307,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
     private var temporaryPageDirectories: [URL] = []
+    private var didRunDownloadAutomation = false
     private weak var readerTapRecognizer: UITapGestureRecognizer?
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
@@ -11897,8 +12109,25 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             mangaKey: manga.key,
             chapterKey: chapter.key
         )
+        runDownloadAutomationIfFinished(pageIndex: pageIndex)
         lastSavedHistoryPageIndex = pageIndex
         lastHistorySaveDate = now
+    }
+
+    private func runDownloadAutomationIfFinished(pageIndex: Int) {
+        guard !didRunDownloadAutomation, pageIndex >= pages.count - 1 else { return }
+        didRunDownloadAutomation = true
+        LegacyDownloadAutomation.shared.chapterDidComplete(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            nextUnreadChapter: legacyReaderNextUnreadChapter(
+                after: chapter,
+                in: manga.chapters,
+                sourceKey: source.key,
+                mangaKey: manga.key
+            )
+        )
     }
 }
 
@@ -11929,6 +12158,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var appStateObservers: [NSObjectProtocol] = []
     private var didTrimVisibleImagesForBackground = false
     private var temporaryPageDirectories: [URL] = []
+    private var didRunDownloadAutomation = false
     private weak var readerTapRecognizer: UITapGestureRecognizer?
 
     init(
@@ -12870,8 +13100,25 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             mangaKey: manga.key,
             chapterKey: chapter.key
         )
+        runDownloadAutomationIfFinished(pageIndex: pageIndex)
         lastSavedHistoryPageIndex = pageIndex
         lastHistorySaveDate = now
+    }
+
+    private func runDownloadAutomationIfFinished(pageIndex: Int) {
+        guard !didRunDownloadAutomation, pageIndex >= pages.count - 1 else { return }
+        didRunDownloadAutomation = true
+        LegacyDownloadAutomation.shared.chapterDidComplete(
+            source: source,
+            manga: manga,
+            chapter: chapter,
+            nextUnreadChapter: legacyReaderNextUnreadChapter(
+                after: chapter,
+                in: manga.chapters,
+                sourceKey: source.key,
+                mangaKey: manga.key
+            )
+        )
     }
 }
 
@@ -12946,6 +13193,26 @@ private func legacyReaderNextChapter(
     guard sorted.indices.contains(nextIndex) else { return nil }
     let candidate = sorted[nextIndex]
     return candidate.locked ? nil : candidate
+}
+
+private func legacyReaderNextUnreadChapter(
+    after current: AidokuRunnerLegacyChapter,
+    in chapters: [AidokuRunnerLegacyChapter]?,
+    sourceKey: String,
+    mangaKey: String
+) -> AidokuRunnerLegacyChapter? {
+    guard let chapters = chapters, !chapters.isEmpty else { return nil }
+    let language = current.normalizedLanguage
+    let pool = chapters.filter { language == nil || $0.normalizedLanguage == language || $0.normalizedLanguage == nil }
+    let sorted = (pool.isEmpty ? chapters : pool).sorted(by: legacyChapterAscending)
+    guard let index = sorted.firstIndex(where: { $0.key == current.key }) else { return nil }
+    let readKeys = LegacyHistoryStore.shared.readChapterKeys(sourceKey: sourceKey, mangaKey: mangaKey)
+    for candidate in sorted.dropFirst(index + 1) where !candidate.locked {
+        if readKeys.contains(candidate.key) { continue }
+        if LegacyDownloadStore.shared.hasChapter(sourceKey: sourceKey, mangaKey: mangaKey, chapterKey: candidate.key) { continue }
+        return candidate
+    }
+    return nil
 }
 
 // The chapter that precedes `current` in reading order. Mirrors
