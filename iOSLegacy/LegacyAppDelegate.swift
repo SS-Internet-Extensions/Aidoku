@@ -125,6 +125,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.backgroundColor": "black",
                 "AidokuLegacy.reader.showPageNumber": true,
                 "AidokuLegacy.reader.showTapZones": true,
+                "AidokuLegacy.reader.eInkFlash": false,
                 "AidokuLegacy.reader.restoreLastSession": true,
                 "AidokuLegacy.appearance.darkTheme": false,
                 "AidokuLegacy.library.automaticUpdates": false,

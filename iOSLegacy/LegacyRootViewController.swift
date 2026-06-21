@@ -351,6 +351,7 @@ private enum LegacyReaderColorDefaults {
     static let animatePageTransitions = "AidokuLegacy.reader.animatePageTransitions"
     static let webtoonSidePadding = "AidokuLegacy.reader.webtoonSidePadding"
     static let invertTapZones = "AidokuLegacy.reader.invertTapZones"
+    static let eInkFlash = "AidokuLegacy.reader.eInkFlash"
 }
 
 func aidokuLegacyReaderColorFilterEnabled() -> Bool {
@@ -448,6 +449,14 @@ func aidokuLegacyReaderAnimatePageTransitions() -> Bool {
 
 func aidokuLegacySetReaderAnimatePageTransitions(_ enabled: Bool) {
     UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.animatePageTransitions)
+}
+
+func aidokuLegacyReaderEInkFlash() -> Bool {
+    return UserDefaults.standard.bool(forKey: LegacyReaderColorDefaults.eInkFlash)
+}
+
+func aidokuLegacySetReaderEInkFlash(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: LegacyReaderColorDefaults.eInkFlash)
 }
 
 /// Per-side webtoon padding as a percentage (0...25) of the strip width.
@@ -11486,6 +11495,8 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private var temporaryPageDirectories: [URL] = []
     private var didRunDownloadAutomation = false
     private weak var readerTapRecognizer: UITapGestureRecognizer?
+    private weak var eInkFlashView: UIView?
+    private var lastEInkFlashPageIndex: Int?
     private var fitToScreen: Bool {
         return LegacyReaderMode.current == .verticalFit
     }
@@ -11745,6 +11756,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             currentPageIndex = indexPath.row
             recordHistory(pageIndex: indexPath.row, force: false)
             updatePageHUD()
+            if fitToScreen {
+                flashReaderIfNeeded()
+            }
         }
 
         preloadPages(around: indexPath.row, includeCurrent: false)
@@ -12000,6 +12014,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         currentPageIndex = next
         recordHistory(pageIndex: next, force: false)
         updatePageHUD()
+        if fitToScreen {
+            flashReaderIfNeeded()
+        }
     }
 
     private func jumpToPage(_ pageIndex: Int, animated: Bool) {
@@ -12009,6 +12026,9 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         preloadPages(around: pageIndex, includeCurrent: true)
         recordHistory(pageIndex: pageIndex, force: true)
         updatePageHUD()
+        if fitToScreen {
+            flashReaderIfNeeded()
+        }
     }
 
     private func installOverlayIfNeeded() {
@@ -12044,6 +12064,31 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
 
     private func updatePageHUD() {
         overlayView.updatePage(index: currentPageIndex, count: pages.count)
+    }
+
+    private func flashReaderIfNeeded() {
+        guard aidokuLegacyReaderEInkFlash(), view.window != nil else { return }
+        if let pageIndex = currentPageIndex {
+            guard lastEInkFlashPageIndex != pageIndex else { return }
+            lastEInkFlashPageIndex = pageIndex
+        }
+        let flashView: UIView
+        if let existing = eInkFlashView {
+            flashView = existing
+        } else {
+            flashView = UIView(frame: view.bounds)
+            flashView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            flashView.isUserInteractionEnabled = false
+            flashView.alpha = 0
+            view.addSubview(flashView)
+            eInkFlashView = flashView
+        }
+        flashView.backgroundColor = LegacyReaderBackground.current == .white ? UIColor.black : UIColor.white
+        view.bringSubviewToFront(flashView)
+        flashView.alpha = 0.85
+        UIView.animate(withDuration: 0.12, delay: 0.03, options: [.allowUserInteraction], animations: {
+            flashView.alpha = 0
+        })
     }
 
     private func registerAppStateObservers() {
@@ -12330,6 +12375,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     /// setting or orientation changes.
     private var spreads: [[Int]] = []
     private var appliedDoublePage = false
+    private var isolatedPageIndexes = Set<Int>()
+    private var knownWidePageIndexes = Set<Int>()
     private var barsHidden = false
     private var didShowTapOverlay = false
     private var appStateObservers: [NSObjectProtocol] = []
@@ -12337,6 +12384,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private var temporaryPageDirectories: [URL] = []
     private var didRunDownloadAutomation = false
     private weak var readerTapRecognizer: UITapGestureRecognizer?
+    private weak var eInkFlashView: UIView?
+    private var lastEInkFlashPageIndex: Int?
 
     init(
         source: AidokuRunnerLegacySource,
@@ -12508,8 +12557,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         }
     }
 
-    private func reloadPreservingCurrentPage() {
-        let page = currentPageIndex
+    private func reloadPreservingCurrentPage(pageIndex explicitPageIndex: Int? = nil) {
+        let page = explicitPageIndex ?? currentPageIndex
         collectionView.reloadData()
         if let page = page {
             DispatchQueue.main.async {
@@ -12591,16 +12640,25 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                     let rightPageIndex = mode == .pagedRTL ? spread[0] : spread[1]
                     cell.configure(
                         leftPage: pages[leftPageIndex],
+                        leftPageIndex: leftPageIndex,
                         rightPage: pages[rightPageIndex],
+                        rightPageIndex: rightPageIndex,
                         source: source
                     )
+                    cell.onImageLoaded = { [weak self] pageIndex, image in
+                        self?.markWidePageIfNeeded(index: pageIndex, image: image)
+                    }
                     return cell
                 }
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: "PagedImageCell",
                     for: indexPath
                 ) as! LegacyPagedImageCell
-                cell.configure(page: pages[spread.first ?? 0], source: source)
+                let pageIndex = spread.first ?? 0
+                cell.onImageLoaded = { [weak self] image in
+                    self?.markWidePageIfNeeded(index: pageIndex, image: image)
+                }
+                cell.configure(page: pages[pageIndex], source: source)
                 return cell
         }
     }
@@ -12628,11 +12686,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
                 updatePageHUD()
             case .spread(let spreadIndex):
                 let primary = primaryPageIndex(forSpreadIndex: spreadIndex)
-                currentPageIndex = primary
                 // Record the furthest page in the spread so progress advances.
                 let furthest = spreads.indices.contains(spreadIndex) ? (spreads[spreadIndex].last ?? primary) : primary
+                currentPageIndex = furthest
                 recordHistory(pageIndex: furthest, force: false)
                 updatePageHUD()
+                flashReaderIfNeeded()
                 preloadPages(around: spreads.indices.contains(spreadIndex) ? (spreads[spreadIndex].last ?? primary) : primary, includeCurrent: false)
         }
     }
@@ -12706,6 +12765,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let prepared = aidokuLegacyPreparePagesForLowMemory(newPages)
         pages = prepared.pages
         temporaryPageDirectories = prepared.temporaryDirectories
+        isolatedPageIndexes = []
+        knownWidePageIndexes = []
         rebuildSpreads()
         let warmupPageIndex = pages.indices.contains(initialPageIndex) ? initialPageIndex : 0
         preloadPages(around: warmupPageIndex, includeCurrent: true)
@@ -12724,8 +12785,8 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     }
 
     /// Groups pages into screens. Single-page mode yields one page per spread
-    /// (identical to the original behavior); double-page mode pairs consecutive
-    /// pages, leaving a trailing odd page on its own.
+    /// (identical to the original behavior); double-page mode keeps the cover
+    /// and loaded wide pages alone, then pairs only adjacent normal pages.
     private func rebuildSpreads() {
         let double = shouldUseDoublePage()
         appliedDoublePage = double
@@ -12736,7 +12797,10 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         var result: [[Int]] = []
         var index = 0
         while index < pages.count {
-            if index + 1 < pages.count {
+            if shouldIsolatePage(at: index) {
+                result.append([index])
+                index += 1
+            } else if index + 1 < pages.count, !shouldIsolatePage(at: index + 1) {
                 result.append([index, index + 1])
                 index += 2
             } else {
@@ -12745,6 +12809,23 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             }
         }
         spreads = result
+    }
+
+    private func shouldIsolatePage(at index: Int) -> Bool {
+        guard pages.indices.contains(index) else { return false }
+        return index == 0 || isolatedPageIndexes.contains(index)
+    }
+
+    private func markWidePageIfNeeded(index: Int, image: UIImage) {
+        guard pages.indices.contains(index), shouldUseDoublePage() else { return }
+        let aspectRatio = image.size.width / max(image.size.height, 1)
+        guard aspectRatio >= 1.2 else { return }
+        guard !knownWidePageIndexes.contains(index) || !isolatedPageIndexes.contains(index) else { return }
+        knownWidePageIndexes.insert(index)
+        isolatedPageIndexes.insert(index)
+        let current = currentPageIndex ?? index
+        rebuildSpreads()
+        reloadPreservingCurrentPage(pageIndex: current)
     }
 
     private func scrollToInitialPageIfNeeded() {
@@ -12820,6 +12901,14 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             return primaryPageIndex(forSpreadIndex: spreadIndex)
         }
         return 0
+    }
+
+    private func pageIndex(forVisualIndex visualIndex: Int, in cell: UICollectionViewCell, at collectionPoint: CGPoint) -> Int {
+        guard let spreadCell = cell as? LegacyPagedSpreadCell else {
+            return pageIndex(forVisualIndex: visualIndex)
+        }
+        let point = collectionView.convert(collectionPoint, to: spreadCell)
+        return spreadCell.pageIndex(at: point) ?? pageIndex(forVisualIndex: visualIndex)
     }
 
     private var nextChapter: AidokuRunnerLegacyChapter? {
@@ -12973,11 +13062,13 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         let location = recognizer.location(in: collectionView)
         guard
             let indexPath = collectionView.indexPathForItem(at: location),
-            pages.indices.contains(pageIndex(forVisualIndex: indexPath.item))
+            let cell = collectionView.cellForItem(at: indexPath),
+            pages.indices.contains(pageIndex(forVisualIndex: indexPath.item, in: cell, at: location))
         else { return }
+        let pageIndex = pageIndex(forVisualIndex: indexPath.item, in: cell, at: location)
         let point = recognizer.location(in: view)
         showPageActions(
-            pageIndex: pageIndex(forVisualIndex: indexPath.item),
+            pageIndex: pageIndex,
             sourceView: view,
             sourceRect: CGRect(origin: point, size: CGSize(width: 1, height: 1))
         )
@@ -13002,7 +13093,9 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private func showPageActions(pageIndex: Int, sourceView: UIView?, sourceRect: CGRect? = nil) {
         guard pages.indices.contains(pageIndex) else { return }
         let indexPath = IndexPath(item: visualIndex(forSpreadIndex: spreadIndex(forPageIndex: pageIndex)), section: 0)
-        let visibleImage = (collectionView.cellForItem(at: indexPath) as? LegacyPagedImageCell)?.currentImage
+        let visibleCell = collectionView.cellForItem(at: indexPath)
+        let visibleImage = (visibleCell as? LegacyPagedImageCell)?.currentImage
+            ?? (visibleCell as? LegacyPagedSpreadCell)?.currentImage(for: pageIndex)
         resolvePageActionImage(page: pages[pageIndex], visibleImage: visibleImage) { [weak self] image in
             guard let self = self else { return }
             self.resolvePageDescription(pageIndex: pageIndex) { [weak self] pageDescription in
@@ -13099,10 +13192,12 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             return
         }
         let targetPage = primaryPageIndex(forSpreadIndex: nextSpread)
+        let furthestPage = spreads[nextSpread].last ?? targetPage
         scrollTo(pageIndex: targetPage, animated: aidokuLegacyReaderAnimatePageTransitions())
-        currentPageIndex = targetPage
-        recordHistory(pageIndex: spreads[nextSpread].last ?? targetPage, force: false)
+        currentPageIndex = furthestPage
+        recordHistory(pageIndex: furthestPage, force: false)
         updatePageHUD()
+        flashReaderIfNeeded()
     }
 
     private func jumpToPage(_ pageIndex: Int, animated: Bool) {
@@ -13112,6 +13207,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         preloadPages(around: pageIndex, includeCurrent: true)
         recordHistory(pageIndex: pageIndex, force: true)
         updatePageHUD()
+        flashReaderIfNeeded()
     }
 
     private func installOverlayIfNeeded() {
@@ -13147,6 +13243,31 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
 
     private func updatePageHUD() {
         overlayView.updatePage(index: currentPageIndex, count: pages.count)
+    }
+
+    private func flashReaderIfNeeded() {
+        guard aidokuLegacyReaderEInkFlash(), view.window != nil else { return }
+        if let pageIndex = currentPageIndex {
+            guard lastEInkFlashPageIndex != pageIndex else { return }
+            lastEInkFlashPageIndex = pageIndex
+        }
+        let flashView: UIView
+        if let existing = eInkFlashView {
+            flashView = existing
+        } else {
+            flashView = UIView(frame: view.bounds)
+            flashView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            flashView.isUserInteractionEnabled = false
+            flashView.alpha = 0
+            view.addSubview(flashView)
+            eInkFlashView = flashView
+        }
+        flashView.backgroundColor = LegacyReaderBackground.current == .white ? UIColor.black : UIColor.white
+        view.bringSubviewToFront(flashView)
+        flashView.alpha = 0.85
+        UIView.animate(withDuration: 0.12, delay: 0.03, options: [.allowUserInteraction], animations: {
+            flashView.alpha = 0
+        })
     }
 
     private func registerAppStateObservers() {
@@ -13822,6 +13943,7 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
         case pageTransitions
         case keepScreenOn
         case doublePage
+        case eInkFlash
         case sidePadding
     }
 
@@ -13875,8 +13997,8 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
             ),
             Section(
                 title: "Paged Reader",
-                footer: "Double page shows two pages side by side in paged modes.",
-                items: [.doublePage]
+                footer: "Double page shows two pages side by side in paged modes. E-ink flash briefly refreshes the page after navigation.",
+                items: [.doublePage, .eInkFlash]
             ),
             Section(
                 title: "Vertical Scroll",
@@ -13935,6 +14057,14 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 let cell = valueCell()
                 cell.textLabel?.text = "Double Page"
                 cell.detailTextLabel?.text = LegacyReaderDoublePageMode.current.title
+                return cell
+            case .eInkFlash:
+                let cell = toggleCell()
+                cell.configure(title: "E-Ink Flash", subtitle: "Flash the page surface after paged-reader navigation.", isOn: aidokuLegacyReaderEInkFlash())
+                cell.onToggle = { [weak self] isOn in
+                    aidokuLegacySetReaderEInkFlash(isOn)
+                    self?.notifyChange()
+                }
                 return cell
             case .navLayout:
                 let cell = valueCell()
@@ -15067,6 +15197,9 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
     private let leftView = LegacyZoomableImageView()
     private let rightView = LegacyZoomableImageView()
     private var representedLoadID = UUID()
+    private var leftPageIndex: Int?
+    private var rightPageIndex: Int?
+    var onImageLoaded: ((Int, UIImage) -> Void)?
 
     var zoomDoubleTapRecognizers: [UIGestureRecognizer] {
         return [leftView.doubleTapRecognizer, rightView.doubleTapRecognizer]
@@ -15110,18 +15243,23 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
 
     func configure(
         leftPage: AidokuRunnerLegacyPage,
+        leftPageIndex: Int,
         rightPage: AidokuRunnerLegacyPage,
+        rightPageIndex: Int,
         source: AidokuRunnerLegacySource
     ) {
         let loadID = UUID()
         representedLoadID = loadID
+        self.leftPageIndex = leftPageIndex
+        self.rightPageIndex = rightPageIndex
         applyReaderBackground(LegacyReaderBackground.current.color)
-        load(leftPage, into: leftView, source: source, loadID: loadID)
-        load(rightPage, into: rightView, source: source, loadID: loadID)
+        load(leftPage, pageIndex: leftPageIndex, into: leftView, source: source, loadID: loadID)
+        load(rightPage, pageIndex: rightPageIndex, into: rightView, source: source, loadID: loadID)
     }
 
     private func load(
         _ page: AidokuRunnerLegacyPage,
+        pageIndex: Int,
         into imageView: LegacyZoomableImageView,
         source: AidokuRunnerLegacySource,
         loadID: UUID
@@ -15132,6 +15270,9 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
                 LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source) { [weak self, weak imageView] image in
                     guard let self = self, self.representedLoadID == loadID, let imageView = imageView else { return }
                     imageView.image = image
+                    if let image = image {
+                        self.onImageLoaded?(pageIndex, image)
+                    }
                 }
             case .image(let data):
                 aidokuLegacyImageDecodeQueue.async { [weak self, weak imageView] in
@@ -15142,6 +15283,9 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
                     DispatchQueue.main.async {
                         guard let self = self, self.representedLoadID == loadID, let imageView = imageView else { return }
                         imageView.image = image
+                        if let image = image {
+                            self.onImageLoaded?(pageIndex, image)
+                        }
                     }
                 }
             case .text, .zipFile:
@@ -15155,6 +15299,23 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
         rightView.image = nil
     }
 
+    func pageIndex(at location: CGPoint) -> Int? {
+        if location.x < bounds.midX {
+            return leftPageIndex
+        }
+        return rightPageIndex
+    }
+
+    func currentImage(for pageIndex: Int) -> UIImage? {
+        if pageIndex == leftPageIndex {
+            return leftView.image
+        }
+        if pageIndex == rightPageIndex {
+            return rightView.image
+        }
+        return nil
+    }
+
     func releaseDecodedImages(ifLoadID loadID: UUID) {
         guard representedLoadID == loadID else { return }
         releaseDecodedImages()
@@ -15163,6 +15324,9 @@ private final class LegacyPagedSpreadCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         releaseDecodedImages()
+        leftPageIndex = nil
+        rightPageIndex = nil
+        onImageLoaded = nil
         applyReaderBackground(LegacyReaderBackground.current.color)
     }
 }
@@ -15176,6 +15340,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     private var representedLoadID = UUID()
     private var representedPage: AidokuRunnerLegacyPage?
     private var representedSource: AidokuRunnerLegacySource?
+    var onImageLoaded: ((UIImage) -> Void)?
 
     var zoomDoubleTapRecognizer: UIGestureRecognizer { pageImageView.doubleTapRecognizer }
 
@@ -15234,6 +15399,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         reloadButton.isHidden = true
         representedPage = nil
         representedSource = nil
+        onImageLoaded = nil
         pageImageView.isHidden = false
         applyReaderBackground(LegacyReaderBackground.current.color)
     }
@@ -15521,6 +15687,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         reloadButton.isHidden = true
         pageImageView.isHidden = false
         pageImageView.image = image
+        onImageLoaded?(image)
     }
 
     private func configureReloadButton() {
