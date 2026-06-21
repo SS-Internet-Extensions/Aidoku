@@ -16,9 +16,15 @@ enum LocalFileManagerError: Error {
 }
 
 struct LocalSeriesInfo: Hashable {
+    let id: String
     let coverUrl: String
     let name: String
     let chapterCount: Int
+}
+
+struct LocalFileImportCandidate: Hashable {
+    let url: URL
+    let seriesName: String?
 }
 
 enum LocalFileType {

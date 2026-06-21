@@ -28,9 +28,15 @@ enum LegacyModernBackupExportError: Error {
 final class LegacyModernBackupExporter {
     static let shared = LegacyModernBackupExporter()
 
+    private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let maxAutomaticBackups = 5
 
     init() {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        self.decoder = decoder
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         // Modern JSON backups encode dates as seconds since 1970.
@@ -40,8 +46,8 @@ final class LegacyModernBackupExporter {
 
     // Builds a modern-schema backup from the current legacy stores, writes it to
     // the legacy backups directory, and returns the file URL.
-    func exportBackup() throws -> URL {
-        let backup = buildBackup()
+    func exportBackup(automatic: Bool = false) throws -> URL {
+        let backup = buildBackup(automatic: automatic)
         let data = try encoder.encode(backup)
         let directory = try backupsDirectory()
         let formatter = DateFormatter()
@@ -49,18 +55,22 @@ final class LegacyModernBackupExporter {
         formatter.dateFormat = "yyyy-MM-dd_HH.mm.ss"
         // Use the modern `aidoku_` filename prefix and `.json` extension so the
         // result is unambiguously a modern, JSON-encoded backup.
-        let url = directory.appendingPathComponent("aidoku_\(formatter.string(from: Date())).json")
+        let prefix = automatic ? "aidoku_auto_" : "aidoku_"
+        let url = directory.appendingPathComponent("\(prefix)\(formatter.string(from: Date())).json")
         try data.write(to: url, options: .atomic)
+        if automatic {
+            cleanUpAutomaticBackups()
+        }
         return url
     }
 
     // Completion-based convenience. Encoding/writing runs on a background queue;
     // the completion is delivered on the main queue.
-    func exportBackup(completion: @escaping (Result<URL, Error>) -> Void) {
+    func exportBackup(automatic: Bool = false, completion: @escaping (Result<URL, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let result: Result<URL, Error>
             do {
-                let url = try self.exportBackup()
+                let url = try self.exportBackup(automatic: automatic)
                 result = .success(url)
             } catch {
                 result = .failure(error)
@@ -73,7 +83,7 @@ final class LegacyModernBackupExporter {
 
     // MARK: - Building
 
-    private func buildBackup() -> LegacyModernBackup {
+    private func buildBackup(automatic: Bool) -> LegacyModernBackup {
         let libraryEntries = LegacyLibraryStore.shared.rawEntries
         let historyEntries = LegacyHistoryStore.shared.entries
         let updateEntries = LegacyUpdateStore.shared.entries
@@ -188,7 +198,7 @@ final class LegacyModernBackupExporter {
             sourceLists: sourceLists.isEmpty ? nil : sourceLists,
             date: Date(),
             name: "AidokuLegacy",
-            automatic: false,
+            automatic: automatic,
             version: "AidokuLegacy"
         )
     }
@@ -254,6 +264,36 @@ final class LegacyModernBackupExporter {
 
     // MARK: - Directory
 
+    private func cleanUpAutomaticBackups() {
+        guard let urls = try? backupURLs() else { return }
+        var backups: [(url: URL, date: Date)] = []
+        for url in urls {
+            guard
+                let data = try? Data(contentsOf: url),
+                let backup = try? decoder.decode(LegacyModernBackup.self, from: data),
+                backup.automatic == true
+            else {
+                continue
+            }
+            backups.append((url: url, date: backup.date))
+        }
+
+        while backups.count > maxAutomaticBackups {
+            guard let oldest = backups.enumerated().min(by: { $0.element.date < $1.element.date }) else { break }
+            try? FileManager.default.removeItem(at: oldest.element.url)
+            backups.remove(at: oldest.offset)
+        }
+    }
+
+    private func backupURLs() throws -> [URL] {
+        let directory = try backupsDirectory()
+        return try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension.lowercased() == "json" }
+    }
+
     // Mirrors the legacy backups directory used by `LegacyBackupManager` so
     // exported modern backups sit alongside native legacy backups.
     private func backupsDirectory() throws -> URL {
@@ -266,5 +306,52 @@ final class LegacyModernBackupExporter {
         let directory = support.appendingPathComponent("AidokuLegacyBackups", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         return directory
+    }
+}
+
+final class LegacyModernAutomaticBackupScheduler {
+    static let shared = LegacyModernAutomaticBackupScheduler()
+
+    private let enabledKey = "AidokuLegacy.backup.automaticModernBackups"
+    private let lastBackupKey = "AidokuLegacy.backup.lastAutomaticModernBackup"
+    private let minimumInterval: TimeInterval = 24 * 60 * 60
+    private let queue = DispatchQueue(label: "app.aidoku.legacy.modernAutomaticBackup")
+    private var isRunning = false
+
+    var isEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: enabledKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+            if newValue {
+                createBackupIfNeeded(force: true)
+            }
+        }
+    }
+
+    var lastBackupDate: Date? {
+        let timestamp = UserDefaults.standard.double(forKey: lastBackupKey)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    func createBackupIfNeeded(force: Bool = false) {
+        guard isEnabled else { return }
+        let now = Date()
+        if !force, let lastBackupDate = lastBackupDate, now.timeIntervalSince(lastBackupDate) < minimumInterval {
+            return
+        }
+
+        queue.async {
+            if self.isRunning { return }
+            self.isRunning = true
+            defer { self.isRunning = false }
+
+            do {
+                _ = try LegacyModernBackupExporter.shared.exportBackup(automatic: true)
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: self.lastBackupKey)
+            } catch {
+                // Automatic backups should never interrupt launch/backgrounding.
+            }
+        }
     }
 }

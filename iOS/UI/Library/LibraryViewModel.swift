@@ -14,6 +14,7 @@ class LibraryViewModel {
     var manga: [MangaInfo] = []
     var pinnedManga: [MangaInfo] = []
     var sourceKeys: [String] = []
+    var manuallyPinnedIdentifiers: Set<MangaIdentifier> = []
 
     // temporary storage when searching
     private var searchQuery: String = ""
@@ -110,6 +111,7 @@ class LibraryViewModel {
 
         static let unread = BadgeType(rawValue: 1 << 0)
         static let downloaded = BadgeType(rawValue: 1 << 1)
+        static let local = BadgeType(rawValue: 1 << 2)
     }
 
     lazy var pinType: PinType = getPinType()
@@ -123,8 +125,12 @@ class LibraryViewModel {
         if UserDefaults.standard.bool(forKey: "Library.downloadedChapterBadges") {
             type.insert(.downloaded)
         }
+        if UserDefaults.standard.bool(forKey: "Library.localSourceBadges") {
+            type.insert(.local)
+        }
         return type
     }()
+    lazy var groupPinnedTitles = UserDefaults.standard.bool(forKey: "Library.groupPinnedTitles")
 
     var filters: [LibraryFilter] {
         didSet {
@@ -159,10 +165,45 @@ class LibraryViewModel {
         } else {
             self.filters = []
         }
+        manuallyPinnedIdentifiers = Self.getManuallyPinnedIdentifiers()
     }
 }
 
 extension LibraryViewModel {
+    static func getManuallyPinnedIdentifiers() -> Set<MangaIdentifier> {
+        guard let data = UserDefaults.standard.data(forKey: "Library.pinnedTitles") else {
+            return []
+        }
+        return (try? JSONDecoder().decode(Set<MangaIdentifier>.self, from: data)) ?? []
+    }
+
+    private func saveManuallyPinnedIdentifiers() {
+        let data = try? JSONEncoder().encode(manuallyPinnedIdentifiers)
+        UserDefaults.standard.set(data, forKey: "Library.pinnedTitles")
+    }
+
+    func isManuallyPinned(_ manga: MangaInfo) -> Bool {
+        manuallyPinnedIdentifiers.contains(manga.identifier)
+    }
+
+    func setManuallyPinned(_ pinned: Bool, manga: MangaInfo) async {
+        await setManuallyPinned(pinned, manga: [manga])
+    }
+
+    func setManuallyPinned(_ pinned: Bool, manga: [MangaInfo]) async {
+        if pinned {
+            for item in manga {
+                manuallyPinnedIdentifiers.insert(item.identifier)
+            }
+        } else {
+            for item in manga {
+                manuallyPinnedIdentifiers.remove(item.identifier)
+            }
+        }
+        saveManuallyPinnedIdentifiers()
+        await loadLibrary()
+    }
+
     func isCategoryLocked() -> Bool {
         guard UserDefaults.standard.bool(forKey: "Library.lockLibrary") else { return false }
         if let currentCategory, !currentCategory.isEmpty {
@@ -213,7 +254,7 @@ extension LibraryViewModel {
             manga,
             sourceKeys,
             unappliedFilters
-        ) = await CoreDataManager.shared.container.performBackgroundTask { @Sendable [sortMethod, sortAscending, pinType] context in
+        ) = await CoreDataManager.shared.container.performBackgroundTask { @Sendable [sortMethod, sortAscending, pinType, manuallyPinnedIdentifiers] context in
             var pinnedManga: [MangaInfo] = []
             var manga: [MangaInfo] = []
             var sourceKeys: Set<String> = []
@@ -338,6 +379,11 @@ extension LibraryViewModel {
                     continue main
                 }
 
+                if manuallyPinnedIdentifiers.contains(info.identifier) {
+                    pinnedManga.append(info)
+                    continue
+                }
+
                 switch pinType {
                     case .none:
                         manga.append(info)
@@ -386,12 +432,14 @@ extension LibraryViewModel {
             self.manga = self.manga.filter(filter)
         }
 
+        updatePinnedGrouping()
+
         if pinType == .unread {
-            let currentManga = self.manga + self.pinnedManga
+            let currentManga = self.pinnedManga + self.manga
             var pinnedManga: [MangaInfo] = []
             var manga: [MangaInfo] = []
             for item in currentManga {
-                if item.unread > 0 {
+                if isManuallyPinned(item) || item.unread > 0 {
                     pinnedManga.append(item)
                 } else {
                     manga.append(item)
@@ -400,6 +448,8 @@ extension LibraryViewModel {
             self.pinnedManga = pinnedManga
             self.manga = manga
         }
+
+        updatePinnedGrouping()
 
         if sortMethod == .unreadChapters {
             await sortLibrary()
@@ -642,6 +692,13 @@ extension LibraryViewModel {
         await sortLibrary()
     }
 
+    func setGroupPinnedTitles(_ enabled: Bool) async {
+        guard groupPinnedTitles != enabled else { return }
+        groupPinnedTitles = enabled
+        UserDefaults.standard.set(enabled, forKey: "Library.groupPinnedTitles")
+        await loadLibrary()
+    }
+
     func toggleFilter(method: LibraryFilter.FilterMethod, value: String? = nil) async {
         let filterIndex = filters.firstIndex(where: { $0.type == method && $0.value == value })
         if let filterIndex {
@@ -661,6 +718,12 @@ extension LibraryViewModel {
         if let filtersData {
             UserDefaults.standard.set(filtersData, forKey: "Library.filters")
         }
+    }
+
+    private func updatePinnedGrouping() {
+        guard !groupPinnedTitles else { return }
+        manga = pinnedManga + manga
+        pinnedManga = []
     }
 
     func search(query: String) async {

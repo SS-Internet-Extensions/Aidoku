@@ -12,6 +12,7 @@
 "OK" = "OK";
 "DONE" = "Done";
 "EDIT" = "Edit";
+"EDIT_METADATA" = "Edit Metadata";
 "UNKNOWN" = "Unknown";
 "UNAVAILABLE" = "Unavailable";
 "INVALID" = "Invalid";
@@ -453,7 +454,15 @@
 "RESUME_LAST_OPENED_CHAPTER" = "Resume Last Opened Chapter";
 "UNREAD_CHAPTER_BADGES" = "Unread Chapter Badges";
 "DOWNLOADED_CHAPTER_BADGES" = "Downloaded Chapter Badges";
+"LOCAL_SOURCE_BADGES" = "Local Source Badges";
 "PIN_TITLES" = "Pin Titles";
+"PIN_TITLE" = "Pin Title";
+"UNPIN_TITLE" = "Unpin Title";
+"GROUP_PINNED_TITLES" = "Group Pinned Titles";
+"BADGES" = "Badges";
+"DISPLAY" = "Display";
+"GROUPING" = "Grouping";
+"LOCAL_BADGE" = "Local";
 "PIN_DISABLED" = "Disabled";
 "PIN_UNREAD" = "Unread";
 "PIN_UPDATED_CHAPTERS" = "Updated Chapters";

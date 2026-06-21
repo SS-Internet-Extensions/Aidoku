@@ -24,8 +24,7 @@ actor LocalFileManager {
     static let allowedFileExtensions = Set(["cbz", "zip"])
     static let allowedImageExtensions = Set(["jpg", "jpeg", "png", "webp", "gif", "heic", "avif"])
 
-    private var localFolderFileDescriptor: CInt?
-    private var localFolderSource: DispatchSourceFileSystemObject?
+    private var folderSources: [String: DispatchSourceFileSystemObject] = [:]
 
     private var suppressFileEvents = false
 
@@ -36,8 +35,8 @@ actor LocalFileManager {
     }
 
     deinit {
-        localFolderSource?.cancel()
-        localFolderSource = nil
+        folderSources.values.forEach { $0.cancel() }
+        folderSources.removeAll()
     }
 }
 
@@ -202,6 +201,30 @@ extension LocalFileManager {
 }
 
 extension LocalFileManager {
+    func uploadItems(from urls: [URL]) async -> (imported: Int, failed: Int) {
+        var imported = 0
+        var failed = 0
+
+        for url in urls {
+            let accessGranted = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessGranted { url.stopAccessingSecurityScopedResource() }
+            }
+
+            for candidate in importCandidates(from: url) {
+                do {
+                    try await uploadFile(from: candidate.url, mangaName: candidate.seriesName)
+                    imported += 1
+                } catch {
+                    LogManager.logger.error("Failed to import local file \(candidate.url.path): \(error)")
+                    failed += 1
+                }
+            }
+        }
+
+        return (imported, failed)
+    }
+
     // add a new file to the local files source
     // swiftlint:disable:next cyclomatic_complexity
     func uploadFile(
@@ -437,10 +460,76 @@ extension LocalFileManager {
             comicInfo: comicInfo
         )
     }
+
+    private func importCandidates(from url: URL) -> [LocalFileImportCandidate] {
+        guard url.isDirectory else {
+            guard Self.allowedFileExtensions.contains(url.pathExtension.lowercased()) else {
+                return []
+            }
+            return [.init(url: url, seriesName: nil)]
+        }
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var candidates: [LocalFileImportCandidate] = []
+        for case let fileURL as URL in enumerator {
+            guard
+                !fileURL.isDirectory,
+                Self.allowedFileExtensions.contains(fileURL.pathExtension.lowercased())
+            else {
+                continue
+            }
+            let relativePath = fileURL.path.replacingOccurrences(of: url.path + "/", with: "")
+            let components = relativePath.split(separator: "/").map(String.init)
+            let seriesName = components.count > 1 ? components[0] : url.lastPathComponent
+            candidates.append(.init(url: fileURL, seriesName: seriesName))
+        }
+
+        return candidates.sorted {
+            $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
+        }
+    }
 }
 
 extension LocalFileManager {
+    func updateMangaMetadata(
+        mangaId: String,
+        title: String,
+        description: String?,
+        coverImage: PlatformImage?
+    ) async -> AidokuRunner.Manga? {
+        let coverUrl: String?
+        if let coverImage {
+            coverUrl = await writeCover(for: mangaId, image: coverImage)
+        } else {
+            coverUrl = nil
+        }
+
+        return await LocalFileDataManager.shared.updateMangaMetadata(
+            mangaId: mangaId,
+            title: title,
+            description: description,
+            cover: coverUrl
+        )
+    }
+
     func setCover(for mangaId: String, image: PlatformImage) async -> String? {
+        let coverUrl = await writeCover(for: mangaId, image: image)
+        guard let coverUrl else { return nil }
+        return await CoreDataManager.shared.setCover(
+            sourceId: LocalSourceRunner.sourceKey,
+            mangaId: mangaId,
+            coverUrl: coverUrl
+        )
+    }
+
+    private func writeCover(for mangaId: String, image: PlatformImage) async -> String? {
         let mangaData = await LocalFileDataManager.shared.fetchLocalSeries(id: mangaId)
 
         // remove the cover image file if it exists
@@ -464,12 +553,7 @@ extension LocalFileManager {
             return nil
         }
 
-        // set cover image in coredata
-        return await CoreDataManager.shared.setCover(
-            sourceId: LocalSourceRunner.sourceKey,
-            mangaId: mangaId,
-            coverUrl: newCoverURL.toAidokuImageUrl()?.absoluteString
-        )
+        return newCoverURL.toAidokuImageUrl()?.absoluteString
     }
 }
 
@@ -571,10 +655,7 @@ extension LocalFileManager {
                 let mangaId = folder.lastPathComponent.normalized
 
                 // find cbz files in this folder
-                let cbzFiles = folder.contents
-                    .filter {
-                        Self.allowedFileExtensions.contains($0.pathExtension.lowercased())
-                    }
+                let cbzFiles = localArchiveFiles(in: folder)
                     .sorted {
                         $0.path.localizedStandardCompare($1.path) == .orderedAscending
                     }
@@ -591,7 +672,7 @@ extension LocalFileManager {
                     }
                 } else {
                     // add missing chapters
-                    let cbzFileNames = Set(cbzFiles.map { $0.lastPathComponent })
+                    let cbzFileNames = Set(cbzFiles.map { localRelativePath(for: $0, in: folder) })
 
                     let dbChapterFileNames = await LocalFileDataManager.shared.removeMissingChapters(
                         mangaId: mangaId,
@@ -610,10 +691,51 @@ extension LocalFileManager {
                 }
             }
 
+            let watchedFolders = mangaFolders.flatMap { [$0] + localDirectories(in: $0) }
+            await refreshFileSystemListeners(for: watchedFolders)
+
             // clear running task (complete)
             scanTask = nil
         }
         await scanTask?.value
+    }
+
+    private nonisolated func localArchiveFiles(in folder: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+        return enumerator.compactMap { item in
+            guard
+                let url = item as? URL,
+                !url.isDirectory,
+                Self.allowedFileExtensions.contains(url.pathExtension.lowercased())
+            else {
+                return nil
+            }
+            return url
+        }
+    }
+
+    private nonisolated func localRelativePath(for url: URL, in folder: URL) -> String {
+        url.path.replacingOccurrences(of: folder.path + "/", with: "")
+    }
+
+    private nonisolated func localDirectories(in folder: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+        return enumerator.compactMap { item in
+            guard let url = item as? URL, url.isDirectory else { return nil }
+            return url
+        }
     }
 }
 
@@ -624,10 +746,31 @@ extension LocalFileManager {
         let localFolder = FileManager.default.documentDirectory
             .appendingPathComponent("Local", isDirectory: true)
         localFolder.createDirectory()
+        watchDirectory(localFolder)
+    }
 
-        let fd = open(localFolder.path, O_EVTONLY)
+    private func refreshFileSystemListeners(for folders: [URL]) {
+        let localFolder = FileManager.default.documentDirectory
+            .appendingPathComponent("Local", isDirectory: true)
+        let expectedPaths = Set(([localFolder] + folders).map { $0.standardizedFileURL.path })
+
+        let stalePaths = folderSources.keys.filter { !expectedPaths.contains($0) }
+        for path in stalePaths {
+            folderSources[path]?.cancel()
+            folderSources[path] = nil
+        }
+
+        for folder in expectedPaths {
+            watchDirectory(URL(fileURLWithPath: folder, isDirectory: true))
+        }
+    }
+
+    private func watchDirectory(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        guard folderSources[path] == nil else { return }
+
+        let fd = open(path, O_EVTONLY)
         guard fd >= 0 else { return }
-        localFolderFileDescriptor = fd
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
@@ -639,22 +782,9 @@ extension LocalFileManager {
             Task { await LocalFileManager.shared.scanLocalFiles() }
         }
         source.setCancelHandler {
-            Task { await LocalFileManager.shared.closeLocalFolderFileDescriptor() }
-        }
-        localFolderSource = source
-        source.resume()
-    }
-
-    // stop file system listener
-//    func stopFileSystemListener() {
-//        localFolderSource?.cancel()
-//        localFolderSource = nil
-//    }
-
-    private func closeLocalFolderFileDescriptor() {
-        if let fd = self.localFolderFileDescriptor {
             close(fd)
-            self.localFolderFileDescriptor = nil
         }
+        folderSources[path] = source
+        source.resume()
     }
 }

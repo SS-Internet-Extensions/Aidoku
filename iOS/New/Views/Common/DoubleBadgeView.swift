@@ -10,14 +10,37 @@ import UIKit
 class DoubleBadgeView: UIView {
     var badgeNumber: Int = 0 {
         didSet {
-            badgeLabel.text = badgeNumber == 0 ? nil : String(badgeNumber)
+            updateText()
             updateLayout()
         }
     }
 
     var badgeNumber2: Int = 0 {
         didSet {
-            badgeLabel2.text = badgeNumber2 == 0 ? nil : String(badgeNumber2)
+            updateText()
+            updateLayout()
+        }
+    }
+
+    var badgeImage: UIImage? {
+        didSet {
+            badgeImageView.image = badgeImage
+            badgeImageView.isHidden = badgeImage == nil
+            updateLayout()
+        }
+    }
+
+    var badgeImage2: UIImage? {
+        didSet {
+            badgeImageView2.image = badgeImage2
+            badgeImageView2.isHidden = badgeImage2 == nil
+            updateLayout()
+        }
+    }
+
+    var badgeTextOverride2: String? {
+        didSet {
+            updateText()
             updateLayout()
         }
     }
@@ -27,9 +50,11 @@ class DoubleBadgeView: UIView {
         badgeView.isHidden = true
         badgeView.backgroundColor = tintColor
         badgeView.layer.cornerRadius = 5
-        badgeView.addSubview(badgeLabel)
+        badgeView.addSubview(badgeStackView)
         return badgeView
     }()
+
+    private lazy var badgeImageView = makeImageView()
 
     private let badgeLabel = {
         let badgeLabel = UILabel()
@@ -39,14 +64,18 @@ class DoubleBadgeView: UIView {
         return badgeLabel
     }()
 
+    private lazy var badgeStackView = makeStackView(imageView: badgeImageView, label: badgeLabel)
+
     private lazy var badgeView2 = {
         let badgeView = UIView()
         badgeView.isHidden = true
         badgeView.backgroundColor = .systemIndigo
         badgeView.layer.cornerRadius = 5
-        badgeView.addSubview(badgeLabel2)
+        badgeView.addSubview(badgeStackView2)
         return badgeView
     }()
+
+    private lazy var badgeImageView2 = makeImageView()
 
     private let badgeLabel2 = {
         let badgeLabel = UILabel()
@@ -56,15 +85,17 @@ class DoubleBadgeView: UIView {
         return badgeLabel
     }()
 
+    private lazy var badgeStackView2 = makeStackView(imageView: badgeImageView2, label: badgeLabel2)
+
     private var badgeConstraints: [NSLayoutConstraint] = []
 
     override var intrinsicContentSize: CGSize {
         var width: CGFloat = 0
         if !badgeView.isHidden {
-            width += (badgeLabel.text?.size(withAttributes: [.font: badgeLabel.font as Any]).width ?? 0) + 10
+            width += badgeWidth(label: badgeLabel, imageView: badgeImageView)
         }
         if !badgeView2.isHidden {
-            width += (badgeLabel2.text?.size(withAttributes: [.font: badgeLabel2.font as Any]).width ?? 0) + 10
+            width += badgeWidth(label: badgeLabel2, imageView: badgeImageView2)
         }
         return CGSize(width: width, height: 20)
     }
@@ -86,9 +117,9 @@ class DoubleBadgeView: UIView {
 
     func constrain() {
         badgeView.translatesAutoresizingMaskIntoConstraints = false
-        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeStackView.translatesAutoresizingMaskIntoConstraints = false
         badgeView2.translatesAutoresizingMaskIntoConstraints = false
-        badgeLabel2.translatesAutoresizingMaskIntoConstraints = false
+        badgeStackView2.translatesAutoresizingMaskIntoConstraints = false
 
         badgeLabel.setContentHuggingPriority(.required, for: .horizontal)
         badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -98,16 +129,16 @@ class DoubleBadgeView: UIView {
         NSLayoutConstraint.activate([
             badgeView.leadingAnchor.constraint(equalTo: leadingAnchor),
             badgeView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            badgeView.widthAnchor.constraint(equalTo: badgeLabel.widthAnchor, constant: 10),
+            badgeView.widthAnchor.constraint(equalTo: badgeStackView.widthAnchor, constant: 10),
             badgeView.heightAnchor.constraint(equalToConstant: 20),
-            badgeLabel.centerXAnchor.constraint(equalTo: badgeView.centerXAnchor),
-            badgeLabel.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
+            badgeStackView.centerXAnchor.constraint(equalTo: badgeView.centerXAnchor),
+            badgeStackView.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
 
             badgeView2.centerYAnchor.constraint(equalTo: centerYAnchor),
-            badgeView2.widthAnchor.constraint(equalTo: badgeLabel2.widthAnchor, constant: 10),
+            badgeView2.widthAnchor.constraint(equalTo: badgeStackView2.widthAnchor, constant: 10),
             badgeView2.heightAnchor.constraint(equalToConstant: 20),
-            badgeLabel2.centerXAnchor.constraint(equalTo: badgeView2.centerXAnchor),
-            badgeLabel2.centerYAnchor.constraint(equalTo: badgeView2.centerYAnchor)
+            badgeStackView2.centerXAnchor.constraint(equalTo: badgeView2.centerXAnchor),
+            badgeStackView2.centerYAnchor.constraint(equalTo: badgeView2.centerYAnchor)
         ])
 
         updateLayout()
@@ -158,6 +189,38 @@ class DoubleBadgeView: UIView {
         }
         NSLayoutConstraint.activate(badgeConstraints)
         invalidateIntrinsicContentSize()
+    }
+
+    private func updateText() {
+        badgeLabel.text = badgeNumber == 0 ? nil : String(badgeNumber)
+        badgeLabel2.text = badgeNumber2 == 0 ? nil : badgeTextOverride2 ?? String(badgeNumber2)
+    }
+
+    private func makeImageView() -> UIImageView {
+        let imageView = UIImageView()
+        imageView.isHidden = true
+        imageView.tintColor = .white
+        imageView.contentMode = .scaleAspectFit
+        imageView.preferredSymbolConfiguration = .init(pointSize: 10, weight: .semibold)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.widthAnchor.constraint(equalToConstant: 11).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 11).isActive = true
+        return imageView
+    }
+
+    private func makeStackView(imageView: UIImageView, label: UILabel) -> UIStackView {
+        let stackView = UIStackView(arrangedSubviews: [imageView, label])
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.spacing = 3
+        return stackView
+    }
+
+    private func badgeWidth(label: UILabel, imageView: UIImageView) -> CGFloat {
+        let textWidth = label.text?.size(withAttributes: [.font: label.font as Any]).width ?? 0
+        let imageWidth: CGFloat = imageView.isHidden ? 0 : 11
+        let spacing: CGFloat = imageWidth > 0 && textWidth > 0 ? 3 : 0
+        return textWidth + imageWidth + spacing + 10
     }
 }
 

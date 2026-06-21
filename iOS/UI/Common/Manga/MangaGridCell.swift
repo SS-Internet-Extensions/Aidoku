@@ -31,6 +31,15 @@ class MangaGridCell: UICollectionViewCell {
         }
     }
 
+    var showsLocalBadge: Bool {
+        get {
+            !localBadgeView.isHidden
+        }
+        set {
+            localBadgeView.isHidden = !newValue
+        }
+    }
+
     var badgeNumber: Int {
         get { badgeView.badgeNumber }
         set { badgeView.badgeNumber = newValue }
@@ -48,6 +57,7 @@ class MangaGridCell: UICollectionViewCell {
     private lazy var badgeView = DoubleBadgeView()
 
     private let bookmarkView = UIImageView()
+    private let localBadgeView = UILabel()
     private let highlightView = UIView()
 
     private var url: String?
@@ -113,6 +123,16 @@ class MangaGridCell: UICollectionViewCell {
         bookmarkView.contentMode = .scaleAspectFit
         contentView.addSubview(bookmarkView)
 
+        localBadgeView.isHidden = true
+        localBadgeView.text = NSLocalizedString("LOCAL_BADGE")
+        localBadgeView.textColor = .white
+        localBadgeView.backgroundColor = .systemTeal
+        localBadgeView.font = .systemFont(ofSize: 10, weight: .semibold)
+        localBadgeView.textAlignment = .center
+        localBadgeView.layer.cornerRadius = 5
+        localBadgeView.clipsToBounds = true
+        contentView.addSubview(localBadgeView)
+
         highlightView.alpha = 0
         highlightView.backgroundColor = UIColor(white: 0, alpha: 0.5)
         highlightView.layer.cornerRadius = layer.cornerRadius
@@ -130,6 +150,7 @@ class MangaGridCell: UICollectionViewCell {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         badgeView.translatesAutoresizingMaskIntoConstraints = false
         bookmarkView.translatesAutoresizingMaskIntoConstraints = false
+        localBadgeView.translatesAutoresizingMaskIntoConstraints = false
         highlightView.translatesAutoresizingMaskIntoConstraints = false
         selectionView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -156,6 +177,11 @@ class MangaGridCell: UICollectionViewCell {
             bookmarkView.topAnchor.constraint(equalTo: contentView.topAnchor),
             bookmarkView.widthAnchor.constraint(equalToConstant: 17),
             bookmarkView.heightAnchor.constraint(equalToConstant: 27),
+
+            localBadgeView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            localBadgeView.topAnchor.constraint(equalTo: bookmarkView.bottomAnchor, constant: 4),
+            localBadgeView.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            localBadgeView.heightAnchor.constraint(equalToConstant: 18),
 
             highlightView.topAnchor.constraint(equalTo: contentView.topAnchor),
             highlightView.leftAnchor.constraint(equalTo: contentView.leftAnchor),
@@ -185,6 +211,20 @@ class MangaGridCell: UICollectionViewCell {
         imageTask?.cancel()
         imageTask = nil
         highlightView.alpha = 0
+        showsBookmark = false
+        showsLocalBadge = false
+        badgeView.badgeTextOverride2 = nil
+    }
+}
+
+extension MangaGridCell {
+    func setBadgeImages(primary: UIImage?, secondary: UIImage?) {
+        badgeView.badgeImage = primary
+        badgeView.badgeImage2 = secondary
+    }
+
+    func setSecondaryBadgeTextOverride(_ text: String?) {
+        badgeView.badgeTextOverride2 = text
     }
 }
 

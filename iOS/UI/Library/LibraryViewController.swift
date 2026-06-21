@@ -394,6 +394,23 @@ class LibraryViewController: OldMangaCollectionViewController {
             }
             self?.reloadItems()
         }
+        addObserver(forName: .localSourceBadges) { [weak self] _ in
+            if UserDefaults.standard.bool(forKey: "Library.localSourceBadges") {
+                self?.viewModel.badgeType.insert(.local)
+            } else {
+                self?.viewModel.badgeType.remove(.local)
+            }
+            self?.reloadItems()
+        }
+        addObserver(forName: .groupPinnedTitles) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.viewModel.groupPinnedTitles = UserDefaults.standard.bool(forKey: "Library.groupPinnedTitles")
+                await self.viewModel.loadLibrary()
+                self.updateDataSource()
+                self.updateMoreMenu()
+            }
+        }
 
         // update history
         addObserver(forName: .updateHistory) { [weak self] _ in
@@ -474,6 +491,13 @@ class LibraryViewController: OldMangaCollectionViewController {
 
         cell.badgeNumber = viewModel.badgeType.contains(.unread) ? info.unread : 0
         cell.badgeNumber2 = viewModel.badgeType.contains(.downloaded) ? info.downloads : 0
+        cell.setBadgeImages(
+            primary: UIImage(systemName: "book.closed.fill"),
+            secondary: UIImage(systemName: "arrow.down.circle.fill")
+        )
+        cell.setSecondaryBadgeTextOverride(nil)
+        cell.showsBookmark = viewModel.isManuallyPinned(info)
+        cell.showsLocalBadge = viewModel.badgeType.contains(.local) && info.sourceId == LocalSourceRunner.sourceKey
 
         cell.setEditing(self.isEditing, animated: false)
     }
@@ -483,6 +507,13 @@ class LibraryViewController: OldMangaCollectionViewController {
 
         cell.badgeNumber = viewModel.badgeType.contains(.unread) ? info.unread : 0
         cell.badgeNumber2 = viewModel.badgeType.contains(.downloaded) ? info.downloads : 0
+        cell.setBadgeImages(
+            primary: UIImage(systemName: "book.closed.fill"),
+            secondary: UIImage(systemName: "arrow.down.circle.fill")
+        )
+        cell.setSecondaryBadgeTextOverride(nil)
+        cell.showsPin = viewModel.isManuallyPinned(info)
+        cell.showsLocalBadge = viewModel.badgeType.contains(.local) && info.sourceId == LocalSourceRunner.sourceKey
 
         cell.setEditing(isEditing, animated: false)
     }
@@ -1085,30 +1116,123 @@ extension LibraryViewController {
             self.setEditing(true, animated: true)
         }
 
-        let layoutActions = [
-            UIAction(
-                title: NSLocalizedString("LAYOUT_GRID"),
-                image: UIImage(systemName: "square.grid.2x2"),
-                state: usesListLayout ? .off : .on
-            ) { [weak self] _ in
-                guard let self, self.usesListLayout else { return }
-                self.usesListLayout = false
-                self.collectionView.setCollectionViewLayout(self.makeCollectionViewLayout(), animated: true)
-                self.collectionView.reloadData()
-                self.updateMoreMenu()
-            },
-            UIAction(
-                title: NSLocalizedString("LAYOUT_LIST"),
-                image: UIImage(systemName: "list.bullet"),
-                state: usesListLayout ? .on : .off
-            ) { [weak self] _ in
-                guard let self, !self.usesListLayout else { return }
-                self.usesListLayout = true
-                self.collectionView.setCollectionViewLayout(self.makeCollectionViewLayout(), animated: true)
-                self.collectionView.reloadData()
-                self.updateMoreMenu()
+        let layoutMenu = UIMenu(
+            title: NSLocalizedString("LAYOUT"),
+            image: UIImage(systemName: "rectangle.grid.2x2"),
+            children: [
+                UIAction(
+                    title: NSLocalizedString("LAYOUT_GRID"),
+                    image: UIImage(systemName: "square.grid.2x2"),
+                    state: usesListLayout ? .off : .on
+                ) { [weak self] _ in
+                    guard let self, self.usesListLayout else { return }
+                    self.usesListLayout = false
+                    self.collectionView.setCollectionViewLayout(self.makeCollectionViewLayout(), animated: true)
+                    self.collectionView.reloadData()
+                    self.updateMoreMenu()
+                },
+                UIAction(
+                    title: NSLocalizedString("LAYOUT_LIST"),
+                    image: UIImage(systemName: "list.bullet"),
+                    state: usesListLayout ? .on : .off
+                ) { [weak self] _ in
+                    guard let self, !self.usesListLayout else { return }
+                    self.usesListLayout = true
+                    self.collectionView.setCollectionViewLayout(self.makeCollectionViewLayout(), animated: true)
+                    self.collectionView.reloadData()
+                    self.updateMoreMenu()
+                }
+            ]
+        )
+
+        let menuKeepsPresented: UIMenuElement.Attributes = if #available(iOS 16.0, *) {
+            .keepsMenuPresented
+        } else {
+            []
+        }
+
+        let badgeMenu = UIMenu(
+            title: NSLocalizedString("BADGES"),
+            image: UIImage(systemName: "number.circle"),
+            children: [
+                UIAction(
+                    title: NSLocalizedString("UNREAD_CHAPTER_BADGES"),
+                    image: UIImage(systemName: "book.closed.fill"),
+                    attributes: menuKeepsPresented,
+                    state: viewModel.badgeType.contains(.unread) ? .on : .off
+                ) { [weak self] _ in
+                    guard let self else { return }
+                    let enabled = !self.viewModel.badgeType.contains(.unread)
+                    UserDefaults.standard.set(enabled, forKey: "Library.unreadChapterBadges")
+                    NotificationCenter.default.post(name: .init("Library.unreadChapterBadges"), object: enabled)
+                },
+                UIAction(
+                    title: NSLocalizedString("DOWNLOADED_CHAPTER_BADGES"),
+                    image: UIImage(systemName: "arrow.down.circle.fill"),
+                    attributes: menuKeepsPresented,
+                    state: viewModel.badgeType.contains(.downloaded) ? .on : .off
+                ) { [weak self] _ in
+                    guard let self else { return }
+                    let enabled = !self.viewModel.badgeType.contains(.downloaded)
+                    UserDefaults.standard.set(enabled, forKey: "Library.downloadedChapterBadges")
+                    NotificationCenter.default.post(name: .init("Library.downloadedChapterBadges"), object: enabled)
+                },
+                UIAction(
+                    title: NSLocalizedString("LOCAL_SOURCE_BADGES"),
+                    image: UIImage(systemName: "folder.fill"),
+                    attributes: menuKeepsPresented,
+                    state: viewModel.badgeType.contains(.local) ? .on : .off
+                ) { [weak self] _ in
+                    guard let self else { return }
+                    let enabled = !self.viewModel.badgeType.contains(.local)
+                    UserDefaults.standard.set(enabled, forKey: "Library.localSourceBadges")
+                    NotificationCenter.default.post(name: .localSourceBadges, object: enabled)
+                }
+            ]
+        )
+
+        let groupingMenu = UIMenu(
+            title: NSLocalizedString("GROUPING"),
+            image: UIImage(systemName: "square.stack.3d.up"),
+            children: [
+                UIAction(
+                    title: NSLocalizedString("GROUP_PINNED_TITLES"),
+                    image: UIImage(systemName: "pin.fill"),
+                    state: viewModel.groupPinnedTitles ? .on : .off
+                ) { [weak self] _ in
+                    guard let self else { return }
+                    Task {
+                        await self.viewModel.setGroupPinnedTitles(!self.viewModel.groupPinnedTitles)
+                        self.updateDataSource()
+                        self.updateMoreMenu()
+                    }
+                }
+            ]
+        )
+
+        let displayMenu = UIMenu(
+            title: NSLocalizedString("DISPLAY"),
+            subtitle: usesListLayout ? NSLocalizedString("LAYOUT_LIST") : NSLocalizedString("LAYOUT_GRID"),
+            image: UIImage(systemName: "rectangle.grid.1x2"),
+            children: [layoutMenu, groupingMenu, badgeMenu]
+        )
+
+        let pinMenu = UIMenu(
+            title: NSLocalizedString("PIN_TITLES"),
+            subtitle: viewModel.pinType.title,
+            image: UIImage(systemName: "pin"),
+            children: LibraryViewModel.PinType.allCases.map { type in
+                UIAction(
+                    title: type.title,
+                    state: viewModel.pinType == type ? .on : .off
+                ) { [weak self] _ in
+                    guard let self, self.viewModel.pinType != type else { return }
+                    UserDefaults.standard.set(type.rawValue, forKey: "Library.pinTitles")
+                    NotificationCenter.default.post(name: .pinTitles, object: type.rawValue)
+                    self.updateMoreMenu()
+                }
             }
-        ]
+        )
 
         let sortMenu = UIMenu(
             title: NSLocalizedString("SORT_BY"),
@@ -1211,7 +1335,7 @@ extension LibraryViewController {
         moreBarButton.menu = UIMenu(
             children: [
                 UIMenu(options: .displayInline, children: [selectAction]),
-                UIMenu(options: .displayInline, children: layoutActions),
+                UIMenu(options: .displayInline, children: [displayMenu, pinMenu]),
                 UIMenu(options: .displayInline, children: [sortMenu, filterMenu])
             ]
         )
@@ -1494,6 +1618,18 @@ extension LibraryViewController {
                     )
                 })
             }
+
+            let allPinned = mangaInfo.allSatisfy { self.viewModel.isManuallyPinned($0) }
+            actions.append(UIAction(
+                title: allPinned ? NSLocalizedString("UNPIN_TITLE") : NSLocalizedString("PIN_TITLE"),
+                image: UIImage(systemName: allPinned ? "pin.slash" : "pin")
+            ) { _ in
+                Task {
+                    await self.viewModel.setManuallyPinned(!allPinned, manga: mangaInfo)
+                    self.updateDataSource()
+                    self.updateMoreMenu()
+                }
+            })
 
             actions.append(UIAction(
                 title: NSLocalizedString("MIGRATE"),

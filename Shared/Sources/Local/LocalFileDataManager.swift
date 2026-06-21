@@ -93,6 +93,7 @@ extension LocalFileDataManager {
             let results = try context.fetch(request)
             return results.map {
                 LocalSeriesInfo(
+                    id: $0.id,
                     coverUrl: $0.cover ?? "",
                     name: $0.title,
                     chapterCount: $0.chapters?.count ?? 0
@@ -173,6 +174,62 @@ extension LocalFileDataManager {
 
 // MARK: Removing
 extension LocalFileDataManager {
+    func updateMangaMetadata(
+        mangaId: String,
+        title: String,
+        description: String?,
+        cover: String? = nil
+    ) -> AidokuRunner.Manga? {
+        let request = MangaObject.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "id == %@ AND sourceId == %@",
+            mangaId,
+            LocalSourceRunner.sourceKey
+        )
+        request.fetchLimit = 1
+
+        guard let object = (try? context.fetch(request))?.first else {
+            return nil
+        }
+
+        object.title = title
+        object.desc = description
+        if let cover {
+            object.cover = cover
+        }
+
+        try? context.save()
+        return object.toNewManga()
+    }
+
+    func updateChapterMetadata(
+        mangaId: String,
+        chapterId: String,
+        title: String?,
+        volume: Float?,
+        chapter: Float?
+    ) -> AidokuRunner.Chapter? {
+        let request = ChapterObject.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "id == %@ AND mangaId == %@ AND sourceId == %@",
+            chapterId,
+            mangaId,
+            LocalSourceRunner.sourceKey
+        )
+        request.fetchLimit = 1
+
+        guard let object = (try? context.fetch(request))?.first else {
+            return nil
+        }
+
+        object.title = title
+        object.volume = volume.map { NSNumber(value: $0) }
+        object.chapter = chapter.map { NSNumber(value: $0) }
+
+        try? context.save()
+        return object.toNewChapter()
+    }
+
     // remove a manga object (and all associated chapters) from the db
     func removeManga(with mangaId: String) -> String? {
         let request = MangaObject.fetchRequest()
@@ -271,7 +328,8 @@ extension LocalFileDataManager {
         let chaptersToRemove = dbChapters.filter { chapter in
             guard let path = chapter.fileInfo?.path else { return false }
             let fileName = URL(fileURLWithPath: path).lastPathComponent
-            return !availableChapters.contains(fileName)
+            let relativePath = localChapterPath(from: path, mangaId: mangaId)
+            return !availableChapters.contains(relativePath) && !availableChapters.contains(fileName)
         }
         for chapter in chaptersToRemove {
             self.context.delete(chapter)
@@ -283,7 +341,7 @@ extension LocalFileDataManager {
         let dbChapterFileNames: Set<String> = Set(dbChapters.compactMap { chapter in
             guard !chaptersToRemove.contains(chapter) else { return nil }
             guard let path = chapter.fileInfo?.path else { return nil }
-            return URL(fileURLWithPath: path).lastPathComponent
+            return localChapterPath(from: path, mangaId: mangaId)
         })
 
         return dbChapterFileNames
@@ -445,5 +503,13 @@ extension LocalFileDataManager {
             return String(path.dropFirst(privatePrefix.count))
         }
         return path
+    }
+
+    private func localChapterPath(from path: String, mangaId: String) -> String {
+        let prefix = "Local/\(mangaId)/"
+        if path.hasPrefix(prefix) {
+            return String(path.dropFirst(prefix.count))
+        }
+        return URL(fileURLWithPath: path).lastPathComponent
     }
 }

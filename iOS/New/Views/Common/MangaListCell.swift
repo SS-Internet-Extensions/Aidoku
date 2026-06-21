@@ -42,6 +42,24 @@ class MangaListCell: UICollectionViewCell {
         }
     }
 
+    var showsPin: Bool {
+        get {
+            bookmarkImageView.image != nil
+        }
+        set {
+            bookmarkImageView.image = newValue ? UIImage(systemName: "pin.fill") : nil
+        }
+    }
+
+    var showsLocalBadge: Bool {
+        get {
+            !localBadgeView.isHidden
+        }
+        set {
+            localBadgeView.isHidden = !newValue
+        }
+    }
+
     lazy var coverImageView = {
         let imageView = GIFImageView()
         imageView.image = UIImage(named: "MangaPlaceholder")
@@ -87,6 +105,18 @@ class MangaListCell: UICollectionViewCell {
     }()
 
     private lazy var tagScrollView = TagScrollView()
+    private lazy var localBadgeView = {
+        let label = UILabel()
+        label.isHidden = true
+        label.text = NSLocalizedString("LOCAL_BADGE")
+        label.textColor = .white
+        label.backgroundColor = .systemTeal
+        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 5
+        label.clipsToBounds = true
+        return label
+    }()
     private lazy var selectionView = SelectionCheckView()
     private lazy var badgeView = DoubleBadgeView()
 
@@ -115,6 +145,7 @@ class MangaListCell: UICollectionViewCell {
 
         contentView.addSubview(selectionView)
         contentView.addSubview(coverImageView)
+        contentView.addSubview(localBadgeView)
         contentView.addSubview(titleStackView)
         contentView.addSubview(badgeView)
     }
@@ -122,6 +153,7 @@ class MangaListCell: UICollectionViewCell {
     func constrain() {
         coverImageView.translatesAutoresizingMaskIntoConstraints = false
         bookmarkImageView.translatesAutoresizingMaskIntoConstraints = false
+        localBadgeView.translatesAutoresizingMaskIntoConstraints = false
         titleStackView.translatesAutoresizingMaskIntoConstraints = false
         selectionView.translatesAutoresizingMaskIntoConstraints = false
         badgeView.translatesAutoresizingMaskIntoConstraints = false
@@ -146,6 +178,11 @@ class MangaListCell: UICollectionViewCell {
             bookmarkImageView.widthAnchor.constraint(equalToConstant: 17),
             bookmarkImageView.heightAnchor.constraint(equalToConstant: 27),
 
+            localBadgeView.trailingAnchor.constraint(equalTo: coverImageView.trailingAnchor, constant: -5),
+            localBadgeView.bottomAnchor.constraint(equalTo: coverImageView.bottomAnchor, constant: -5),
+            localBadgeView.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            localBadgeView.heightAnchor.constraint(equalToConstant: 18),
+
             textTrailingConstraint!,
             titleStackView.leadingAnchor.constraint(equalTo: coverImageView.trailingAnchor, constant: 12),
             titleStackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -163,6 +200,9 @@ class MangaListCell: UICollectionViewCell {
         imageTask?.cancel()
         imageTask = nil
         setBadgeVisible(false)
+        showsPin = false
+        showsLocalBadge = false
+        badgeView.badgeTextOverride2 = nil
         alpha = 1
     }
 
@@ -262,6 +302,16 @@ extension MangaListCell {
         Task {
             await loadImage(url: info.coverUrl)
         }
+    }
+
+    func setBadgeImages(primary: UIImage?, secondary: UIImage?) {
+        badgeView.badgeImage = primary
+        badgeView.badgeImage2 = secondary
+    }
+
+    func setSecondaryBadgeTextOverride(_ text: String?) {
+        badgeView.badgeTextOverride2 = text
+        badgeWidthConstraint?.constant = badgeView.intrinsicContentSize.width
     }
 }
 

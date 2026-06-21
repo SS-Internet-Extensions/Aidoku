@@ -271,6 +271,62 @@ extension MangaView {
 }
 
 extension MangaView.ViewModel {
+    func updateLocalMangaMetadata(
+        title: String,
+        description: String?,
+        coverImage: PlatformImage?
+    ) async {
+        guard manga.isLocal() else { return }
+        guard let updatedManga = await LocalFileManager.shared.updateMangaMetadata(
+            mangaId: manga.key,
+            title: title,
+            description: description,
+            coverImage: coverImage
+        ) else {
+            return
+        }
+
+        var updated = updatedManga
+        updated.chapters = manga.chapters
+        withAnimation {
+            manga = updated
+        }
+        NotificationCenter.default.post(name: .updateMangaDetails, object: updated)
+        NotificationCenter.default.post(name: .init("refresh-content"), object: nil)
+    }
+
+    func updateLocalChapterMetadata(
+        chapterId: String,
+        title: String?,
+        volume: Float?,
+        chapter: Float?
+    ) async {
+        guard manga.isLocal() else { return }
+        guard let updatedChapter = await LocalFileDataManager.shared.updateChapterMetadata(
+            mangaId: manga.key,
+            chapterId: chapterId,
+            title: title,
+            volume: volume,
+            chapter: chapter
+        ) else {
+            return
+        }
+
+        func replaceChapter(in chapters: inout [AidokuRunner.Chapter]) {
+            guard let index = chapters.firstIndex(where: { $0.key == chapterId }) else { return }
+            chapters[index] = updatedChapter
+        }
+
+        withAnimation {
+            replaceChapter(in: &chapters)
+            if var mangaChapters = manga.chapters {
+                replaceChapter(in: &mangaChapters)
+                manga.chapters = mangaChapters
+            }
+        }
+        NotificationCenter.default.post(name: .init("refresh-content"), object: nil)
+    }
+
     func refreshReadButtonState() {
         updateReadButton()
     }

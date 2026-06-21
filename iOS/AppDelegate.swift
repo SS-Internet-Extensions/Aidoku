@@ -137,7 +137,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 "Library.resumeLastOpenedChapter": false,
                 "Library.unreadChapterBadges": true,
                 "Library.downloadedChapterBadges": true,
+                "Library.localSourceBadges": true,
                 "Library.pinTitles": LibraryViewModel.PinType.none.rawValue,
+                "Library.groupPinnedTitles": true,
                 "Library.lockLibrary": false,
 
                 "Library.lockedCategories": [String](),

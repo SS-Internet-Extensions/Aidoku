@@ -27,6 +27,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
         window.makeKeyAndVisible()
         presentLaunchCover(over: window)
+        LegacyModernAutomaticBackupScheduler.shared.createBackupIfNeeded()
         return true
     }
 
@@ -95,6 +96,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
     func applicationDidEnterBackground(_ application: UIApplication) {
         beginShortBackgroundTask(application)
         NotificationCenter.default.post(name: Notification.Name("AidokuLegacyAppDidEnterBackground"), object: nil)
+        LegacyModernAutomaticBackupScheduler.shared.createBackupIfNeeded()
         aidokuLegacyTrimVolatileCaches()
     }
 
@@ -105,6 +107,7 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationWillTerminate(_ application: UIApplication) {
         NotificationCenter.default.post(name: Notification.Name("AidokuLegacyAppDidEnterBackground"), object: nil)
+        LegacyModernAutomaticBackupScheduler.shared.createBackupIfNeeded()
         aidokuLegacyTrimVolatileCaches()
         endShortBackgroundTask(application)
     }
@@ -125,7 +128,8 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
                 "AidokuLegacy.reader.restoreLastSession": true,
                 "AidokuLegacy.appearance.darkTheme": false,
                 "AidokuLegacy.library.automaticUpdates": false,
-                "AidokuLegacy.sources.automaticUpdates": true
+                "AidokuLegacy.sources.automaticUpdates": true,
+                "AidokuLegacy.backup.automaticModernBackups": false
             ]
         )
     }

@@ -22,6 +22,7 @@ struct MangaView: View {
     @State private var showRemoveAllConfirm = false
     @State private var showRemoveSelectedConfirm = false
     @State private var showConnectionAlert = false
+    @State private var showEditMangaMetadata = false
 
     @State private var detailsLoaded = false
     @State private var descriptionExpanded = false
@@ -29,6 +30,7 @@ struct MangaView: View {
     @State private var loadingAlert: UIAlertController?
 
     @State private var openChapter: AidokuRunner.Chapter?
+    @State private var editingChapterMetadata: AidokuRunner.Chapter?
 
     @StateObject private var refreshController = RefreshController()
 
@@ -170,6 +172,25 @@ struct MangaView: View {
                     source: viewModel.source,
                     manga: viewModel.manga
                 )
+            }
+            .sheet(isPresented: $showEditMangaMetadata) {
+                LocalMangaMetadataEditView(manga: viewModel.manga) { title, description, coverImage in
+                    await viewModel.updateLocalMangaMetadata(
+                        title: title,
+                        description: description,
+                        coverImage: coverImage
+                    )
+                }
+            }
+            .sheet(item: $editingChapterMetadata) { chapter in
+                LocalChapterMetadataEditView(chapter: chapter) { title, volume, chapterNumber in
+                    await viewModel.updateLocalChapterMetadata(
+                        chapterId: chapter.key,
+                        title: title,
+                        volume: volume,
+                        chapter: chapterNumber
+                    )
+                }
             }
             .task {
                 guard !detailsLoaded else { return }
@@ -484,6 +505,12 @@ extension MangaView {
 
         Section {
             if viewModel.manga.isLocal() {
+                Button {
+                    editingChapterMetadata = chapter
+                } label: {
+                    Label(NSLocalizedString("EDIT_METADATA"), systemImage: "pencil")
+                }
+
                 // if the chapter is from the local source, add a button to remove it instead of download
                 Button(role: .destructive) {
                     Task {
@@ -566,6 +593,9 @@ extension MangaView {
             showShareSheet: showShareSheet(item:),
             removeDownloads: {
                 showRemoveAllConfirm = true
+            },
+            editMetadata: {
+                showEditMangaMetadata = true
             },
             editMode: $editMode
         ).equatable()
@@ -843,6 +873,7 @@ private struct RightNavbarButton: View, Equatable {
     private let hasCategories: Bool
     private let url: URL?
     private let hasDownloads: Bool
+    private let isLocal: Bool
     private let isEditing: Bool
     private let refresh: () async -> Void
 
@@ -852,6 +883,7 @@ private struct RightNavbarButton: View, Equatable {
     let migrate: () -> Void
     let showShareSheet: (URL) -> Void
     let removeDownloads: () -> Void
+    let editMetadata: () -> Void
 
     @Binding var editMode: EditMode
 
@@ -864,12 +896,14 @@ private struct RightNavbarButton: View, Equatable {
         migrate: @escaping () -> Void,
         showShareSheet: @escaping (URL) -> Void,
         removeDownloads: @escaping () -> Void,
+        editMetadata: @escaping () -> Void,
         editMode: Binding<EditMode>
     ) {
         self.bookmarked = viewModel.bookmarked
         self.hasCategories = !CoreDataManager.shared.getCategoryTitles(sorted: false).isEmpty
         self.url = viewModel.manga.url
         self.hasDownloads = viewModel.downloadStatus.contains(where: { $0.value == .finished })
+        self.isLocal = viewModel.manga.isLocal()
         self.refresh = refreshController.refresh
 
         self.markAllRead = markAllRead
@@ -878,6 +912,7 @@ private struct RightNavbarButton: View, Equatable {
         self.migrate = migrate
         self.showShareSheet = showShareSheet
         self.removeDownloads = removeDownloads
+        self.editMetadata = editMetadata
 
         self.isEditing = editMode.wrappedValue == .active
         self._editMode = editMode
@@ -915,6 +950,13 @@ private struct RightNavbarButton: View, Equatable {
                         }
                     } label: {
                         Label(NSLocalizedString("SELECT_CHAPTERS"), systemImage: "checkmark.circle")
+                    }
+                    if isLocal {
+                        Button {
+                            editMetadata()
+                        } label: {
+                            Label(NSLocalizedString("EDIT_METADATA"), systemImage: "pencil")
+                        }
                     }
                     if bookmarked {
                         if hasCategories {
@@ -971,7 +1013,180 @@ private struct RightNavbarButton: View, Equatable {
             && lhs.hasCategories == rhs.hasCategories
             && lhs.url == rhs.url
             && lhs.hasDownloads == rhs.hasDownloads
+            && lhs.isLocal == rhs.isLocal
             && lhs.isEditing == rhs.isEditing
+    }
+}
+
+private struct LocalMangaMetadataEditView: View {
+    let onSave: (String, String?, PlatformImage?) async -> Void
+
+    @State private var title: String
+    @State private var description: String
+    @State private var coverImage: PlatformImage?
+    @State private var showImagePicker = false
+    @State private var saving = false
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let coverUrl: String?
+
+    init(
+        manga: AidokuRunner.Manga,
+        onSave: @escaping (String, String?, PlatformImage?) async -> Void
+    ) {
+        self.onSave = onSave
+        self._title = State(initialValue: manga.title)
+        self._description = State(initialValue: manga.description ?? "")
+        self.coverUrl = manga.cover
+    }
+
+    var body: some View {
+        PlatformNavigationStack {
+            Form {
+                Section {
+                    Button {
+                        showImagePicker = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            coverView
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(NSLocalizedString("COVER"))
+                                Text(NSLocalizedString("EDIT"))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                }
+
+                Section {
+                    TextField(NSLocalizedString("SERIES_TITLE"), text: $title)
+                        .autocorrectionDisabled()
+                    if #available(iOS 16.0, *) {
+                        TextField(NSLocalizedString("DESCRIPTION"), text: $description, axis: .vertical)
+                            .autocorrectionDisabled()
+                            .lineLimit(4...8)
+                    } else {
+                        TextField(NSLocalizedString("DESCRIPTION"), text: $description)
+                            .autocorrectionDisabled()
+                    }
+                }
+            }
+            .disabled(saving)
+            .navigationTitle(NSLocalizedString("EDIT_METADATA"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("CANCEL"), role: .cancel) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("SAVE")) {
+                        save()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
+                }
+            }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(image: $coverImage)
+                    .ignoresSafeArea()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverView: some View {
+        if let coverImage {
+            Image(uiImage: coverImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 60 * 2/3, height: 60)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+        } else {
+            MangaCoverView(
+                coverImage: coverUrl ?? "",
+                width: 60 * 2/3,
+                height: 60
+            )
+        }
+    }
+
+    private func save() {
+        saving = true
+        Task {
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            await onSave(
+                trimmedTitle,
+                trimmedDescription.isEmpty ? nil : trimmedDescription,
+                coverImage
+            )
+            dismiss()
+        }
+    }
+}
+
+private struct LocalChapterMetadataEditView: View {
+    let onSave: (String?, Float?, Float?) async -> Void
+
+    @State private var title: String
+    @State private var volume: Float?
+    @State private var chapter: Float?
+    @State private var saving = false
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        chapter: AidokuRunner.Chapter,
+        onSave: @escaping (String?, Float?, Float?) async -> Void
+    ) {
+        self.onSave = onSave
+        self._title = State(initialValue: chapter.title ?? "")
+        self._volume = State(initialValue: chapter.volumeNumber)
+        self._chapter = State(initialValue: chapter.chapterNumber)
+    }
+
+    var body: some View {
+        PlatformNavigationStack {
+            Form {
+                Section {
+                    TextField(NSLocalizedString("CHAPTER_TITLE"), text: $title)
+                        .autocorrectionDisabled()
+                    TextField(NSLocalizedString("VOLUME"), value: $volume, format: .number)
+                        .keyboardType(.decimalPad)
+                    TextField(NSLocalizedString("CHAPTER"), value: $chapter, format: .number)
+                        .keyboardType(.decimalPad)
+                }
+            }
+            .disabled(saving)
+            .navigationTitle(NSLocalizedString("EDIT_METADATA"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("CANCEL"), role: .cancel) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("SAVE")) {
+                        save()
+                    }
+                    .disabled(volume == nil && chapter == nil || saving)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        saving = true
+        Task {
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            await onSave(trimmedTitle.isEmpty ? nil : trimmedTitle, volume, chapter)
+            dismiss()
+        }
     }
 }
 

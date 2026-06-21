@@ -6114,6 +6114,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         case restoreBackup
         case importModernBackup
         case exportModernBackup
+        case automaticModernBackups
         case clearImageCache
         case clearHistory
         case clearLibrary
@@ -6132,7 +6133,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
         Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
         Section(title: "Library", rows: [.readingInsights, .manageCategories, .downloads, .localFiles, .selfHosted, .trackers]),
-        Section(title: "Backup & Restore", rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup]),
+        Section(
+            title: "Backup & Restore",
+            rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup, .automaticModernBackups]
+        ),
         Section(title: "Storage", rows: [.clearImageCache, .clearHistory, .clearLibrary]),
         Section(title: "About", rows: [.about])
     ]
@@ -6328,6 +6332,22 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             case .exportModernBackup:
                 cell.textLabel?.text = "Export Modern Backup"
                 cell.detailTextLabel?.text = "Save a modern Aidoku backup that newer apps can read."
+            case .automaticModernBackups:
+                let scheduler = LegacyModernAutomaticBackupScheduler.shared
+                cell.textLabel?.text = "Automatic Modern Backups"
+                if scheduler.isEnabled {
+                    if let lastBackupDate = scheduler.lastBackupDate {
+                        let formatter = DateFormatter()
+                        formatter.dateStyle = .medium
+                        formatter.timeStyle = .short
+                        cell.detailTextLabel?.text = "Daily on launch/background. Last: \(formatter.string(from: lastBackupDate))"
+                    } else {
+                        cell.detailTextLabel?.text = "Daily on launch/background. First backup pending."
+                    }
+                } else {
+                    cell.detailTextLabel?.text = "Off - create modern backups manually."
+                }
+                cell.accessoryType = scheduler.isEnabled ? .checkmark : .none
             case .clearImageCache:
                 cell.textLabel?.text = "Clear Image Cache"
                 cell.detailTextLabel?.text = "Remove cached covers and reader pages."
@@ -6422,6 +6442,10 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 openModernBackupPicker()
             case .exportModernBackup:
                 exportModernBackup()
+            case .automaticModernBackups:
+                let scheduler = LegacyModernAutomaticBackupScheduler.shared
+                scheduler.isEnabled = !scheduler.isEnabled
+                tableView.reloadRows(at: [indexPath], with: .automatic)
             case .clearImageCache:
                 LegacyImageLoader.shared.clear()
             case .clearHistory:

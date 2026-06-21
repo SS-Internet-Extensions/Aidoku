@@ -134,20 +134,35 @@ extension LocalFileImportView.ContentView {
             }
             .sheet(isPresented: $importing) {
                 DocumentPickerView(
-                    allowedContentTypes: [.init(filenameExtension: "cbz")!, .zip],
+                    allowedContentTypes: [.init(filenameExtension: "cbz")!, .zip, .folder],
+                    allowsMultipleSelection: true,
                     onDocumentsPicked: { urls in
-                        guard let url = urls.first else {
+                        guard !urls.isEmpty else {
                             loadingImport = false
                             return
                         }
                         loadingFile = true
                         Task {
-                            let importFileInfo = await LocalFileManager.shared.loadImportFileInfo(url: url)
-                            if let importFileInfo {
-                                fileInfo = importFileInfo
-                                fullyPresented = true
+                            if
+                                urls.count == 1,
+                                let url = urls.first,
+                                !url.isDirectory
+                            {
+                                let importFileInfo = await LocalFileManager.shared.loadImportFileInfo(url: url)
+                                if let importFileInfo {
+                                    fileInfo = importFileInfo
+                                    fullyPresented = true
+                                } else {
+                                    showImportFailAlert = true
+                                }
                             } else {
-                                showImportFailAlert = true
+                                let result = await LocalFileManager.shared.uploadItems(from: urls)
+                                if result.imported > 0 {
+                                    NotificationCenter.default.post(name: .init("refresh-content"), object: nil)
+                                    dismiss()
+                                } else {
+                                    showImportFailAlert = true
+                                }
                             }
                             loadingFile = false
                             loadingImport = false
@@ -405,11 +420,12 @@ extension LocalFileImportView.ContentView {
             ?? LocalFileNameParser.getMangaChapterNumber(from: fileInfo.name)
             ?? 1
         Task {
-            let hasSeries = await LocalFileDataManager.shared.hasSeries(id: seriesName.percentEncoded())
+            let seriesId = seriesName.normalized
+            let hasSeries = await LocalFileDataManager.shared.hasSeries(id: seriesId)
             nameEmpty = selectedMangaId.isEmpty ? seriesName.isEmpty : false
             nameValid = !hasSeries
             if hasSeries {
-                selectedMangaId = seriesName
+                selectedMangaId = seriesId
                 selectedMangaTitle = seriesName
             }
         }
@@ -438,7 +454,7 @@ extension LocalFileImportView.ContentView {
         if selectedMangaId.isEmpty {
             nameEmpty = seriesName.isEmpty
             Task {
-                nameValid = !(await LocalFileDataManager.shared.hasSeries(id: seriesName.percentEncoded()))
+                nameValid = !(await LocalFileDataManager.shared.hasSeries(id: seriesName.normalized))
             }
         } else {
             nameEmpty = false
@@ -587,7 +603,7 @@ extension LocalFileImportView.ContentView {
 
                     ForEach(series, id: \.self) { item in
                         seriesView(
-                            id: item.name,
+                            id: item.id,
                             imageUrl: item.coverUrl,
                             title: item.name,
                             subtitle: {

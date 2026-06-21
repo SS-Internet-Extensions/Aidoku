@@ -192,12 +192,22 @@ extension Settings {
                 value: .toggle(.init())
             ),
             .init(
+                key: "Library.localSourceBadges",
+                title: NSLocalizedString("LOCAL_SOURCE_BADGES"),
+                value: .toggle(.init())
+            ),
+            .init(
                 key: "Library.pinTitles",
                 title: NSLocalizedString("PIN_TITLES"),
                 value: .select(.init(
                     values: LibraryViewModel.PinType.allCases.map(\.rawValue),
                     titles: LibraryViewModel.PinType.allCases.map(\.title)
                 ))
+            ),
+            .init(
+                key: "Library.groupPinnedTitles",
+                title: NSLocalizedString("GROUP_PINNED_TITLES"),
+                value: .toggle(.init())
             )
         ]))),
         .init(value: .group(.init(items: [
