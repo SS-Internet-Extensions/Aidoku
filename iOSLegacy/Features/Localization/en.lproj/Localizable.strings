@@ -103,6 +103,17 @@
 "history.empty.title" = "No reading history.";
 "history.empty.detail" = "Open a chapter to start tracking progress.";
 
+/* MARK: - Reading Insights screen */
+"reading_insights.title" = "Reading Insights";
+"reading_insights.empty.message" = "No reading activity yet.\nRead a chapter to start tracking insights.";
+"reading_insights.stat.chapters_read" = "Chapters Read";
+"reading_insights.stat.days_active" = "Days Active";
+"reading_insights.stat.current_streak" = "Current Streak";
+"reading_insights.stat.longest_streak" = "Longest Streak";
+"reading_insights.activity" = "ACTIVITY";
+"reading_insights.clear.title" = "Clear Statistics";
+"reading_insights.clear.message" = "Remove all reading insights data? This cannot be undone.";
+
 /* MARK: - Updates screen */
 "updates.title" = "Updates";
 "updates.empty.title" = "No new chapters recorded.";

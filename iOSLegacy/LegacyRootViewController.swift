@@ -2707,7 +2707,7 @@ final class LegacyInsightsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Reading Insights"
+        title = LegacyString("reading_insights.title")
         view.backgroundColor = LegacyPalette.background
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -2760,16 +2760,16 @@ final class LegacyInsightsViewController: UIViewController {
         label.textAlignment = .center
         label.textColor = LegacyPalette.secondaryText
         label.font = UIFont.systemFont(ofSize: 15)
-        label.text = "No reading activity yet.\nRead a chapter to start tracking insights."
+        label.text = LegacyString("reading_insights.empty.message")
         return label
     }
 
     private func makeStatsGrid(store: LegacyReadingStatsStore) -> UIView {
         let items: [(String, String)] = [
-            ("\(store.totalChapters)", "Chapters Read"),
-            ("\(store.daysActive)", "Days Active"),
-            ("\(store.currentStreak)", "Current Streak"),
-            ("\(store.longestStreak)", "Longest Streak")
+            ("\(store.totalChapters)", LegacyString("reading_insights.stat.chapters_read")),
+            ("\(store.daysActive)", LegacyString("reading_insights.stat.days_active")),
+            ("\(store.currentStreak)", LegacyString("reading_insights.stat.current_streak")),
+            ("\(store.longestStreak)", LegacyString("reading_insights.stat.longest_streak"))
         ]
         // Two cards per row.
         let topRow = UIStackView()
@@ -2832,7 +2832,7 @@ final class LegacyInsightsViewController: UIViewController {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         titleLabel.textColor = LegacyPalette.secondaryText
-        titleLabel.text = "ACTIVITY"
+        titleLabel.text = LegacyString("reading_insights.activity")
 
         heatmap.translatesAutoresizingMaskIntoConstraints = false
         heatmap.backgroundColor = .clear
@@ -2856,7 +2856,7 @@ final class LegacyInsightsViewController: UIViewController {
 
     private func makeClearButton() -> UIView {
         let button = UIButton(type: .system)
-        button.setTitle("Clear Statistics", for: .normal)
+        button.setTitle(LegacyString("reading_insights.clear.title"), for: .normal)
         button.setTitleColor(UIColor.systemRed, for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 16)
         button.addTarget(self, action: #selector(confirmClear), for: .touchUpInside)
@@ -2866,12 +2866,12 @@ final class LegacyInsightsViewController: UIViewController {
 
     @objc private func confirmClear() {
         let alert = UIAlertController(
-            title: "Clear Statistics",
-            message: "Remove all reading insights data? This cannot be undone.",
+            title: LegacyString("reading_insights.clear.title"),
+            message: LegacyString("reading_insights.clear.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { [weak self] _ in
             LegacyReadingStatsStore.shared.clear()
             self?.rebuild()
         })
