@@ -358,18 +358,20 @@ final class LegacyKomgaClient {
     }
 
     private func parseKavitaBooks(volumes: [[String: Any]]) -> [LegacyKomgaBook] {
-        let candidates: [(book: LegacyKomgaBook, volume: Int, chapter: Float)] = volumes.flatMap { volume in
+        var candidates: [(book: LegacyKomgaBook, volume: Int, chapter: Float)] = []
+
+        for volume in volumes {
             let volumeNumber = LegacyKomgaClient.intValue(volume["number"]) ?? 0
             let normalizedVolume = volumeNumber < 0 || volumeNumber >= 100000 ? 0 : volumeNumber
             let chapters = volume["chapters"] as? [[String: Any]] ?? []
-            return chapters.compactMap { chapter in
-                guard let id = LegacyKomgaClient.stringId(chapter["id"]) else { return nil }
+            for chapter in chapters {
+                guard let id = LegacyKomgaClient.stringId(chapter["id"]) else { continue }
                 let files = chapter["files"] as? [[String: Any]] ?? []
                 let isEpub = files.contains { LegacyKomgaClient.intValue($0["format"]) == 3 }
-                guard !isEpub else { return nil }
+                guard !isEpub else { continue }
 
                 let pageCount = LegacyKomgaClient.intValue(chapter["pages"]) ?? 0
-                guard pageCount > 0 else { return nil }
+                guard pageCount > 0 else { continue }
 
                 let numberString = LegacyKomgaClient.nonEmptyString(chapter["number"])
                 let number = numberString.flatMap { Float($0) } ?? 0
@@ -380,7 +382,7 @@ final class LegacyKomgaClient {
                     }
                     ?? LegacyString("self_hosted.unknown_title")
 
-                return (
+                candidates.append((
                     book: LegacyKomgaBook(
                         id: id,
                         title: title,
@@ -389,7 +391,7 @@ final class LegacyKomgaClient {
                     ),
                     volume: normalizedVolume,
                     chapter: number
-                )
+                ))
             }
         }
 
