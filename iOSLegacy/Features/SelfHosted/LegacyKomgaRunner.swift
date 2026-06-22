@@ -44,13 +44,6 @@ final class LegacyKomgaRunner: AidokuRunnerLegacyRunner {
         self.client = LegacyKomgaClient(server: server)
     }
 
-    // HTTP Basic header value for the server credentials, or nil if it cannot be built.
-    private var basicAuthValue: String? {
-        let raw = "\(server.username):\(server.password)"
-        guard let encoded = raw.data(using: .utf8)?.base64EncodedString() else { return nil }
-        return "Basic \(encoded)"
-    }
-
     func getPageList(
         manga: AidokuRunnerLegacyManga,
         chapter: AidokuRunnerLegacyChapter,
@@ -84,13 +77,16 @@ final class LegacyKomgaRunner: AidokuRunnerLegacyRunner {
         context: [String: String]?,
         completion: @escaping (Result<AidokuRunnerLegacyImageRequest, Error>) -> Void
     ) {
-        var headers = ["Accept": "image/*"]
-        if let basicAuthValue = basicAuthValue {
-            headers["Authorization"] = basicAuthValue
+        client.imageHeaders { result in
+            switch result {
+                case .success(let headers):
+                    completion(.success(
+                        AidokuRunnerLegacyImageRequest(url: url, method: "GET", headers: headers, body: nil)
+                    ))
+                case .failure(let error):
+                    completion(.failure(error))
+            }
         }
-        completion(.success(
-            AidokuRunnerLegacyImageRequest(url: url, method: "GET", headers: headers, body: nil)
-        ))
     }
 
     // MARK: - Unsupported capabilities

@@ -51,20 +51,30 @@ final class LegacyKomgaClient {
             case .komga:
                 listKomgaBooks(seriesId: seriesId, completion: completion)
             case .kavita:
-                completion(.failure(LegacyKomgaError.requestFailed(
-                    LegacyString("self_hosted.error.kavita_books_unsupported")
-                )))
+                listKavitaBooks(seriesId: seriesId, completion: completion)
         }
     }
 
-    // URL for a single page image. `page` is 1-indexed (both Komga and Kavita).
+    // URL for a single page image. The public `page` argument is 1-indexed to
+    // match the reader; Kavita's API expects a 0-indexed page query value.
     func pageImageURL(bookId: String, page: Int) -> URL? {
         guard let base = server.url else { return nil }
         switch server.kind {
             case .komga:
                 return base.appendingPathComponent("api/v1/books/\(bookId)/pages/\(page)")
             case .kavita:
-                return nil
+                guard var components = URLComponents(
+                    url: base.appendingPathComponent("api/Reader/image"),
+                    resolvingAgainstBaseURL: false
+                ) else {
+                    return nil
+                }
+                components.queryItems = [
+                    URLQueryItem(name: "chapterId", value: bookId),
+                    URLQueryItem(name: "page", value: String(max(0, page - 1))),
+                    URLQueryItem(name: "extractPdf", value: "true")
+                ]
+                return components.url
         }
     }
 
@@ -76,6 +86,31 @@ final class LegacyKomgaClient {
                 return base.appendingPathComponent("api/v1/series/\(seriesId)/thumbnail")
             case .kavita:
                 return nil
+        }
+    }
+
+    // Headers required when the reader fetches a page image through a synthetic
+    // source. Komga uses Basic auth; Kavita uses the bearer token from login.
+    func imageHeaders(completion: @escaping (Result<[String: String], Error>) -> Void) {
+        switch server.kind {
+            case .komga:
+                var headers = ["Accept": "image/*"]
+                if let basicAuthValue = basicAuthValue {
+                    headers["Authorization"] = basicAuthValue
+                }
+                completion(.success(headers))
+            case .kavita:
+                authenticateKavita { result in
+                    switch result {
+                        case .success(let token):
+                            completion(.success([
+                                "Accept": "image/*",
+                                "Authorization": "Bearer \(token)"
+                            ]))
+                        case .failure(let error):
+                            completion(.failure(error))
+                    }
+                }
         }
     }
 
@@ -247,7 +282,20 @@ final class LegacyKomgaClient {
                                         coverURL: nil
                                     )
                                 }
-                                completion(.success(series))
+                                let filteredSeries: [LegacyKomgaSeries]
+                                if let query = query, !query.isEmpty {
+                                    filteredSeries = series.filter {
+                                        $0.title.range(
+                                            of: query,
+                                            options: [.caseInsensitive, .diacriticInsensitive]
+                                        ) != nil
+                                    }
+                                } else {
+                                    filteredSeries = series
+                                }
+                                let start = max(0, page) * 20
+                                let pageSlice = Array(filteredSeries.dropFirst(start).prefix(20))
+                                completion(.success(pageSlice))
                             case .failure(let error):
                                 completion(.failure(error))
                         }
@@ -256,6 +304,103 @@ final class LegacyKomgaClient {
                     completion(.failure(error))
             }
         }
+    }
+
+    private func listKavitaBooks(
+        seriesId: String,
+        completion: @escaping (Result<[LegacyKomgaBook], Error>) -> Void
+    ) {
+        authenticateKavita { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+                case .success(let token):
+                    guard let base = self.server.url else {
+                        completion(.failure(LegacyKomgaError.notConfigured))
+                        return
+                    }
+                    guard var components = URLComponents(
+                        url: base.appendingPathComponent("api/Series/volumes"),
+                        resolvingAgainstBaseURL: false
+                    ) else {
+                        completion(.failure(LegacyKomgaError.notConfigured))
+                        return
+                    }
+                    components.queryItems = [URLQueryItem(name: "seriesId", value: seriesId)]
+                    guard let url = components.url else {
+                        completion(.failure(LegacyKomgaError.notConfigured))
+                        return
+                    }
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "GET"
+                    request.setValue("application/json", forHTTPHeaderField: "Accept")
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+                    self.performData(request: request) { dataResult in
+                        switch dataResult {
+                            case .success(let data):
+                                guard
+                                    let volumes = (try? JSONSerialization.jsonObject(with: data, options: []))
+                                        as? [[String: Any]]
+                                else {
+                                    completion(.failure(LegacyKomgaError.invalidResponse))
+                                    return
+                                }
+                                let books = self.parseKavitaBooks(volumes: volumes)
+                                completion(.success(books))
+                            case .failure(let error):
+                                completion(.failure(error))
+                        }
+                    }
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
+    }
+
+    private func parseKavitaBooks(volumes: [[String: Any]]) -> [LegacyKomgaBook] {
+        let candidates: [(book: LegacyKomgaBook, volume: Int, chapter: Float)] = volumes.flatMap { volume in
+            let volumeNumber = LegacyKomgaClient.intValue(volume["number"]) ?? 0
+            let normalizedVolume = volumeNumber < 0 || volumeNumber >= 100000 ? 0 : volumeNumber
+            let chapters = volume["chapters"] as? [[String: Any]] ?? []
+            return chapters.compactMap { chapter in
+                guard let id = LegacyKomgaClient.stringId(chapter["id"]) else { return nil }
+                let files = chapter["files"] as? [[String: Any]] ?? []
+                let isEpub = files.contains { LegacyKomgaClient.intValue($0["format"]) == 3 }
+                guard !isEpub else { return nil }
+
+                let pageCount = LegacyKomgaClient.intValue(chapter["pages"]) ?? 0
+                guard pageCount > 0 else { return nil }
+
+                let numberString = LegacyKomgaClient.nonEmptyString(chapter["number"])
+                let number = numberString.flatMap { Float($0) } ?? 0
+                let title = LegacyKomgaClient.nonEmptyString(chapter["titleName"])
+                    ?? LegacyKomgaClient.nonEmptyString(chapter["title"])
+                    ?? numberString.map {
+                        String(format: LegacyString("self_hosted.chapter_title"), $0)
+                    }
+                    ?? LegacyString("self_hosted.unknown_title")
+
+                return (
+                    book: LegacyKomgaBook(
+                        id: id,
+                        title: title,
+                        number: number,
+                        pageCount: pageCount
+                    ),
+                    volume: normalizedVolume,
+                    chapter: number
+                )
+            }
+        }
+
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.volume == rhs.volume {
+                    return lhs.chapter < rhs.chapter
+                }
+                return lhs.volume < rhs.volume
+            }
+            .map { $0.book }
     }
 
     // Logs in to Kavita and caches the returned JWT token.
@@ -276,7 +421,8 @@ final class LegacyKomgaClient {
 
         let body: [String: Any] = [
             "username": server.username,
-            "password": server.password
+            "password": server.password,
+            "apiKey": ""
         ]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
@@ -307,11 +453,16 @@ final class LegacyKomgaClient {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let raw = "\(server.username):\(server.password)"
-        if let encoded = raw.data(using: .utf8)?.base64EncodedString() {
-            request.setValue("Basic \(encoded)", forHTTPHeaderField: "Authorization")
+        if let basicAuthValue = basicAuthValue {
+            request.setValue(basicAuthValue, forHTTPHeaderField: "Authorization")
         }
         return request
+    }
+
+    private var basicAuthValue: String? {
+        let raw = "\(server.username):\(server.password)"
+        guard let encoded = raw.data(using: .utf8)?.base64EncodedString() else { return nil }
+        return "Basic \(encoded)"
     }
 
     // Executes a request and decodes a top-level JSON object.
@@ -385,5 +536,24 @@ final class LegacyKomgaClient {
             return String(int)
         }
         return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int {
+            return int
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        if let string = value as? String {
+            return Int(string)
+        }
+        return nil
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

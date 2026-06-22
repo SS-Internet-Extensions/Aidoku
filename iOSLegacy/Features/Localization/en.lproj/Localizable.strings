@@ -232,6 +232,7 @@
 "self_hosted.book_count.many" = "%d books";
 "self_hosted.page_count.one" = "1 page";
 "self_hosted.page_count.many" = "%d pages";
+"self_hosted.chapter_title" = "Chapter %@";
 "self_hosted.unknown_title" = "Unknown";
 "self_hosted.error.not_configured" = "The server is not configured correctly.";
 "self_hosted.error.invalid_response" = "Received an invalid response from the server.";
