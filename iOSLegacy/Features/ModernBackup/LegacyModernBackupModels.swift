@@ -28,10 +28,13 @@ struct LegacyModernBackup: Codable {
     var history: [LegacyModernBackupHistory]?
     var manga: [LegacyModernBackupManga]?
     var chapters: [LegacyModernBackupChapter]?
+    var trackItems: [LegacyModernBackupTrackItem]?
+    var readingSessions: [LegacyModernBackupReadingSession]?
     var updates: [LegacyModernBackupUpdate]?
     var categories: [LegacyModernBackupCategory]?
     var sources: [LegacyModernBackupSource]?
     var sourceLists: [String]?
+    var settings: [String: LegacyModernBackupSettingValue]?
     var date: Date
     var name: String?
     var automatic: Bool?
@@ -42,10 +45,13 @@ struct LegacyModernBackup: Codable {
         history: [LegacyModernBackupHistory]? = nil,
         manga: [LegacyModernBackupManga]? = nil,
         chapters: [LegacyModernBackupChapter]? = nil,
+        trackItems: [LegacyModernBackupTrackItem]? = nil,
+        readingSessions: [LegacyModernBackupReadingSession]? = nil,
         updates: [LegacyModernBackupUpdate]? = nil,
         categories: [LegacyModernBackupCategory]? = nil,
         sources: [LegacyModernBackupSource]? = nil,
         sourceLists: [String]? = nil,
+        settings: [String: LegacyModernBackupSettingValue]? = nil,
         date: Date,
         name: String? = nil,
         automatic: Bool? = nil,
@@ -55,10 +61,13 @@ struct LegacyModernBackup: Codable {
         self.history = history
         self.manga = manga
         self.chapters = chapters
+        self.trackItems = trackItems
+        self.readingSessions = readingSessions
         self.updates = updates
         self.categories = categories
         self.sources = sources
         self.sourceLists = sourceLists
+        self.settings = settings
         self.date = date
         self.name = name
         self.automatic = automatic
@@ -71,10 +80,13 @@ struct LegacyModernBackup: Codable {
         history = try container.decodeIfPresent([LegacyModernBackupHistory].self, forKey: .history)
         manga = try container.decodeIfPresent([LegacyModernBackupManga].self, forKey: .manga)
         chapters = try container.decodeIfPresent([LegacyModernBackupChapter].self, forKey: .chapters)
+        trackItems = try container.decodeIfPresent([LegacyModernBackupTrackItem].self, forKey: .trackItems)
+        readingSessions = try container.decodeIfPresent([LegacyModernBackupReadingSession].self, forKey: .readingSessions)
         updates = try container.decodeIfPresent([LegacyModernBackupUpdate].self, forKey: .updates)
         categories = try container.decodeIfPresent([LegacyModernBackupCategory].self, forKey: .categories)
         sources = try container.decodeIfPresent([LegacyModernBackupSource].self, forKey: .sources)
         sourceLists = try container.decodeIfPresent([String].self, forKey: .sourceLists)
+        settings = try container.decodeIfPresent([String: LegacyModernBackupSettingValue].self, forKey: .settings)
         // `date` is required in the modern format, but be tolerant: fall back to
         // the current date if a malformed backup omits it.
         date = (try? container.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
@@ -89,10 +101,13 @@ struct LegacyModernBackup: Codable {
         try container.encodeIfPresent(history, forKey: .history)
         try container.encodeIfPresent(manga, forKey: .manga)
         try container.encodeIfPresent(chapters, forKey: .chapters)
+        try container.encodeIfPresent(trackItems, forKey: .trackItems)
+        try container.encodeIfPresent(readingSessions, forKey: .readingSessions)
         try container.encodeIfPresent(updates, forKey: .updates)
         try container.encodeIfPresent(categories, forKey: .categories)
         try container.encodeIfPresent(sources, forKey: .sources)
         try container.encodeIfPresent(sourceLists, forKey: .sourceLists)
+        try container.encodeIfPresent(settings, forKey: .settings)
         try container.encode(date, forKey: .date)
         try container.encodeIfPresent(name, forKey: .name)
         try container.encodeIfPresent(automatic, forKey: .automatic)
@@ -104,10 +119,13 @@ struct LegacyModernBackup: Codable {
         case history
         case manga
         case chapters
+        case trackItems
+        case readingSessions
         case updates
         case categories
         case sources
         case sourceLists
+        case settings
         case date
         case name
         case automatic
@@ -432,6 +450,83 @@ struct LegacyModernBackupChapter: Codable {
     }
 }
 
+// MARK: - Tracking
+
+// Mirrors the modern `BackupTrackItem`. Legacy stores use a numeric remote id,
+// so the modern string id is parsed leniently on import.
+struct LegacyModernBackupTrackItem: Codable {
+    var id: String
+    var trackerId: String
+    var mangaId: String
+    var sourceId: String
+    var title: String?
+    var chapterOffset: Int?
+
+    init(
+        id: String,
+        trackerId: String,
+        mangaId: String,
+        sourceId: String,
+        title: String? = nil,
+        chapterOffset: Int? = nil
+    ) {
+        self.id = id
+        self.trackerId = trackerId
+        self.mangaId = mangaId
+        self.sourceId = sourceId
+        self.title = title
+        self.chapterOffset = chapterOffset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        trackerId = try container.decodeIfPresent(String.self, forKey: .trackerId) ?? ""
+        mangaId = try container.decodeIfPresent(String.self, forKey: .mangaId) ?? ""
+        sourceId = try container.decodeIfPresent(String.self, forKey: .sourceId) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        chapterOffset = try container.decodeIfPresent(Int.self, forKey: .chapterOffset)
+    }
+}
+
+// MARK: - Reading Sessions
+
+// Mirrors the modern `BackupReadingSession`.
+struct LegacyModernBackupReadingSession: Codable {
+    var pagesRead: Int
+    var startDate: Date
+    var endDate: Date
+    var sourceId: String
+    var mangaId: String
+    var chapterId: String
+
+    init(
+        pagesRead: Int,
+        startDate: Date,
+        endDate: Date,
+        sourceId: String,
+        mangaId: String,
+        chapterId: String
+    ) {
+        self.pagesRead = pagesRead
+        self.startDate = startDate
+        self.endDate = endDate
+        self.sourceId = sourceId
+        self.mangaId = mangaId
+        self.chapterId = chapterId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pagesRead = try container.decodeIfPresent(Int.self, forKey: .pagesRead) ?? 0
+        startDate = (try? container.decodeIfPresent(Date.self, forKey: .startDate)) ?? Date()
+        endDate = (try? container.decodeIfPresent(Date.self, forKey: .endDate)) ?? startDate
+        sourceId = try container.decodeIfPresent(String.self, forKey: .sourceId) ?? ""
+        mangaId = try container.decodeIfPresent(String.self, forKey: .mangaId) ?? ""
+        chapterId = try container.decodeIfPresent(String.self, forKey: .chapterId) ?? ""
+    }
+}
+
 // MARK: - Update
 
 // Mirrors the modern `BackupUpdate`. References manga/chapter by id.
@@ -480,6 +575,124 @@ struct LegacyModernBackupUpdate: Codable {
         case sourceId
         case mangaId
         case chapterId
+    }
+}
+
+// MARK: - Settings
+
+// JSON value compatible with the modern app's `JsonAnyValue` encoding.
+struct LegacyModernBackupSettingValue: Codable, Hashable {
+    indirect enum Value: Hashable {
+        case null
+        case bool(Bool)
+        case int(Int)
+        case double(Double)
+        case string(String)
+        case stringArray([String])
+        case intArray([Int])
+        case object([String: LegacyModernBackupSettingValue])
+    }
+
+    var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            value = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            value = .bool(bool)
+        } else if let int = try? container.decode(Int.self) {
+            value = .int(int)
+        } else if let double = try? container.decode(Double.self) {
+            value = .double(double)
+        } else if let string = try? container.decode(String.self) {
+            value = .string(string)
+        } else if let ints = try? container.decode([Int].self) {
+            value = .intArray(ints)
+        } else if let strings = try? container.decode([String].self) {
+            value = .stringArray(strings)
+        } else if let object = try? container.decode([String: LegacyModernBackupSettingValue].self) {
+            value = .object(object)
+        } else {
+            value = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch value {
+            case .null:
+                try container.encodeNil()
+            case .bool(let value):
+                try container.encode(value)
+            case .int(let value):
+                try container.encode(value)
+            case .double(let value):
+                try container.encode(value)
+            case .string(let value):
+                try container.encode(value)
+            case .stringArray(let value):
+                try container.encode(value)
+            case .intArray(let value):
+                try container.encode(value)
+            case .object(let value):
+                try container.encode(value)
+        }
+    }
+
+    var rawValue: Any? {
+        switch value {
+            case .null:
+                return nil
+            case .bool(let value):
+                return value
+            case .int(let value):
+                return value
+            case .double(let value):
+                return value
+            case .string(let value):
+                return value
+            case .stringArray(let value):
+                return value
+            case .intArray(let value):
+                return value
+            case .object(let value):
+                var object: [String: Any] = [:]
+                for (key, nestedValue) in value {
+                    if let rawValue = nestedValue.rawValue {
+                        object[key] = rawValue
+                    }
+                }
+                return object
+        }
+    }
+
+    static func bool(_ value: Bool) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.bool(value))
+    }
+
+    static func int(_ value: Int) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.int(value))
+    }
+
+    static func double(_ value: Double) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.double(value))
+    }
+
+    static func string(_ value: String) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.string(value))
+    }
+
+    static func stringArray(_ value: [String]) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.stringArray(value))
+    }
+
+    static func intArray(_ value: [Int]) -> LegacyModernBackupSettingValue {
+        return LegacyModernBackupSettingValue(.intArray(value))
     }
 }
 

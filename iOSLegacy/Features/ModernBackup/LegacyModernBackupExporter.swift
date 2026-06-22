@@ -87,6 +87,7 @@ final class LegacyModernBackupExporter {
         let libraryEntries = LegacyLibraryStore.shared.rawEntries
         let historyEntries = LegacyHistoryStore.shared.entries
         let updateEntries = LegacyUpdateStore.shared.entries
+        let trackEntries = LegacyTrackerStore.shared.entries
 
         // Collect manga and chapters from every legacy source, de-duplicated by
         // their modern composite keys.
@@ -140,7 +141,7 @@ final class LegacyModernBackupExporter {
                     lastUpdated: entry.dateAdded,
                     lastUpdatedChapters: entry.dateAdded,
                     lastChapter: nil,
-                    lastRead: nil,
+                    lastRead: latestHistoryDate(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, historyEntries: historyEntries),
                     dateAdded: entry.dateAdded,
                     categories: categories.isEmpty ? nil : categories,
                     mangaId: entry.manga.key,
@@ -184,18 +185,46 @@ final class LegacyModernBackupExporter {
             )
         }
 
+        // Tracking
+        let trackItems = trackEntries.map { entry in
+            LegacyModernBackupTrackItem(
+                id: String(entry.remoteId),
+                trackerId: entry.trackerId.rawValue,
+                mangaId: entry.mangaKey,
+                sourceId: entry.sourceKey,
+                title: mangaByKey[mangaKey(sourceId: entry.sourceKey, mangaId: entry.mangaKey)]?.title,
+                chapterOffset: Int(entry.lastReadChapter.rounded(.down))
+            )
+        }
+
+        // Reading sessions
+        let readingSessions = historyEntries.map { entry in
+            LegacyModernBackupReadingSession(
+                pagesRead: max(1, min(entry.pageIndex + 1, max(entry.pageCount, entry.pageIndex + 1))),
+                startDate: entry.dateRead,
+                endDate: entry.dateRead,
+                sourceId: entry.sourceKey,
+                mangaId: entry.manga.key,
+                chapterId: entry.chapter.key
+            )
+        }
+
         let sourceLists = LegacySourceRepositoryStore.shared.repositoryURLs.map { $0.absoluteString }
         let sourceIds = Set(mangaByKey.values.map { $0.sourceId }).sorted()
+        let settings = exportSettings(sourceIds: sourceIds)
 
         return LegacyModernBackup(
             library: library,
             history: history,
             manga: Array(mangaByKey.values),
             chapters: Array(chapterByKey.values),
+            trackItems: trackItems.isEmpty ? nil : trackItems,
+            readingSessions: readingSessions.isEmpty ? nil : readingSessions,
             updates: updates,
             categories: categoryTitles.map { LegacyModernBackupCategory(title: $0) },
             sources: sourceIds.map { LegacyModernBackupSource(id: $0) },
             sourceLists: sourceLists.isEmpty ? nil : sourceLists,
+            settings: settings.isEmpty ? nil : settings,
             date: Date(),
             name: "AidokuLegacy",
             automatic: automatic,
@@ -219,11 +248,11 @@ final class LegacyModernBackupExporter {
             tags: manga.tags,
             cover: manga.cover,
             url: manga.url?.absoluteString,
-            status: 0,
-            nsfw: 0,
-            viewer: 0,
-            nextUpdateTime: nil,
-            chapterFlags: nil,
+            status: Int(manga.status.rawValue),
+            nsfw: Int(manga.contentRating.rawValue),
+            viewer: Int(manga.viewer.rawValue),
+            nextUpdateTime: manga.nextUpdateTime.map { Date(timeIntervalSince1970: TimeInterval($0)) },
+            chapterFlags: 0,
             langFilter: nil,
             scanlatorFilter: nil
         )
@@ -260,6 +289,72 @@ final class LegacyModernBackupExporter {
 
     private func chapterKey(sourceId: String, mangaId: String, chapterId: String) -> String {
         return "\(sourceId)::\(mangaId)::\(chapterId)"
+    }
+
+    // MARK: - Settings
+
+    private func latestHistoryDate(
+        sourceKey: String,
+        mangaKey: String,
+        historyEntries: [LegacyHistoryEntry]
+    ) -> Date? {
+        return historyEntries
+            .filter { $0.sourceKey == sourceKey && $0.manga.key == mangaKey }
+            .map { $0.dateRead }
+            .max()
+    }
+
+    private func exportSettings(sourceIds: [String]) -> [String: LegacyModernBackupSettingValue] {
+        var result: [String: LegacyModernBackupSettingValue] = [:]
+        for (key, value) in UserDefaults.standard.dictionaryRepresentation() {
+            guard shouldExportSetting(key: key, sourceIds: sourceIds) else { continue }
+            if let value = value as? Bool {
+                result[key] = .bool(value)
+            } else if let value = value as? Int {
+                result[key] = .int(value)
+            } else if let value = value as? Double {
+                result[key] = .double(value)
+            } else if let value = value as? String {
+                result[key] = .string(value)
+            } else if let value = value as? [String] {
+                result[key] = .stringArray(value)
+            } else if let value = value as? [Int] {
+                result[key] = .intArray(value)
+            }
+        }
+        return result
+    }
+
+    private func shouldExportSetting(key: String, sourceIds: [String]) -> Bool {
+        guard shouldApplySetting(key: key, sourceIds: sourceIds) else { return false }
+        let lowercased = key.lowercased()
+        let sensitiveKeywords = ["login", "password", "token", "auth", "cookie"]
+        return !sensitiveKeywords.contains { lowercased.contains($0) }
+    }
+
+    private func shouldApplySetting(key: String, sourceIds: [String]) -> Bool {
+        if key == "AidokuLegacy.library.entries"
+            || key == "AidokuLegacy.history.entries"
+            || key == "AidokuLegacy.updates.entries"
+            || key == "AidokuLegacy.tracker.entries"
+            || key == "AidokuLegacy.tracker.tokens" {
+            return false
+        }
+        if key.hasPrefix("AidokuLegacy.reader.")
+            || key.hasPrefix("AidokuLegacy.appearance.")
+            || key.hasPrefix("AidokuLegacy.library.")
+            || key.hasPrefix("AidokuLegacy.sources.")
+            || key.hasPrefix("AidokuLegacy.backup.")
+            || key.hasPrefix("AidokuLegacy.downloads.")
+            || key.hasPrefix("AidokuLegacy.privacy.")
+            || key.hasPrefix("AidokuLegacy.network.")
+            || key.hasPrefix("AidokuLegacy.notifications.") {
+            return true
+        }
+        if sourceIds.contains(where: { key.hasPrefix("\($0).") }) {
+            return true
+        }
+        return key.hasSuffix(".languages") || key.hasSuffix(".language") || key.hasSuffix(".url")
     }
 
     // MARK: - Directory
