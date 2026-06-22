@@ -186,11 +186,6 @@ final class LegacyModernBackupImporter {
             description: modern.desc,
             url: modern.url.flatMap { URL(string: $0) },
             tags: modern.tags,
-            status: publishingStatus(from: modern.status),
-            contentRating: contentRating(from: modern.nsfw),
-            viewer: viewer(from: modern.viewer),
-            updateStrategy: .always,
-            nextUpdateTime: modern.nextUpdateTime.map { Int($0.timeIntervalSince1970) },
             chapters: chapters?.map { legacyChapter(from: $0) }
         )
     }
@@ -208,11 +203,6 @@ final class LegacyModernBackupImporter {
             description: nil,
             url: nil,
             tags: nil,
-            status: .unknown,
-            contentRating: .unknown,
-            viewer: .unknown,
-            updateStrategy: .always,
-            nextUpdateTime: nil,
             chapters: nil
         )
     }
@@ -581,24 +571,4 @@ final class LegacyModernBackupImporter {
         return key.hasSuffix(".languages") || key.hasSuffix(".language") || key.hasSuffix(".url")
     }
 
-    private func publishingStatus(from value: Int?) -> PublishingStatus {
-        guard let value = value, let raw = UInt8(exactly: value), let status = PublishingStatus(rawValue: raw) else {
-            return .unknown
-        }
-        return status
-    }
-
-    private func contentRating(from value: Int?) -> ContentRating {
-        guard let value = value, let raw = UInt8(exactly: value), let rating = ContentRating(rawValue: raw) else {
-            return .unknown
-        }
-        return rating
-    }
-
-    private func viewer(from value: Int?) -> Viewer {
-        guard let value = value, let raw = UInt8(exactly: value), let viewer = Viewer(rawValue: raw) else {
-            return .unknown
-        }
-        return viewer
-    }
 }

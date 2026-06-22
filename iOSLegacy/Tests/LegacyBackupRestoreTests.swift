@@ -103,7 +103,7 @@ final class LegacyBackupRestoreTests: XCTestCase {
         XCTAssertTrue(LegacyBackupManager.shared.backupURLs().contains(url))
     }
 
-    func testModernBackupExportMapsTrackItemsReadingSessionsSettingsAndMangaFlags() throws {
+    func testModernBackupExportMapsTrackItemsReadingSessionsAndSettings() throws {
         let manga = AidokuRunnerLegacyManga(
             sourceKey: "src.a",
             key: "m1",
@@ -114,11 +114,6 @@ final class LegacyBackupRestoreTests: XCTestCase {
             description: nil,
             url: nil,
             tags: nil,
-            status: .completed,
-            contentRating: .nsfw,
-            viewer: .rightToLeft,
-            updateStrategy: .never,
-            nextUpdateTime: 4_000,
             chapters: [LegacyFixtures.chapter(key: "c1")]
         )
         LegacyLibraryStore.shared.replace([
@@ -169,12 +164,9 @@ final class LegacyBackupRestoreTests: XCTestCase {
         XCTAssertEqual(backup.settings?["AidokuLegacy.reader.maxImageHeight"]?.rawValue as? Int, 1800)
         XCTAssertEqual(backup.settings?["src.a.language"]?.rawValue as? String, "en")
         XCTAssertNil(backup.settings?["src.a.login.password"])
-        XCTAssertEqual(backup.manga?.first?.status, Int(PublishingStatus.completed.rawValue))
-        XCTAssertEqual(backup.manga?.first?.nsfw, Int(ContentRating.nsfw.rawValue))
-        XCTAssertEqual(backup.manga?.first?.viewer, Int(Viewer.rightToLeft.rawValue))
     }
 
-    func testModernBackupImportMapsTrackItemsReadingSessionsSettingsAndMangaFlags() throws {
+    func testModernBackupImportMapsTrackItemsReadingSessionsAndSettings() throws {
         let backup = LegacyModernBackup(
             library: [
                 LegacyModernBackupLibraryManga(
@@ -251,9 +243,6 @@ final class LegacyBackupRestoreTests: XCTestCase {
 
         XCTAssertEqual(result.libraryAdded, 1)
         XCTAssertEqual(result.historyAdded, 1)
-        XCTAssertEqual(LegacyLibraryStore.shared.rawEntries.first?.manga.viewer, .webtoon)
-        XCTAssertEqual(LegacyLibraryStore.shared.rawEntries.first?.manga.status, .completed)
-        XCTAssertEqual(LegacyLibraryStore.shared.rawEntries.first?.manga.contentRating, .suggestive)
         XCTAssertEqual(LegacyHistoryStore.shared.entries.first?.key, "src.a::m1::c1")
         XCTAssertEqual(LegacyHistoryStore.shared.entries.first?.pageIndex, 5)
         XCTAssertEqual(LegacyTrackerStore.shared.entries.first?.remoteId, 456)

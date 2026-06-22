@@ -248,11 +248,11 @@ final class LegacyModernBackupExporter {
             tags: manga.tags,
             cover: manga.cover,
             url: manga.url?.absoluteString,
-            status: Int(manga.status.rawValue),
-            nsfw: Int(manga.contentRating.rawValue),
-            viewer: Int(manga.viewer.rawValue),
-            nextUpdateTime: manga.nextUpdateTime.map { Date(timeIntervalSince1970: TimeInterval($0)) },
-            chapterFlags: 0,
+            status: 0,
+            nsfw: 0,
+            viewer: 0,
+            nextUpdateTime: nil,
+            chapterFlags: nil,
             langFilter: nil,
             scanlatorFilter: nil
         )
