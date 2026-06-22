@@ -5887,9 +5887,13 @@ final class LegacyUpdatesViewController: UITableViewController {
     }
 
     @objc private func confirmClear() {
-        let alert = UIAlertController(title: "Clear Updates", message: "Remove recorded chapter updates?", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        let alert = UIAlertController(
+            title: LegacyString("updates.clear.title"),
+            message: LegacyString("updates.clear.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             LegacyUpdateStore.shared.clear()
         })
         present(alert, animated: true)
@@ -5897,7 +5901,7 @@ final class LegacyUpdatesViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -5910,11 +5914,11 @@ final class LegacyDownloadsViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Downloads"
+        title = LegacyString("downloads.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         tableView.rowHeight = 86
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Clear", style: .plain, target: self, action: #selector(confirmClear))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: LegacyString("button.clear"), style: .plain, target: self, action: #selector(confirmClear))
         observer = NotificationCenter.default.addObserver(
             forName: .legacyDownloadsDidChange,
             object: nil,
@@ -5949,8 +5953,8 @@ final class LegacyDownloadsViewController: UITableViewController {
         cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
         cell.detailTextLabel?.numberOfLines = 2
         guard !entries.isEmpty else {
-            cell.textLabel?.text = "No downloaded chapters."
-            cell.detailTextLabel?.text = "Open a manga and download chapters for offline reading."
+            cell.textLabel?.text = LegacyString("downloads.empty.title")
+            cell.detailTextLabel?.text = LegacyString("downloads.empty.detail")
             cell.accessoryType = .none
             cell.selectionStyle = .none
             return cell
@@ -5958,7 +5962,16 @@ final class LegacyDownloadsViewController: UITableViewController {
         let entry = entries[indexPath.row]
         cell.textLabel?.text = entry.manga.title
         let size = ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
-        cell.detailTextLabel?.text = "\(entry.chapter.legacyFormattedTitle)\n\(entry.sourceName) - \(entry.pageCount) pages - \(size)"
+        let pages = entry.pageCount == 1
+            ? LegacyString("downloads.pages.one")
+            : String(format: LegacyString("downloads.pages.many"), entry.pageCount)
+        cell.detailTextLabel?.text = String(
+            format: LegacyString("downloads.row.detail"),
+            entry.chapter.legacyFormattedTitle,
+            entry.sourceName,
+            pages,
+            size
+        )
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -5991,9 +6004,13 @@ final class LegacyDownloadsViewController: UITableViewController {
     }
 
     @objc private func confirmClear() {
-        let alert = UIAlertController(title: "Clear Downloads", message: "Remove all downloaded chapters?", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        let alert = UIAlertController(
+            title: LegacyString("downloads.clear.title"),
+            message: LegacyString("downloads.clear.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             LegacyDownloadStore.shared.clear()
         })
         present(alert, animated: true)
@@ -6001,7 +6018,7 @@ final class LegacyDownloadsViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -6022,12 +6039,12 @@ final class LegacyDownloadSettingsViewController: UITableViewController {
 
     private let sections: [Section] = [
         Section(
-            title: "Automation",
-            footer: "Automation runs only when the reader reaches the end of a chapter. Incognito reading skips these actions.",
+            title: LegacyString("download_settings.section.automation"),
+            footer: LegacyString("download_settings.automation.footer"),
             rows: [.deleteAfterReading, .downloadNextUnread]
         ),
         Section(
-            title: "Manage",
+            title: LegacyString("download_settings.section.manage"),
             footer: nil,
             rows: [.downloads, .clearDownloads]
         )
@@ -6044,7 +6061,7 @@ final class LegacyDownloadSettingsViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Downloads"
+        title = LegacyString("downloads.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
     }
@@ -6087,27 +6104,29 @@ final class LegacyDownloadSettingsViewController: UITableViewController {
         switch row(at: indexPath) {
             case .deleteAfterReading:
                 let enabled = aidokuLegacyDownloadsDeleteAfterReading()
-                cell.textLabel?.text = "Delete After Reading"
+                cell.textLabel?.text = LegacyString("download_settings.delete_after_reading")
                 cell.detailTextLabel?.text = enabled
-                    ? "Downloaded chapters are removed after completion."
-                    : "Keep downloads after completion."
+                    ? LegacyString("download_settings.delete_after_reading.on")
+                    : LegacyString("download_settings.delete_after_reading.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .downloadNextUnread:
                 let enabled = aidokuLegacyDownloadsDownloadNextUnreadAfterReading()
-                cell.textLabel?.text = "Download Next Unread"
+                cell.textLabel?.text = LegacyString("download_settings.download_next_unread")
                 cell.detailTextLabel?.text = enabled
-                    ? "Queue the next unread chapter after completion."
-                    : "Do not queue chapters automatically."
+                    ? LegacyString("download_settings.download_next_unread.on")
+                    : LegacyString("download_settings.download_next_unread.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
-                cell.textLabel?.text = "Downloaded Chapters"
-                cell.detailTextLabel?.text = count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"
+                cell.textLabel?.text = LegacyString("download_settings.downloaded_chapters")
+                cell.detailTextLabel?.text = count == 1
+                    ? LegacyString("settings.downloads.one")
+                    : String(format: LegacyString("settings.downloads.many"), count)
                 cell.accessoryType = .disclosureIndicator
             case .clearDownloads:
-                cell.textLabel?.text = "Clear Downloads"
+                cell.textLabel?.text = LegacyString("downloads.clear.title")
                 cell.textLabel?.textColor = UIColor.red
-                cell.detailTextLabel?.text = "Remove all downloaded chapters."
+                cell.detailTextLabel?.text = LegacyString("download_settings.clear.detail")
         }
         return cell
     }
@@ -6129,9 +6148,13 @@ final class LegacyDownloadSettingsViewController: UITableViewController {
     }
 
     private func confirmClearDownloads() {
-        let alert = UIAlertController(title: "Clear Downloads", message: "Remove all downloaded chapters?", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        let alert = UIAlertController(
+            title: LegacyString("downloads.clear.title"),
+            message: LegacyString("downloads.clear.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { [weak self] _ in
             LegacyDownloadStore.shared.clear()
             self?.tableView.reloadData()
         })

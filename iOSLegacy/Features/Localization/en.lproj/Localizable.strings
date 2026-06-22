@@ -116,6 +116,22 @@
 "downloads.empty.detail" = "Open a manga and download chapters for offline reading.";
 "downloads.clear.title" = "Clear Downloads";
 "downloads.clear.message" = "Remove all downloaded chapters?";
+"downloads.pages.one" = "1 page";
+"downloads.pages.many" = "%d pages";
+"downloads.row.detail" = "%@\n%@ - %@ - %@";
+
+/* MARK: - Download Settings screen */
+"download_settings.section.automation" = "Automation";
+"download_settings.automation.footer" = "Automation runs only when the reader reaches the end of a chapter. Incognito reading skips these actions.";
+"download_settings.section.manage" = "Manage";
+"download_settings.delete_after_reading" = "Delete After Reading";
+"download_settings.delete_after_reading.on" = "Downloaded chapters are removed after completion.";
+"download_settings.delete_after_reading.off" = "Keep downloads after completion.";
+"download_settings.download_next_unread" = "Download Next Unread";
+"download_settings.download_next_unread.on" = "Queue the next unread chapter after completion.";
+"download_settings.download_next_unread.off" = "Do not queue chapters automatically.";
+"download_settings.downloaded_chapters" = "Downloaded Chapters";
+"download_settings.clear.detail" = "Remove all downloaded chapters.";
 
 /* MARK: - Settings screen */
 "settings.title" = "Settings";
