@@ -53,19 +53,28 @@ struct LegacyLocalManga: Codable, Hashable {
     var title: String
     /// Optional cover image file name relative to the manga directory.
     var coverFileName: String?
+    /// User-editable description shown when the local manga is opened.
+    var description: String?
     /// When the archive was imported.
     var dateAdded: Date
+    /// Absolute path to a watched Documents/Local series folder, when this
+    /// manga is backed by structured local files instead of managed imports.
+    var localFolderPath: String?
 
     init(
         id: String = UUID().uuidString,
         title: String,
         coverFileName: String? = nil,
-        dateAdded: Date = Date()
+        description: String? = nil,
+        dateAdded: Date = Date(),
+        localFolderPath: String? = nil
     ) {
         self.id = id
         self.title = title
         self.coverFileName = coverFileName
+        self.description = description
         self.dateAdded = dateAdded
+        self.localFolderPath = localFolderPath
     }
 }
 
@@ -82,19 +91,27 @@ struct LegacyLocalChapter: Codable, Hashable {
     var kind: LegacyLocalChapterKind
     /// Number of readable pages discovered when the archive was imported.
     var pageCount: Int
+    /// Optional volume number, editable from the legacy local-files UI.
+    var volumeNumber: Float?
+    /// Optional chapter number, editable from the legacy local-files UI.
+    var chapterNumber: Float?
 
     init(
         id: String = UUID().uuidString,
         title: String,
         archiveFileName: String,
         kind: LegacyLocalChapterKind,
-        pageCount: Int
+        pageCount: Int,
+        volumeNumber: Float? = nil,
+        chapterNumber: Float? = nil
     ) {
         self.id = id
         self.title = title
         self.archiveFileName = archiveFileName
         self.kind = kind
         self.pageCount = pageCount
+        self.volumeNumber = volumeNumber
+        self.chapterNumber = chapterNumber
     }
 }
 

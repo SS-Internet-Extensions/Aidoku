@@ -6595,12 +6595,17 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             cover: nil,
             artists: nil,
             authors: nil,
-            description: nil,
+            description: localManga.description,
             url: nil,
             tags: nil,
             chapters: nil
         )
-        let chapter = AidokuRunnerLegacyChapter(key: localChapter.id, title: localChapter.title, chapterNumber: 1)
+        let chapter = AidokuRunnerLegacyChapter(
+            key: localChapter.id,
+            title: localChapter.title,
+            chapterNumber: localChapter.chapterNumber,
+            volumeNumber: localChapter.volumeNumber
+        )
         let reader = LegacyReaderFactory.makeReader(source: source, manga: manga, chapter: chapter)
         navigationController?.pushViewController(reader, animated: true)
     }
