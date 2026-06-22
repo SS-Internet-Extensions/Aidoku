@@ -406,6 +406,14 @@
 "source.download_failed.title" = "Download Failed";
 "source.settings_failed.title" = "Settings Failed";
 
+/* MARK: - Deep links */
+"deep_link.source_list_added.title" = "Source List Added";
+"deep_link.source_list_added.message" = "Open Sources and refresh to load %@.";
+"deep_link.tracker.anilist_connected" = "AniList Connected";
+"deep_link.tracker.mal_connected" = "MyAnimeList Connected";
+"deep_link.unsupported.title" = "Unsupported Link";
+"deep_link.unsupported.open_manga" = "Opening a manga directly from a link is not supported on this version. Search for it in Sources instead.";
+
 /* MARK: - Source updates */
 "source_update.no_sources.title" = "No Sources";
 "source_update.no_sources.message" = "Install sources before checking for updates.";

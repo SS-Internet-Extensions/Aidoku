@@ -231,8 +231,11 @@ enum LegacyDeepLinkCoordinator {
                 NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
                 presentAlert(
                     on: presenter,
-                    title: "Source List Added",
-                    message: "Open Sources and refresh to load \(normalized.absoluteString)."
+                    title: LegacyString("deep_link.source_list_added.title"),
+                    message: String(
+                        format: LegacyString("deep_link.source_list_added.message"),
+                        normalized.absoluteString
+                    )
                 )
                 return true
 
@@ -254,7 +257,7 @@ enum LegacyDeepLinkCoordinator {
                 if let token = token, !token.isEmpty {
                     LegacyAniListTracker.shared.setAccessToken(token)
                     NotificationCenter.default.post(name: .aidokuLegacyTrackingDidChange, object: nil)
-                    presentAlert(on: presenter, title: "AniList Connected", message: nil)
+                    presentAlert(on: presenter, title: LegacyString("deep_link.tracker.anilist_connected"), message: nil)
                     return true
                 }
                 if let code = code, !code.isEmpty {
@@ -263,9 +266,9 @@ enum LegacyDeepLinkCoordinator {
                             switch result {
                                 case .success:
                                     NotificationCenter.default.post(name: .aidokuLegacyTrackingDidChange, object: nil)
-                                    presentAlert(on: presenter, title: "MyAnimeList Connected", message: nil)
+                                    presentAlert(on: presenter, title: LegacyString("deep_link.tracker.mal_connected"), message: nil)
                                 case .failure(let error):
-                                    presentAlert(on: presenter, title: "Login Failed", message: error.localizedDescription)
+                                    presentAlert(on: presenter, title: LegacyString("tracker.login.failed.title"), message: error.localizedDescription)
                             }
                         }
                     }
@@ -276,9 +279,8 @@ enum LegacyDeepLinkCoordinator {
             case .openManga:
                 presentAlert(
                     on: presenter,
-                    title: "Unsupported Link",
-                    message: "Opening a manga directly from a link is not supported on this version. "
-                        + "Search for it in Sources instead."
+                    title: LegacyString("deep_link.unsupported.title"),
+                    message: LegacyString("deep_link.unsupported.open_manga")
                 )
                 return false
 
@@ -297,12 +299,16 @@ enum LegacyDeepLinkCoordinator {
                         let installer = AidokuRunnerLegacyPackageInstaller()
                         let source = try installer.installPackage(at: localURL)
                         NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
-                        presentAlert(on: presenter, title: "Source Installed", message: source.name)
+                        presentAlert(
+                            on: presenter,
+                            title: LegacyString("source.installed.title"),
+                            message: String(format: LegacyString("source.installed.message"), source.name)
+                        )
                     } catch {
-                        presentAlert(on: presenter, title: "Install Failed", message: error.localizedDescription)
+                        presentAlert(on: presenter, title: LegacyString("source.install_failed.title"), message: error.localizedDescription)
                     }
                 case .failure(let error):
-                    presentAlert(on: presenter, title: "Install Failed", message: error.localizedDescription)
+                    presentAlert(on: presenter, title: LegacyString("source.install_failed.title"), message: error.localizedDescription)
             }
         }
     }
@@ -321,23 +327,27 @@ enum LegacyDeepLinkCoordinator {
                                     NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
                                     presentAlert(
                                         on: presenter,
-                                        title: "Backup Imported",
-                                        message: "Added \(summary.libraryAdded) library, \(summary.historyAdded) history, "
-                                            + "and \(summary.updatesAdded) update entries."
+                                        title: LegacyString("backup.imported.title"),
+                                        message: String(
+                                            format: LegacyString("backup.imported.message"),
+                                            summary.libraryAdded,
+                                            summary.historyAdded,
+                                            summary.updatesAdded
+                                        )
                                     )
                                 case .failure:
                                     do {
                                         try LegacyBackupManager.shared.restore(from: localURL)
                                         NotificationCenter.default.post(name: .legacyLibraryDidChange, object: nil)
-                                        presentAlert(on: presenter, title: "Backup Restored", message: nil)
+                                        presentAlert(on: presenter, title: LegacyString("backup.restored.title"), message: nil)
                                     } catch {
-                                        presentAlert(on: presenter, title: "Import Failed", message: error.localizedDescription)
+                                        presentAlert(on: presenter, title: LegacyString("backup.import_failed.title"), message: error.localizedDescription)
                                     }
                             }
                         }
                     }
                 case .failure(let error):
-                    presentAlert(on: presenter, title: "Import Failed", message: error.localizedDescription)
+                    presentAlert(on: presenter, title: LegacyString("backup.import_failed.title"), message: error.localizedDescription)
             }
         }
     }
@@ -398,7 +408,7 @@ enum LegacyDeepLinkCoordinator {
     private static func presentAlert(on presenter: UIViewController?, title: String, message: String?) {
         guard let presenter = presenter else { return }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         presenter.present(alert, animated: true)
     }
 }
