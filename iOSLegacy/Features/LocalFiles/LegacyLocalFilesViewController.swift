@@ -31,7 +31,7 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
 
     init() {
         super.init(style: .plain)
-        title = "Local Files"
+        title = LegacyString("settings.local_files")
     }
 
     @available(*, unavailable)
@@ -99,7 +99,7 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
     private func importArchives(at urls: [URL]) {
         guard !urls.isEmpty else { return }
 
-        let loading = UIAlertController(title: nil, message: "Importing...", preferredStyle: .alert)
+        let loading = UIAlertController(title: nil, message: LegacyString("local_files.importing"), preferredStyle: .alert)
         present(loading, animated: true)
 
         importSequentially(urls: urls, index: 0, failures: []) { [weak self] failures in
@@ -107,7 +107,7 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
                 guard let self = self else { return }
                 if !failures.isEmpty {
                     self.showAlert(
-                        title: "Import Incomplete",
+                        title: LegacyString("local_files.import_incomplete.title"),
                         message: failures.joined(separator: "\n")
                     )
                 }
@@ -146,7 +146,7 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 
@@ -185,7 +185,7 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
         cell.imageView?.image = nil
 
         guard !mangaList.isEmpty else {
-            cell.textLabel?.text = "No local files imported"
+            cell.textLabel?.text = LegacyString("local_files.empty")
             cell.detailTextLabel?.text = nil
             cell.textLabel?.textColor = .gray
             cell.accessoryType = .none
@@ -199,17 +199,19 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
         cell.textLabel?.text = manga.title
         cell.textLabel?.textColor = nil
         if chapters.count == 1, let chapter = chapters.first {
-            var detail = "\(chapter.pageCount) page\(chapter.pageCount == 1 ? "" : "s")"
-            detail += " - \(kindDisplayName(chapter.kind))"
+            var detail = pageCountText(chapter.pageCount)
+            detail += LegacyString("settings.detail_separator") + kindDisplayName(chapter.kind)
             if manga.localFolderPath != nil {
-                detail += " - Local folder"
+                detail += LegacyString("settings.detail_separator") + LegacyString("local_files.local_folder")
             }
             cell.detailTextLabel?.text = detail
         } else {
             let chapterCount = chapters.count
-            var detail = "\(chapterCount) chapter\(chapterCount == 1 ? "" : "s")"
+            var detail = chapterCount == 1
+                ? LegacyString("local_files.chapter_count.one")
+                : String(format: LegacyString("local_files.chapter_count.many"), chapterCount)
             if manga.localFolderPath != nil {
-                detail += " - Local folder"
+                detail += LegacyString("settings.detail_separator") + LegacyString("local_files.local_folder")
             }
             cell.detailTextLabel?.text = detail
         }
@@ -221,14 +223,20 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
     private func kindDisplayName(_ kind: LegacyLocalChapterKind) -> String {
         switch kind {
             case .cbz:
-                return "CBZ"
+                return LegacyString("local_files.kind.cbz")
             case .zip:
-                return "ZIP"
+                return LegacyString("local_files.kind.zip")
             case .epub:
-                return "EPUB"
+                return LegacyString("local_files.kind.epub")
             case .pdf:
-                return "PDF"
+                return LegacyString("local_files.kind.pdf")
         }
+    }
+
+    private func pageCountText(_ count: Int) -> String {
+        return count == 1
+            ? LegacyString("local_files.page_count.one")
+            : String(format: LegacyString("local_files.page_count.many"), count)
     }
 
     // MARK: - UITableViewDelegate
@@ -239,7 +247,10 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
         let manga = mangaList[indexPath.row]
         let chapters = store.chapters(for: manga)
         guard !chapters.isEmpty else {
-            showAlert(title: "Unavailable", message: "This item no longer has any readable pages.")
+            showAlert(
+                title: LegacyString("local_files.unavailable.title"),
+                message: LegacyString("local_files.unavailable.message")
+            )
             return
         }
         if chapters.count == 1, let chapter = chapters.first {
@@ -262,10 +273,10 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
         guard !mangaList.isEmpty, indexPath.row < mangaList.count else { return nil }
         let manga = mangaList[indexPath.row]
 
-        let delete = UITableViewRowAction(style: .destructive, title: "Delete") { [weak self] _, _ in
+        let delete = UITableViewRowAction(style: .destructive, title: LegacyString("button.delete")) { [weak self] _, _ in
             self?.store.delete(manga)
         }
-        let edit = UITableViewRowAction(style: .normal, title: "Edit") { [weak self] _, _ in
+        let edit = UITableViewRowAction(style: .normal, title: LegacyString("button.edit")) { [weak self] _, _ in
             self?.presentMangaMetadataEditor(for: manga)
         }
         edit.backgroundColor = view.tintColor
@@ -287,23 +298,23 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
         _ tableView: UITableView,
         titleForDeleteConfirmationButtonForRowAt indexPath: IndexPath
     ) -> String? {
-        return "Delete"
+        return LegacyString("button.delete")
     }
 
     private func presentMangaMetadataEditor(for manga: LegacyLocalManga) {
-        let alert = UIAlertController(title: "Edit Metadata", message: nil, preferredStyle: .alert)
+        let alert = UIAlertController(title: LegacyString("local_files.edit_metadata.title"), message: nil, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Title"
+            textField.placeholder = LegacyString("local_files.field.title")
             textField.text = manga.title
             textField.autocapitalizationType = .words
         }
         alert.addTextField { textField in
-            textField.placeholder = "Description"
+            textField.placeholder = LegacyString("local_files.field.description")
             textField.text = manga.description
             textField.autocapitalizationType = .sentences
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             guard let self = self else { return }
             let title = alert?.textFields?[0].text ?? manga.title
             let description = alert?.textFields?[1].text
@@ -376,7 +387,7 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
         let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier)
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: cellIdentifier)
         guard !chapters.isEmpty else {
-            cell.textLabel?.text = "No chapters"
+            cell.textLabel?.text = LegacyString("local_files.no_chapters")
             cell.detailTextLabel?.text = nil
             cell.textLabel?.textColor = .gray
             cell.accessoryType = .none
@@ -387,7 +398,9 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
         let chapter = chapters[indexPath.row]
         cell.textLabel?.text = chapterDisplayTitle(chapter)
         cell.textLabel?.textColor = nil
-        cell.detailTextLabel?.text = "\(chapter.pageCount) page\(chapter.pageCount == 1 ? "" : "s") - \(kindDisplayName(chapter.kind))"
+        cell.detailTextLabel?.text = pageCountText(chapter.pageCount)
+            + LegacyString("settings.detail_separator")
+            + kindDisplayName(chapter.kind)
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -409,11 +422,11 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
     ) -> [UITableViewRowAction]? {
         guard !chapters.isEmpty, indexPath.row < chapters.count else { return nil }
         let chapter = chapters[indexPath.row]
-        let delete = UITableViewRowAction(style: .destructive, title: "Delete") { [weak self] _, _ in
+        let delete = UITableViewRowAction(style: .destructive, title: LegacyString("button.delete")) { [weak self] _, _ in
             guard let self = self else { return }
             self.store.deleteChapter(mangaId: self.manga.id, chapter: chapter)
         }
-        let edit = UITableViewRowAction(style: .normal, title: "Edit") { [weak self] _, _ in
+        let edit = UITableViewRowAction(style: .normal, title: LegacyString("button.edit")) { [weak self] _, _ in
             self?.presentChapterMetadataEditor(for: chapter)
         }
         edit.backgroundColor = view.tintColor
@@ -421,24 +434,24 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
     }
 
     private func presentChapterMetadataEditor(for chapter: LegacyLocalChapter) {
-        let alert = UIAlertController(title: "Edit Chapter", message: nil, preferredStyle: .alert)
+        let alert = UIAlertController(title: LegacyString("local_files.edit_chapter.title"), message: nil, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Title"
+            textField.placeholder = LegacyString("local_files.field.title")
             textField.text = chapter.title
             textField.autocapitalizationType = .words
         }
         alert.addTextField { textField in
-            textField.placeholder = "Volume"
+            textField.placeholder = LegacyString("local_files.field.volume")
             textField.text = chapter.volumeNumber.map { LegacyLocalChaptersViewController.formatNumber($0) }
             textField.keyboardType = .decimalPad
         }
         alert.addTextField { textField in
-            textField.placeholder = "Chapter"
+            textField.placeholder = LegacyString("local_files.field.chapter")
             textField.text = chapter.chapterNumber.map { LegacyLocalChaptersViewController.formatNumber($0) }
             textField.keyboardType = .decimalPad
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             guard let self = self else { return }
             let title = alert?.textFields?[0].text ?? chapter.title
             let volume = LegacyLocalChaptersViewController.parseNumber(alert?.textFields?[1].text)
@@ -457,28 +470,34 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
     private func chapterDisplayTitle(_ chapter: LegacyLocalChapter) -> String {
         var prefix: [String] = []
         if let volume = chapter.volumeNumber {
-            prefix.append("Vol. \(Self.formatNumber(volume))")
+            prefix.append(String(format: LegacyString("local_files.volume_prefix"), Self.formatNumber(volume)))
         }
         if let number = chapter.chapterNumber {
-            prefix.append("Ch. \(Self.formatNumber(number))")
+            prefix.append(String(format: LegacyString("local_files.chapter_prefix"), Self.formatNumber(number)))
         }
         guard !prefix.isEmpty else {
             return chapter.title
         }
-        return "\(prefix.joined(separator: " ")) - \(chapter.title)"
+        return String(format: LegacyString("local_files.chapter_title_format"), prefix.joined(separator: " "), chapter.title)
     }
 
     private func kindDisplayName(_ kind: LegacyLocalChapterKind) -> String {
         switch kind {
             case .cbz:
-                return "CBZ"
+                return LegacyString("local_files.kind.cbz")
             case .zip:
-                return "ZIP"
+                return LegacyString("local_files.kind.zip")
             case .epub:
-                return "EPUB"
+                return LegacyString("local_files.kind.epub")
             case .pdf:
-                return "PDF"
+                return LegacyString("local_files.kind.pdf")
         }
+    }
+
+    private func pageCountText(_ count: Int) -> String {
+        return count == 1
+            ? LegacyString("local_files.page_count.one")
+            : String(format: LegacyString("local_files.page_count.many"), count)
     }
 
     private static func parseNumber(_ value: String?) -> Float? {

@@ -18,6 +18,7 @@
 "button.done" = "Done";
 "button.add" = "Add";
 "button.delete" = "Delete";
+"button.edit" = "Edit";
 "button.reload" = "Reload";
 "button.restore" = "Restore";
 "button.login" = "Log In";
@@ -179,6 +180,32 @@
 "settings.clear_library.detail" = "Remove saved manga from Aidoku Legacy.";
 "settings.about.title" = "Aidoku Legacy";
 "settings.about.detail" = "iOS 12 personal-use reader with AidokuRunnerLegacy.";
+
+/* MARK: - Local files */
+"local_files.importing" = "Importing...";
+"local_files.import_incomplete.title" = "Import Incomplete";
+"local_files.empty" = "No local files imported";
+"local_files.no_chapters" = "No chapters";
+"local_files.local_folder" = "Local folder";
+"local_files.page_count.one" = "1 page";
+"local_files.page_count.many" = "%d pages";
+"local_files.chapter_count.one" = "1 chapter";
+"local_files.chapter_count.many" = "%d chapters";
+"local_files.kind.cbz" = "CBZ";
+"local_files.kind.zip" = "ZIP";
+"local_files.kind.epub" = "EPUB";
+"local_files.kind.pdf" = "PDF";
+"local_files.unavailable.title" = "Unavailable";
+"local_files.unavailable.message" = "This item no longer has any readable pages.";
+"local_files.edit_metadata.title" = "Edit Metadata";
+"local_files.edit_chapter.title" = "Edit Chapter";
+"local_files.field.title" = "Title";
+"local_files.field.description" = "Description";
+"local_files.field.volume" = "Volume";
+"local_files.field.chapter" = "Chapter";
+"local_files.volume_prefix" = "Vol. %@";
+"local_files.chapter_prefix" = "Ch. %@";
+"local_files.chapter_title_format" = "%@ - %@";
 
 /* MARK: - Backup / restore */
 "backup.restore.title" = "Restore Backup";
