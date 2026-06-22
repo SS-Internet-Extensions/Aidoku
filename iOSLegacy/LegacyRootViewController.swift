@@ -270,10 +270,10 @@ enum LegacyReaderBackground: String, CaseIterable {
 
     var title: String {
         switch self {
-            case .system: return "Automatic"
-            case .white: return "White"
-            case .black: return "Black"
-            case .gray: return "Gray"
+            case .system: return LegacyString("reader_settings.option.automatic")
+            case .white: return LegacyString("reader_settings.background.white")
+            case .black: return LegacyString("reader_settings.background.black")
+            case .gray: return LegacyString("reader_settings.background.gray")
         }
     }
 
@@ -314,12 +314,12 @@ enum LegacyReaderBlendMode: String, CaseIterable {
 
     var title: String {
         switch self {
-            case .normal: return "Default"
-            case .multiply: return "Multiply"
-            case .screen: return "Screen"
-            case .overlay: return "Overlay"
-            case .lighten: return "Lighten"
-            case .darken: return "Darken"
+            case .normal: return LegacyString("reader_settings.blend.default")
+            case .multiply: return LegacyString("reader_settings.blend.multiply")
+            case .screen: return LegacyString("reader_settings.blend.screen")
+            case .overlay: return LegacyString("reader_settings.blend.overlay")
+            case .lighten: return LegacyString("reader_settings.blend.lighten")
+            case .darken: return LegacyString("reader_settings.blend.darken")
         }
     }
 
@@ -501,19 +501,19 @@ enum LegacyReaderNavLayout: String, CaseIterable {
 
     var title: String {
         switch self {
-            case .standard: return "Standard"
-            case .edge: return "Edge"
-            case .wide: return "Large Zones"
-            case .disabled: return "Disabled"
+            case .standard: return LegacyString("reader_settings.nav.standard")
+            case .edge: return LegacyString("reader_settings.nav.edge")
+            case .wide: return LegacyString("reader_settings.nav.large_zones")
+            case .disabled: return LegacyString("reader_settings.nav.disabled")
         }
     }
 
     var detail: String {
         switch self {
-            case .standard: return "Left/right thirds turn pages; center opens the menu."
-            case .edge: return "Small left/right edges turn pages; large center menu."
-            case .wide: return "Large left/right zones; small center menu."
-            case .disabled: return "Tapping only toggles the menu."
+            case .standard: return LegacyString("reader_settings.nav.standard.detail")
+            case .edge: return LegacyString("reader_settings.nav.edge.detail")
+            case .wide: return LegacyString("reader_settings.nav.large_zones.detail")
+            case .disabled: return LegacyString("reader_settings.nav.disabled.detail")
         }
     }
 
@@ -568,17 +568,17 @@ enum LegacyReaderDoublePageMode: String, CaseIterable {
 
     var title: String {
         switch self {
-            case .off: return "Off"
-            case .on: return "On"
-            case .auto: return "Automatic"
+            case .off: return LegacyString("reader_settings.option.off")
+            case .on: return LegacyString("reader_settings.option.on")
+            case .auto: return LegacyString("reader_settings.option.automatic")
         }
     }
 
     var detail: String {
         switch self {
-            case .off: return "Show one page at a time."
-            case .on: return "Always show two pages side by side."
-            case .auto: return "Two pages in landscape, one in portrait."
+            case .off: return LegacyString("reader_settings.double_page.off.detail")
+            case .on: return LegacyString("reader_settings.double_page.on.detail")
+            case .auto: return LegacyString("reader_settings.double_page.automatic.detail")
         }
     }
 }
@@ -14761,7 +14761,7 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Reader Settings"
+        title = LegacyString("reader_settings.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         navigationController?.navigationBar.tintColor = LegacyPalette.accent
@@ -14774,30 +14774,30 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
             colorItems += [.colorRed, .colorGreen, .colorBlue, .colorAlpha, .blendMode]
         }
         sections = [
-            Section(title: "Background", footer: nil, items: [.background]),
+            Section(title: LegacyString("reader_settings.section.background"), footer: nil, items: [.background]),
             Section(
-                title: "Navigation",
-                footer: "How taps turn pages in the reader.",
+                title: LegacyString("reader_settings.section.navigation"),
+                footer: LegacyString("reader_settings.footer.navigation"),
                 items: [.navLayout, .invertTapZones]
             ),
             Section(
-                title: "Color Filter",
-                footer: "Tint or dim pages. Blend modes mix the tint with the page color.",
+                title: LegacyString("reader_settings.section.color_filter"),
+                footer: LegacyString("reader_settings.footer.color_filter"),
                 items: colorItems
             ),
             Section(
-                title: "Display",
-                footer: "Grayscale and crop borders re-decode pages and use more CPU.",
+                title: LegacyString("reader_settings.section.display"),
+                footer: LegacyString("reader_settings.footer.display"),
                 items: [.grayscale, .invert, .cropBorders, .pageNumber, .tapZones, .pageTransitions, .keepScreenOn]
             ),
             Section(
-                title: "Paged Reader",
-                footer: "Double page shows two pages side by side in paged modes. E-ink flash briefly refreshes the page after navigation.",
+                title: LegacyString("reader_settings.section.paged_reader"),
+                footer: LegacyString("reader_settings.footer.paged_reader"),
                 items: [.doublePage, .eInkFlash]
             ),
             Section(
-                title: "Vertical Scroll",
-                footer: "Narrows continuous-scroll pages on wide screens like iPad.",
+                title: LegacyString("reader_settings.section.vertical_scroll"),
+                footer: LegacyString("reader_settings.footer.vertical_scroll"),
                 items: [.sidePadding]
             )
         ]
@@ -14834,28 +14834,32 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
         switch item(at: indexPath) {
             case .background:
                 let cell = valueCell()
-                cell.textLabel?.text = "Page Background"
+                cell.textLabel?.text = LegacyString("reader_settings.page_background")
                 cell.detailTextLabel?.text = LegacyReaderBackground.current.title
                 return cell
             case .blendMode:
                 let cell = valueCell()
-                cell.textLabel?.text = "Blend Mode"
+                cell.textLabel?.text = LegacyString("reader_settings.blend_mode")
                 cell.detailTextLabel?.text = LegacyReaderBlendMode.current.title
                 return cell
             case .sidePadding:
                 let cell = valueCell()
                 let percent = aidokuLegacyReaderWebtoonSidePaddingPercent()
-                cell.textLabel?.text = "Side Padding"
-                cell.detailTextLabel?.text = percent == 0 ? "Off" : "\(percent)%"
+                cell.textLabel?.text = LegacyString("reader_settings.side_padding")
+                cell.detailTextLabel?.text = percent == 0 ? LegacyString("reader_settings.option.off") : "\(percent)%"
                 return cell
             case .doublePage:
                 let cell = valueCell()
-                cell.textLabel?.text = "Double Page"
+                cell.textLabel?.text = LegacyString("reader_settings.double_page")
                 cell.detailTextLabel?.text = LegacyReaderDoublePageMode.current.title
                 return cell
             case .eInkFlash:
                 let cell = toggleCell()
-                cell.configure(title: "E-Ink Flash", subtitle: "Flash the page surface after paged-reader navigation.", isOn: aidokuLegacyReaderEInkFlash())
+                cell.configure(
+                    title: LegacyString("reader_settings.e_ink_flash"),
+                    subtitle: LegacyString("reader_settings.e_ink_flash.subtitle"),
+                    isOn: aidokuLegacyReaderEInkFlash()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderEInkFlash(isOn)
                     self?.notifyChange()
@@ -14863,12 +14867,16 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .navLayout:
                 let cell = valueCell()
-                cell.textLabel?.text = "Tap Zones Layout"
+                cell.textLabel?.text = LegacyString("reader_settings.tap_zones_layout")
                 cell.detailTextLabel?.text = LegacyReaderNavLayout.current.title
                 return cell
             case .invertTapZones:
                 let cell = toggleCell()
-                cell.configure(title: "Invert Tap Zones", subtitle: "Swap the previous/next sides.", isOn: aidokuLegacyReaderInvertTapZones())
+                cell.configure(
+                    title: LegacyString("reader_settings.invert_tap_zones"),
+                    subtitle: LegacyString("reader_settings.invert_tap_zones.subtitle"),
+                    isOn: aidokuLegacyReaderInvertTapZones()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderInvertTapZones(isOn)
                     self?.notifyChange()
@@ -14877,12 +14885,12 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
             case .brightness:
                 let cell = sliderCell()
                 cell.configure(
-                    title: "Brightness",
+                    title: LegacyString("reader_settings.brightness"),
                     value: Float(aidokuLegacyReaderBrightness()),
                     minimumValue: 0,
                     maximumValue: 0.9,
                     tint: LegacyPalette.accent,
-                    display: { $0 < 0.005 ? "Off" : "\(Int(($0 / 0.9) * 100))%" }
+                    display: { $0 < 0.005 ? LegacyString("reader_settings.option.off") : "\(Int(($0 / 0.9) * 100))%" }
                 )
                 cell.onChange = { [weak self] value in
                     aidokuLegacySetReaderBrightness(CGFloat(value))
@@ -14890,26 +14898,39 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 }
                 return cell
             case .colorRed:
-                return colorSliderCell(title: "Red", key: aidokuLegacyReaderColorFilterRedKey, value: aidokuLegacyReaderColorComponents().red, tint: UIColor(red: 0.85, green: 0.2, blue: 0.2, alpha: 1))
+                return colorSliderCell(title: LegacyString("reader_settings.color.red"), key: aidokuLegacyReaderColorFilterRedKey, value: aidokuLegacyReaderColorComponents().red, tint: UIColor(red: 0.85, green: 0.2, blue: 0.2, alpha: 1))
             case .colorGreen:
-                return colorSliderCell(title: "Green", key: aidokuLegacyReaderColorFilterGreenKey, value: aidokuLegacyReaderColorComponents().green, tint: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1))
+                return colorSliderCell(title: LegacyString("reader_settings.color.green"), key: aidokuLegacyReaderColorFilterGreenKey, value: aidokuLegacyReaderColorComponents().green, tint: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1))
             case .colorBlue:
-                return colorSliderCell(title: "Blue", key: aidokuLegacyReaderColorFilterBlueKey, value: aidokuLegacyReaderColorComponents().blue, tint: UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1))
+                return colorSliderCell(title: LegacyString("reader_settings.color.blue"), key: aidokuLegacyReaderColorFilterBlueKey, value: aidokuLegacyReaderColorComponents().blue, tint: UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1))
             case .colorAlpha:
-                return colorSliderCell(title: "Strength", key: aidokuLegacyReaderColorFilterAlphaKey, value: aidokuLegacyReaderColorComponents().alpha, tint: LegacyPalette.accent)
+                return colorSliderCell(title: LegacyString("reader_settings.color.strength"), key: aidokuLegacyReaderColorFilterAlphaKey, value: aidokuLegacyReaderColorComponents().alpha, tint: LegacyPalette.accent)
             case .colorFilterEnabled:
                 let cell = toggleCell()
-                cell.configure(title: "Color Filter", subtitle: nil, isOn: aidokuLegacyReaderColorFilterEnabled())
+                cell.configure(title: LegacyString("reader_settings.color_filter"), subtitle: nil, isOn: aidokuLegacyReaderColorFilterEnabled())
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderColorFilterEnabled(isOn)
                     self?.rebuildSections(reload: false)
-                    self?.tableView.reloadSections(IndexSet(integer: 1), with: .automatic)
+                    if let colorSection = self?.sections.firstIndex(where: { section in
+                        section.items.contains { item in
+                            if case .colorFilterEnabled = item {
+                                return true
+                            }
+                            return false
+                        }
+                    }) {
+                        self?.tableView.reloadSections(IndexSet(integer: colorSection), with: .automatic)
+                    }
                     self?.notifyChange()
                 }
                 return cell
             case .grayscale:
                 let cell = toggleCell()
-                cell.configure(title: "Grayscale", subtitle: "Show pages in black and white.", isOn: aidokuLegacyReaderGrayscale())
+                cell.configure(
+                    title: LegacyString("reader_settings.grayscale"),
+                    subtitle: LegacyString("reader_settings.grayscale.subtitle"),
+                    isOn: aidokuLegacyReaderGrayscale()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderGrayscale(isOn)
                     self?.notifyChange()
@@ -14917,7 +14938,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .invert:
                 let cell = toggleCell()
-                cell.configure(title: "Invert Colors", subtitle: "Invert page colors (useful for dark scans).", isOn: aidokuLegacyReaderInvert())
+                cell.configure(
+                    title: LegacyString("reader_settings.invert_colors"),
+                    subtitle: LegacyString("reader_settings.invert_colors.subtitle"),
+                    isOn: aidokuLegacyReaderInvert()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderInvert(isOn)
                     self?.notifyChange()
@@ -14925,7 +14950,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .cropBorders:
                 let cell = toggleCell()
-                cell.configure(title: "Crop Borders", subtitle: "Trim solid margins around each page.", isOn: aidokuLegacyReaderCropBorders())
+                cell.configure(
+                    title: LegacyString("reader_settings.crop_borders"),
+                    subtitle: LegacyString("reader_settings.crop_borders.subtitle"),
+                    isOn: aidokuLegacyReaderCropBorders()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderCropBorders(isOn)
                     self?.notifyChange()
@@ -14933,7 +14962,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .pageNumber:
                 let cell = toggleCell()
-                cell.configure(title: "Page Number", subtitle: "Show the page count in the reader.", isOn: aidokuLegacyReaderShowsPageNumber())
+                cell.configure(
+                    title: LegacyString("reader_settings.page_number"),
+                    subtitle: LegacyString("reader_settings.page_number.subtitle"),
+                    isOn: aidokuLegacyReaderShowsPageNumber()
+                )
                 cell.onToggle = { [weak self] isOn in
                     UserDefaults.standard.set(isOn, forKey: "AidokuLegacy.reader.showPageNumber")
                     self?.notifyChange()
@@ -14941,7 +14974,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .tapZones:
                 let cell = toggleCell()
-                cell.configure(title: "Tap Zones Overlay", subtitle: "Briefly show previous and next tap zones.", isOn: aidokuLegacyReaderShowsTapZones())
+                cell.configure(
+                    title: LegacyString("reader_settings.tap_zones_overlay"),
+                    subtitle: LegacyString("reader_settings.tap_zones_overlay.subtitle"),
+                    isOn: aidokuLegacyReaderShowsTapZones()
+                )
                 cell.onToggle = { [weak self] isOn in
                     UserDefaults.standard.set(isOn, forKey: "AidokuLegacy.reader.showTapZones")
                     self?.notifyChange()
@@ -14949,7 +14986,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .pageTransitions:
                 let cell = toggleCell()
-                cell.configure(title: "Animate Page Transitions", subtitle: "Slide when tapping to the next or previous page.", isOn: aidokuLegacyReaderAnimatePageTransitions())
+                cell.configure(
+                    title: LegacyString("reader_settings.animate_page_transitions"),
+                    subtitle: LegacyString("reader_settings.animate_page_transitions.subtitle"),
+                    isOn: aidokuLegacyReaderAnimatePageTransitions()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderAnimatePageTransitions(isOn)
                     self?.notifyChange()
@@ -14957,7 +14998,11 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
                 return cell
             case .keepScreenOn:
                 let cell = toggleCell()
-                cell.configure(title: "Keep Screen On", subtitle: "Prevent the screen from sleeping while reading.", isOn: aidokuLegacyReaderKeepScreenOn())
+                cell.configure(
+                    title: LegacyString("reader_settings.keep_screen_on"),
+                    subtitle: LegacyString("reader_settings.keep_screen_on.subtitle"),
+                    isOn: aidokuLegacyReaderKeepScreenOn()
+                )
                 cell.onToggle = { [weak self] isOn in
                     aidokuLegacySetReaderKeepScreenOn(isOn)
                     self?.notifyChange()
@@ -14985,74 +15030,74 @@ private final class LegacyReaderSettingsViewController: UITableViewController {
     }
 
     private func presentDoublePagePicker(at indexPath: IndexPath) {
-        let alert = UIAlertController(title: "Double Page", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("reader_settings.double_page"), message: nil, preferredStyle: .actionSheet)
         for mode in LegacyReaderDoublePageMode.allCases {
-            let title = mode == LegacyReaderDoublePageMode.current ? "\(mode.title) (Current)" : mode.title
+            let title = mode == LegacyReaderDoublePageMode.current ? String(format: LegacyString("settings.option.current"), mode.title) : mode.title
             alert.addAction(UIAlertAction(title: title, style: .default) { _ in
                 LegacyReaderDoublePageMode.setCurrent(mode)
                 self.tableView.reloadRows(at: [indexPath], with: .automatic)
                 self.notifyChange()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func presentNavLayoutPicker(at indexPath: IndexPath) {
-        let alert = UIAlertController(title: "Tap Zones Layout", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("reader_settings.tap_zones_layout"), message: nil, preferredStyle: .actionSheet)
         for layout in LegacyReaderNavLayout.allCases {
-            let title = layout == LegacyReaderNavLayout.current ? "\(layout.title) (Current)" : layout.title
+            let title = layout == LegacyReaderNavLayout.current ? String(format: LegacyString("settings.option.current"), layout.title) : layout.title
             alert.addAction(UIAlertAction(title: title, style: .default) { _ in
                 LegacyReaderNavLayout.setCurrent(layout)
                 self.tableView.reloadRows(at: [indexPath], with: .automatic)
                 self.notifyChange()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func presentSidePaddingPicker(at indexPath: IndexPath) {
-        let alert = UIAlertController(title: "Side Padding", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("reader_settings.side_padding"), message: nil, preferredStyle: .actionSheet)
         let current = aidokuLegacyReaderWebtoonSidePaddingPercent()
         for percent in [0, 5, 10, 15, 25] {
-            let label = percent == 0 ? "Off" : "\(percent)%"
-            let title = percent == current ? "\(label) (Current)" : label
+            let label = percent == 0 ? LegacyString("reader_settings.option.off") : "\(percent)%"
+            let title = percent == current ? String(format: LegacyString("settings.option.current"), label) : label
             alert.addAction(UIAlertAction(title: title, style: .default) { _ in
                 aidokuLegacySetReaderWebtoonSidePaddingPercent(percent)
                 self.tableView.reloadRows(at: [indexPath], with: .automatic)
                 self.notifyChange()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func presentBackgroundPicker(at indexPath: IndexPath) {
-        let alert = UIAlertController(title: "Page Background", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("reader_settings.page_background"), message: nil, preferredStyle: .actionSheet)
         for option in LegacyReaderBackground.allCases {
-            let title = option == LegacyReaderBackground.current ? "\(option.title) (Current)" : option.title
+            let title = option == LegacyReaderBackground.current ? String(format: LegacyString("settings.option.current"), option.title) : option.title
             alert.addAction(UIAlertAction(title: title, style: .default) { _ in
                 LegacyReaderBackground.setCurrent(option)
                 self.tableView.reloadRows(at: [indexPath], with: .automatic)
                 self.notifyChange()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func presentBlendModePicker(at indexPath: IndexPath) {
-        let alert = UIAlertController(title: "Blend Mode", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("reader_settings.blend_mode"), message: nil, preferredStyle: .actionSheet)
         for option in LegacyReaderBlendMode.allCases {
-            let title = option == LegacyReaderBlendMode.current ? "\(option.title) (Current)" : option.title
+            let title = option == LegacyReaderBlendMode.current ? String(format: LegacyString("settings.option.current"), option.title) : option.title
             alert.addAction(UIAlertAction(title: title, style: .default) { _ in
                 LegacyReaderBlendMode.setCurrent(option)
                 self.tableView.reloadRows(at: [indexPath], with: .automatic)
                 self.notifyChange()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
