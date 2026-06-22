@@ -407,7 +407,9 @@ final class LegacyLocalFileStore {
         var scannedIds = Set<String>()
 
         for folder in folders {
-            let mangaId = aidokuLegacySanitizedPathComponent(folder.lastPathComponent.normalized)
+            let mangaId = aidokuLegacySanitizedPathComponent(
+                folder.lastPathComponent.precomposedStringWithCanonicalMapping
+            )
             scannedIds.insert(mangaId)
 
             guard let manifest = buildScannedManifest(folder: folder, mangaId: mangaId, existing: existing[mangaId]) else {
