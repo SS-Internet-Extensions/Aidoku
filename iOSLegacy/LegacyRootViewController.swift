@@ -1454,6 +1454,46 @@ final class LegacyTabBarController: UITabBarController {
         LegacySourceUpdateManager.shared.updateInstalledSourcesIfNeeded(automatic: true)
     }
 
+    func performBackgroundLibraryUpdate(completion: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard
+            let libraryNav = viewControllers?.first as? UINavigationController,
+            let library = libraryNav.viewControllers.first as? LegacyLibraryViewController
+        else {
+            completion(.failed)
+            return
+        }
+        library.performBackgroundFetchUpdate(completion: completion)
+    }
+
+    func openUpdatesFromNotification() {
+        guard let libraryNav = viewControllers?.first as? UINavigationController else { return }
+        selectedIndex = 0
+        libraryNav.popToRootViewController(animated: false)
+        if !(libraryNav.topViewController is LegacyUpdatesViewController) {
+            libraryNav.pushViewController(LegacyUpdatesViewController(), animated: true)
+        }
+    }
+
+    @discardableResult
+    func openUpdatedManga(sourceKey: String, mangaKey: String) -> Bool {
+        guard
+            let libraryNav = viewControllers?.first as? UINavigationController,
+            let entry = LegacyUpdateStore.shared.entries.first(where: {
+                $0.sourceKey == sourceKey && $0.manga.key == mangaKey
+            }),
+            let source = packageInstaller.loadInstalledSources().first(where: { $0.key == sourceKey })
+        else {
+            return false
+        }
+        selectedIndex = 0
+        libraryNav.popToRootViewController(animated: false)
+        libraryNav.pushViewController(
+            LegacyMangaDetailViewController(source: source, manga: entry.manga),
+            animated: true
+        )
+        return true
+    }
+
     private func registerPrivacyShieldObservers() {
         let center = NotificationCenter.default
         privacyResignObserver = center.addObserver(
@@ -2897,6 +2937,10 @@ final class LegacyUpdateStore {
 
     func remove(key: String) {
         save(entries.filter { $0.key != key })
+    }
+
+    func remove(sourceKey: String, mangaKey: String) {
+        save(entries.filter { !($0.sourceKey == sourceKey && $0.manga.key == mangaKey) })
     }
 
     func clear() {
@@ -4945,8 +4989,37 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         startLibraryUpdate(automatic: true)
     }
 
-    private func startLibraryUpdate(automatic: Bool) {
-        guard !isUpdatingLibrary else { return }
+    func performBackgroundFetchUpdate(completion: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard UserDefaults.standard.bool(forKey: automaticUpdateDefaultsKey) else {
+            completion(.noData)
+            return
+        }
+        guard !LegacyLibraryStore.shared.rawEntries.isEmpty else {
+            completion(.noData)
+            return
+        }
+        let now = Date()
+        if
+            let lastUpdate = UserDefaults.standard.object(forKey: lastAutomaticUpdateDefaultsKey) as? Date,
+            now.timeIntervalSince(lastUpdate) < 15 * 60
+        {
+            completion(.noData)
+            return
+        }
+        UserDefaults.standard.set(now, forKey: lastAutomaticUpdateDefaultsKey)
+        startLibraryUpdate(automatic: true) { _, newChapterCount in
+            completion(newChapterCount > 0 ? .newData : .noData)
+        }
+    }
+
+    private func startLibraryUpdate(
+        automatic: Bool,
+        completion: ((Int, Int) -> Void)? = nil
+    ) {
+        guard !isUpdatingLibrary else {
+            completion?(0, 0)
+            return
+        }
         let allEntries = LegacyLibraryStore.shared.rawEntries
         let updateItems = allEntries.compactMap { entry -> (LegacyLibraryEntry, AidokuRunnerLegacySource)? in
             guard let source = sources.first(where: { $0.key == entry.sourceKey }) else { return nil }
@@ -4955,16 +5028,22 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         let items = automatic && aidokuLegacyIsLowMemoryMode() ? Array(updateItems.prefix(25)) : updateItems
         guard !items.isEmpty else {
             gridRefreshControl.endRefreshing()
+            completion?(0, 0)
             return
         }
         isUpdatingLibrary = true
         updateNewChapterCount = 0
         updateNewMangaCount = 0
         navigationItem.prompt = automatic ? "Updating library..." : "Updating \(items.count) manga..."
-        updateLibraryItems(items, index: 0, automatic: automatic)
+        updateLibraryItems(items, index: 0, automatic: automatic, completion: completion)
     }
 
-    private func updateLibraryItems(_ items: [(LegacyLibraryEntry, AidokuRunnerLegacySource)], index: Int, automatic: Bool) {
+    private func updateLibraryItems(
+        _ items: [(LegacyLibraryEntry, AidokuRunnerLegacySource)],
+        index: Int,
+        automatic: Bool,
+        completion: ((Int, Int) -> Void)? = nil
+    ) {
         guard index < items.count else {
             isUpdatingLibrary = false
             navigationItem.prompt = nil
@@ -4977,6 +5056,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             if !automatic {
                 showAlert(title: "Library Updated", message: "Finished checking \(items.count) manga.")
             }
+            completion?(updateNewMangaCount, updateNewChapterCount)
             return
         }
         navigationItem.prompt = "Updating \(index + 1) of \(items.count)..."
@@ -4991,7 +5071,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
                     LegacyHistoryStore.shared.updateMangaMetadata(manga: mergedManga, source: item.1)
                     LegacyUpdateStore.shared.updateMangaMetadata(manga: mergedManga, source: item.1)
                 }
-                self.updateLibraryItems(items, index: index + 1, automatic: automatic)
+                self.updateLibraryItems(items, index: index + 1, automatic: automatic, completion: completion)
             }
         }
     }
@@ -5012,6 +5092,12 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         let addedChapters = newChapters.filter { !oldKeys.contains($0.key) && !$0.locked }
         guard !addedChapters.isEmpty else { return }
         LegacyUpdateStore.shared.add(source: source, manga: newManga, chapters: addedChapters)
+        LegacyUpdateNotificationManager.shared.notifyNewChapters(
+            mangaTitle: newManga.title,
+            sourceKey: source.key,
+            mangaKey: newManga.key,
+            newChapterCount: addedChapters.count
+        )
         updateNewChapterCount += addedChapters.count
         updateNewMangaCount += 1
     }

@@ -19,6 +19,14 @@ final class LegacyUpdateNotificationManager {
 
     /// UserDefaults key backing `isEnabled`.
     static let enabledDefaultsKey = "AidokuLegacy.notifications.libraryUpdates"
+    static let categoryLibrarySummary = "AidokuLegacyNotificationLibrarySummary"
+    static let categoryTitleUpdate = "AidokuLegacyNotificationTitleUpdate"
+    static let actionOpenUpdates = "AidokuLegacyNotificationOpenUpdates"
+    static let actionOpenTitle = "AidokuLegacyNotificationOpenTitle"
+    static let actionMarkTitleRead = "AidokuLegacyNotificationMarkTitleRead"
+    static let userInfoSourceKey = "sourceKey"
+    static let userInfoMangaKey = "mangaKey"
+    static let userInfoMangaTitle = "mangaTitle"
 
     private let defaults: UserDefaults
 
@@ -41,6 +49,39 @@ final class LegacyUpdateNotificationManager {
     }
 
     // MARK: - Authorization
+
+    func configureNotificationCenter(delegate: UNUserNotificationCenterDelegate?) {
+        let openUpdates = UNNotificationAction(
+            identifier: Self.actionOpenUpdates,
+            title: "Open Updates",
+            options: [.foreground]
+        )
+        let openTitle = UNNotificationAction(
+            identifier: Self.actionOpenTitle,
+            title: "Open Title",
+            options: [.foreground]
+        )
+        let markTitleRead = UNNotificationAction(
+            identifier: Self.actionMarkTitleRead,
+            title: "Mark Read",
+            options: []
+        )
+        let summaryCategory = UNNotificationCategory(
+            identifier: Self.categoryLibrarySummary,
+            actions: [openUpdates],
+            intentIdentifiers: [],
+            options: []
+        )
+        let titleCategory = UNNotificationCategory(
+            identifier: Self.categoryTitleUpdate,
+            actions: [openTitle, openUpdates, markTitleRead],
+            intentIdentifiers: [],
+            options: []
+        )
+        let center = UNUserNotificationCenter.current()
+        center.setNotificationCategories([summaryCategory, titleCategory])
+        center.delegate = delegate
+    }
 
     /// Requests notification authorization from the system.
     ///
@@ -84,7 +125,12 @@ final class LegacyUpdateNotificationManager {
     /// - Parameters:
     ///   - mangaTitle: The manga title, used as the notification title.
     ///   - newChapterCount: The number of newly found chapters.
-    func notifyNewChapters(mangaTitle: String, newChapterCount: Int) {
+    func notifyNewChapters(
+        mangaTitle: String,
+        sourceKey: String,
+        mangaKey: String,
+        newChapterCount: Int
+    ) {
         guard isEnabled else { return }
         guard newChapterCount > 0 else { return }
 
@@ -96,6 +142,13 @@ final class LegacyUpdateNotificationManager {
             content.body = "\(newChapterCount) new chapters available"
         }
         content.sound = .default
+        content.categoryIdentifier = Self.categoryTitleUpdate
+        content.threadIdentifier = "AidokuLegacyLibraryUpdates"
+        content.userInfo = [
+            Self.userInfoSourceKey: sourceKey,
+            Self.userInfoMangaKey: mangaKey,
+            Self.userInfoMangaTitle: mangaTitle
+        ]
 
         add(content: content)
     }
@@ -128,6 +181,8 @@ final class LegacyUpdateNotificationManager {
         }
         content.body = "\(chapterText) across \(titleText)"
         content.sound = .default
+        content.categoryIdentifier = Self.categoryLibrarySummary
+        content.threadIdentifier = "AidokuLegacyLibraryUpdates"
 
         add(content: content)
     }

@@ -9,9 +9,10 @@ import UIKit
 import Darwin
 import SDWebImage
 import SDWebImageWebPCoder
+import UserNotifications
 
 @UIApplicationMain
-final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
+final class LegacyAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var window: UIWindow?
     private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
 
@@ -23,6 +24,8 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         window.tintColor = LegacyPalette.accent
         registerDefaults()
         registerImageCoders()
+        LegacyUpdateNotificationManager.shared.configureNotificationCenter(delegate: self)
+        application.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
         window.rootViewController = LegacyTabBarController()
         self.window = window
         window.makeKeyAndVisible()
@@ -112,6 +115,36 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         endShortBackgroundTask(application)
     }
 
+    func application(
+        _ application: UIApplication,
+        performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard let tabBarController = window?.rootViewController as? LegacyTabBarController else {
+            completionHandler(.failed)
+            return
+        }
+        tabBarController.performBackgroundLibraryUpdate(completion: completionHandler)
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleUpdateNotificationResponse(response)
+            completionHandler()
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.alert, .sound])
+    }
+
     private func registerDefaults() {
         let isLegacyIPadAir = UIDevice.current.isFirstGenerationIPadAir
         UserDefaults.standard.register(
@@ -155,6 +188,33 @@ final class LegacyAppDelegate: UIResponder, UIApplicationDelegate {
         guard backgroundTaskIdentifier != .invalid else { return }
         application.endBackgroundTask(backgroundTaskIdentifier)
         backgroundTaskIdentifier = .invalid
+    }
+
+    private func handleUpdateNotificationResponse(_ response: UNNotificationResponse) {
+        let userInfo = response.notification.request.content.userInfo
+        let sourceKey = userInfo[LegacyUpdateNotificationManager.userInfoSourceKey] as? String
+        let mangaKey = userInfo[LegacyUpdateNotificationManager.userInfoMangaKey] as? String
+
+        switch response.actionIdentifier {
+            case LegacyUpdateNotificationManager.actionMarkTitleRead:
+                if let sourceKey = sourceKey, let mangaKey = mangaKey {
+                    LegacyUpdateStore.shared.remove(sourceKey: sourceKey, mangaKey: mangaKey)
+                }
+            case LegacyUpdateNotificationManager.actionOpenTitle, UNNotificationDefaultActionIdentifier:
+                if
+                    let sourceKey = sourceKey,
+                    let mangaKey = mangaKey,
+                    let tabBarController = window?.rootViewController as? LegacyTabBarController,
+                    tabBarController.openUpdatedManga(sourceKey: sourceKey, mangaKey: mangaKey)
+                {
+                    return
+                }
+                (window?.rootViewController as? LegacyTabBarController)?.openUpdatesFromNotification()
+            case LegacyUpdateNotificationManager.actionOpenUpdates:
+                (window?.rootViewController as? LegacyTabBarController)?.openUpdatesFromNotification()
+            default:
+                break
+        }
     }
 }
 
