@@ -21,6 +21,7 @@
 "button.edit" = "Edit";
 "button.reload" = "Reload";
 "button.restore" = "Restore";
+"button.update" = "Update";
 "button.login" = "Log In";
 "button.logout" = "Log Out";
 
@@ -228,15 +229,20 @@
 /* MARK: - Sources screen */
 "sources.title" = "Sources";
 "sources.search_placeholder" = "Search sources";
+"sources.loading" = "Loading Aidoku Community Sources...";
 "sources.empty.title" = "No sources installed.";
 "sources.empty.detail" = "Open Browse to install Aidoku Community sources.";
 "sources.installed.title" = "Installed Sources";
+"sources.installed.short" = "Installed";
+"sources.installed.count" = "Installed (%d)";
 "sources.batch_search.title" = "Batch Search";
 "sources.batch_search.placeholder" = "Search all installed sources";
+"sources.catalog.header" = "%@ - %d sources";
 "sources.source_settings.title" = "Source Settings";
 
 /* MARK: - Source repositories */
 "repo.title" = "Source Repositories";
+"repo.short" = "Repos";
 "repo.url.placeholder" = "https://example.com/sources/index.min.json";
 "repo.add" = "Add Source Repo";
 "repo.refresh" = "Refresh Repos";
@@ -255,6 +261,11 @@
 "source.download_package" = "Download Package";
 "source.copy_package_url" = "Copy Package URL";
 "source.missing.title" = "Source Missing";
+"source.version_format" = "Version %d";
+"source.downloading_format" = "Downloading %@...";
+"source.installing_format" = "Installing %@...";
+"source.installed.title" = "Source Installed";
+"source.installed.message" = "%@ is ready in Installed Sources.";
 "source.install_failed.title" = "Install Failed";
 "source.download_failed.title" = "Download Failed";
 "source.settings_failed.title" = "Settings Failed";
@@ -267,16 +278,23 @@
 "source_update.skipped.message" = "A source update is already running.";
 "source_update.current.title" = "Sources Current";
 "source_update.current.message" = "Installed sources are already up to date.";
+"source_update.updated.title" = "Sources Updated";
+"source_update.updated.message" = "Updated %d source package(s).";
+"source_update.failed_count_suffix" = "%d failed.";
 
 /* MARK: - Source detail rows */
 "source.home" = "Home";
 "source.home.detail" = "Run get_home";
+"source.home.empty" = "No home content.";
+"source.more_format" = "More %@";
 "source.search_manga" = "Search Manga";
 "source.search_manga.detail" = "Run get_search_manga_list";
 "source.settings.detail" = "Languages, content ratings, and source options";
 "source.manga_list.detail" = "Run get_manga_list";
 "source.languages" = "Languages";
 "source.base_url" = "Base URL";
+"source.listings.loading" = "Loading Listings...";
+"source.listings.unavailable" = "Listings Unavailable";
 
 /* MARK: - Source login */
 "login.password.placeholder" = "Password";
@@ -289,15 +307,21 @@
 
 /* MARK: - Search */
 "search.placeholder" = "Search manga";
+"search.title" = "Search";
 "search.empty_term" = "Enter a search term.";
+"search.keep_typing" = "Keep typing...";
 "search.failed" = "Search failed";
 "search.no_sources" = "No sources installed.";
 "search.searching" = "Searching...";
+"search.no_results" = "No manga found.";
+"search.section.count" = "%@ (%d)";
+"search.load_next_page" = "Load Next Page";
 "search.with_filter" = "Search with this filter";
 "search.view_more" = "View more";
 
 /* MARK: - Filters */
 "filters.title" = "Filters";
+"filters.count" = "Filters (%d)";
 "filters.from.placeholder" = "From";
 "filters.to.placeholder" = "To";
 "filters.included" = "Included";
@@ -306,6 +330,7 @@
 /* MARK: - Manga detail */
 "manga.resume_reading" = "Resume Reading";
 "manga.read_first_chapter" = "Read from First Chapter";
+"manga.unavailable.title" = "Chapter Unavailable";
 "manga.unavailable.message" = "%@ is marked unavailable by this source.";
 
 /* MARK: - Manga migration */

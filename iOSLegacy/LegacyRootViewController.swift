@@ -7306,12 +7306,12 @@ final class LegacyRootViewController: UITableViewController {
     private var allSources: [LegacySourceInfo] = []
     private var visibleSources: [LegacySourceInfo] = []
     private var installedSources: [AidokuRunnerLegacySource] = []
-    private var loadingText = "Loading Aidoku Community Sources..."
+    private var loadingText = LegacyString("sources.loading")
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        title = "Browse"
+        title = LegacyString("tab.browse")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
@@ -7321,7 +7321,7 @@ final class LegacyRootViewController: UITableViewController {
 
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search sources"
+        searchController.searchBar.placeholder = LegacyString("sources.search_placeholder")
         navigationItem.searchController = searchController
         definesPresentationContext = true
 
@@ -7329,13 +7329,13 @@ final class LegacyRootViewController: UITableViewController {
         refreshControl?.addTarget(self, action: #selector(reloadCatalog), for: .valueChanged)
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Installed",
+            title: LegacyString("sources.installed.short"),
             style: .plain,
             target: self,
             action: #selector(showInstalledSources)
         )
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Repos",
+            title: LegacyString("repo.short"),
             style: .plain,
             target: self,
             action: #selector(showRepositoryOptions)
@@ -7346,7 +7346,7 @@ final class LegacyRootViewController: UITableViewController {
     }
 
     @objc private func reloadCatalog() {
-        loadingText = "Loading Aidoku Community Sources..."
+        loadingText = LegacyString("sources.loading")
         tableView.reloadData()
 
         catalogClient.fetchCatalogs(from: repositoryStore.repositoryURLs) { [weak self] result in
@@ -7378,12 +7378,14 @@ final class LegacyRootViewController: UITableViewController {
 
     private func reloadInstalledSources() {
         installedSources = packageInstaller.loadInstalledSources()
-        navigationItem.rightBarButtonItem?.title = installedSources.isEmpty ? "Installed" : "Installed (\(installedSources.count))"
+        navigationItem.rightBarButtonItem?.title = installedSources.isEmpty
+            ? LegacyString("sources.installed.short")
+            : String(format: LegacyString("sources.installed.count"), installedSources.count)
     }
 
     @objc private func showInstalledSources() {
         if installedSources.isEmpty {
-            showAlert(title: "Installed Sources", message: "No sources installed.")
+            showAlert(title: LegacyString("sources.installed.title"), message: LegacyString("search.no_sources"))
             return
         }
 
@@ -7393,18 +7395,18 @@ final class LegacyRootViewController: UITableViewController {
 
     @objc private func showRepositoryOptions() {
         let repos = repositoryStore.repositoryURLs.map { $0.absoluteString }.joined(separator: "\n")
-        let alert = UIAlertController(title: "Source Repositories", message: repos, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Add Source Repo", style: .default) { [weak self] _ in
+        let alert = UIAlertController(title: LegacyString("repo.title"), message: repos, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: LegacyString("repo.add"), style: .default) { [weak self] _ in
             self?.promptForRepository()
         })
-        alert.addAction(UIAlertAction(title: "Refresh Repos", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("repo.refresh"), style: .default) { [weak self] _ in
             self?.reloadCatalog()
         })
-        alert.addAction(UIAlertAction(title: "Reset to Community Repo", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("repo.reset_community"), style: .destructive) { [weak self] _ in
             self?.repositoryStore.resetToDefault()
             self?.reloadCatalog()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = navigationItem.leftBarButtonItem
         }
@@ -7413,8 +7415,8 @@ final class LegacyRootViewController: UITableViewController {
 
     private func promptForRepository() {
         let alert = UIAlertController(
-            title: "Add Source Repo",
-            message: "Paste an index.min.json URL or a GitHub owner/repo URL.",
+            title: LegacyString("repo.add"),
+            message: LegacyString("repo.add.message"),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
@@ -7423,14 +7425,14 @@ final class LegacyRootViewController: UITableViewController {
             textField.autocapitalizationType = .none
             textField.autocorrectionType = .no
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.add"), style: .default) { [weak self, weak alert] _ in
             guard
                 let self = self,
                 let value = alert?.textFields?.first?.text,
                 let url = self.repositoryStore.normalizedURL(from: value)
             else {
-                self?.showAlert(title: "Invalid Repo", message: "Enter a valid source repository URL.")
+                self?.showAlert(title: LegacyString("repo.invalid.title"), message: LegacyString("repo.invalid.message"))
                 return
             }
             self.repositoryStore.add(url)
@@ -7449,7 +7451,7 @@ final class LegacyRootViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         if let catalog = catalog {
-            return "\(catalog.name) - \(visibleSources.count) sources"
+            return String(format: LegacyString("sources.catalog.header"), catalog.name, visibleSources.count)
         }
         return nil
     }
@@ -7498,7 +7500,7 @@ final class LegacyRootViewController: UITableViewController {
     private func showDetails(for source: LegacySourceInfo) {
         let details = [
             source.id,
-            "Version \(source.version)",
+            String(format: LegacyString("source.version_format"), source.version),
             source.languageText,
             source.ratingText,
             source.baseURL
@@ -7508,19 +7510,19 @@ final class LegacyRootViewController: UITableViewController {
 
         let alert = UIAlertController(title: source.name, message: details, preferredStyle: .actionSheet)
         if let url = source.resolvedBaseURL {
-            alert.addAction(UIAlertAction(title: "Browse Website", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("source.browse_website"), style: .default) { [weak self] _ in
                 self?.openWebsite(url, title: source.name)
             })
         }
-        alert.addAction(UIAlertAction(title: "Download Package", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("source.download_package"), style: .default) { [weak self] _ in
             self?.download(source: source)
         })
         if let url = source.resolvedDownloadURL {
-            alert.addAction(UIAlertAction(title: "Copy Package URL", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: LegacyString("source.copy_package_url"), style: .default) { _ in
                 UIPasteboard.general.string = url.absoluteString
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
 
         if let popover = alert.popoverPresentationController {
             popover.sourceView = tableView
@@ -7531,7 +7533,7 @@ final class LegacyRootViewController: UITableViewController {
     }
 
     private func download(source: LegacySourceInfo) {
-        loadingText = "Downloading \(source.name)..."
+        loadingText = String(format: LegacyString("source.downloading_format"), source.name)
         tableView.reloadData()
 
         catalogClient.downloadPackage(for: source) { [weak self] result in
@@ -7542,14 +7544,14 @@ final class LegacyRootViewController: UITableViewController {
                     case .success(let packageURL):
                         self.installPackage(at: packageURL, sourceName: source.name)
                     case .failure(let error):
-                        self.showAlert(title: "Download Failed", message: error.localizedDescription)
+                        self.showAlert(title: LegacyString("source.download_failed.title"), message: error.localizedDescription)
                 }
             }
         }
     }
 
     private func installPackage(at packageURL: URL, sourceName: String) {
-        loadingText = "Installing \(sourceName)..."
+        loadingText = String(format: LegacyString("source.installing_format"), sourceName)
         tableView.reloadData()
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -7568,7 +7570,7 @@ final class LegacyRootViewController: UITableViewController {
                         NotificationCenter.default.post(name: .legacyInstalledSourcesDidChange, object: nil)
                         self.showInstallSuccess(source)
                     case .failure(let error):
-                        self.showAlert(title: "Install Failed", message: error.localizedDescription)
+                        self.showAlert(title: LegacyString("source.install_failed.title"), message: error.localizedDescription)
                 }
             }
         }
@@ -7576,19 +7578,19 @@ final class LegacyRootViewController: UITableViewController {
 
     private func showInstallSuccess(_ source: AidokuRunnerLegacySource) {
         let alert = UIAlertController(
-            title: "Source Installed",
-            message: "\(source.name) is ready in Installed Sources.",
+            title: LegacyString("source.installed.title"),
+            message: String(format: LegacyString("source.installed.message"), source.name),
             preferredStyle: .alert
         )
         if let url = source.urls.first {
-            alert.addAction(UIAlertAction(title: "Browse Source", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("source.browse_source"), style: .default) { [weak self] _ in
                 self?.openWebsite(url, title: source.name)
             })
         }
-        alert.addAction(UIAlertAction(title: "Open Source", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("source.open_source"), style: .default) { [weak self] _ in
             self?.navigationController?.pushViewController(LegacySourceMenuViewController(source: source), animated: true)
         })
-        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .cancel))
         present(alert, animated: true)
     }
 
@@ -7599,7 +7601,7 @@ final class LegacyRootViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -7620,7 +7622,7 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
     init(sources: [AidokuRunnerLegacySource]? = nil) {
         self.sources = (sources ?? []).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         super.init(style: .plain)
-        title = "Sources"
+        title = LegacyString("sources.title")
     }
 
     @available(*, unavailable)
@@ -7639,14 +7641,14 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
         refreshControl = UIRefreshControl()
         refreshControl?.addTarget(self, action: #selector(reloadSources), for: .valueChanged)
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Repos",
+            title: LegacyString("repo.short"),
             style: .plain,
             target: self,
             action: #selector(showRepositoryOptions)
         )
         navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "Batch Search", style: .plain, target: self, action: #selector(openBatchSearch)),
-            UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateInstalledSources))
+            UIBarButtonItem(title: LegacyString("sources.batch_search.title"), style: .plain, target: self, action: #selector(openBatchSearch)),
+            UIBarButtonItem(title: LegacyString("button.update"), style: .plain, target: self, action: #selector(updateInstalledSources))
         ]
         observer = NotificationCenter.default.addObserver(
             forName: .legacyInstalledSourcesDidChange,
@@ -7685,8 +7687,8 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
             cell.textLabel?.textColor = LegacyPalette.primaryText
             cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
             cell.imageView?.image = nil
-            cell.textLabel?.text = "No sources installed."
-            cell.detailTextLabel?.text = "Open Browse to install Aidoku Community sources."
+            cell.textLabel?.text = LegacyString("sources.empty.title")
+            cell.detailTextLabel?.text = LegacyString("sources.empty.detail")
             cell.accessoryType = .none
             cell.selectionStyle = .none
             return cell
@@ -7721,7 +7723,7 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
 
     @objc private func updateInstalledSources() {
         guard !(sources.isEmpty ? packageInstaller.loadInstalledSources() : sources).isEmpty else {
-            showAlert(title: "No Sources", message: "Install sources before checking for updates.")
+            showAlert(title: LegacyString("source_update.no_sources.title"), message: LegacyString("source_update.no_sources.message"))
             return
         }
         LegacySourceUpdateManager.shared.updateInstalledSources(automatic: false, progress: { [weak self] message in
@@ -7730,16 +7732,18 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
             guard let self = self else { return }
             self.reloadSources()
             if let error = result.error {
-                self.showAlert(title: "Update Failed", message: error.localizedDescription)
+                self.showAlert(title: LegacyString("source_update.failed.title"), message: error.localizedDescription)
             } else if result.skipped {
-                self.showAlert(title: "Update Skipped", message: "A source update is already running.")
+                self.showAlert(title: LegacyString("source_update.skipped.title"), message: LegacyString("source_update.skipped.message"))
             } else if result.updatedCount == 0 && result.failedCount == 0 {
-                self.showAlert(title: "Sources Current", message: "Installed sources are already up to date.")
+                self.showAlert(title: LegacyString("source_update.current.title"), message: LegacyString("source_update.current.message"))
             } else {
-                let failedText = result.failedCount > 0 ? " \(result.failedCount) failed." : ""
+                let failedText = result.failedCount > 0
+                    ? " " + String(format: LegacyString("source_update.failed_count_suffix"), result.failedCount)
+                    : ""
                 self.showAlert(
-                    title: "Sources Updated",
-                    message: "Updated \(result.updatedCount) source package(s).\(failedText)"
+                    title: LegacyString("source_update.updated.title"),
+                    message: String(format: LegacyString("source_update.updated.message"), result.updatedCount) + failedText
                 )
             }
         })
@@ -7747,18 +7751,18 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
 
     @objc private func showRepositoryOptions() {
         let repos = repositoryStore.repositoryURLs.map { $0.absoluteString }.joined(separator: "\n")
-        let alert = UIAlertController(title: "Source Repositories", message: repos, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Add Source Repo", style: .default) { [weak self] _ in
+        let alert = UIAlertController(title: LegacyString("repo.title"), message: repos, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: LegacyString("repo.add"), style: .default) { [weak self] _ in
             self?.promptForRepository()
         })
-        alert.addAction(UIAlertAction(title: "Check Source Updates", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("repo.check_updates"), style: .default) { [weak self] _ in
             self?.updateInstalledSources()
         })
-        alert.addAction(UIAlertAction(title: "Reset to Community Repo", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("repo.reset_community"), style: .destructive) { [weak self] _ in
             self?.repositoryStore.resetToDefault()
             self?.updateInstalledSources()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = navigationItem.leftBarButtonItem
         }
@@ -7767,8 +7771,8 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
 
     private func promptForRepository() {
         let alert = UIAlertController(
-            title: "Add Source Repo",
-            message: "Paste an index.min.json URL or a GitHub owner/repo URL.",
+            title: LegacyString("repo.add"),
+            message: LegacyString("repo.add.message"),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
@@ -7777,19 +7781,19 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
             textField.autocapitalizationType = .none
             textField.autocorrectionType = .no
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.add"), style: .default) { [weak self, weak alert] _ in
             guard
                 let self = self,
                 let value = alert?.textFields?.first?.text,
                 let url = self.repositoryStore.normalizedURL(from: value)
             else {
-                self?.showAlert(title: "Invalid Repo", message: "Enter a valid source repository URL.")
+                self?.showAlert(title: LegacyString("repo.invalid.title"), message: LegacyString("repo.invalid.message"))
                 return
             }
             self.repositoryStore.add(url)
             if self.sources.isEmpty {
-                self.showAlert(title: "Repo Added", message: "Open Browse to install sources from this repository.")
+                self.showAlert(title: LegacyString("repo.added.title"), message: LegacyString("repo.added.message"))
             } else {
                 self.updateInstalledSources()
             }
@@ -7799,7 +7803,7 @@ final class LegacyInstalledSourcesViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -7816,12 +7820,12 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
     private var searchDebounceTimer: Timer?
     private var sections: [Section] = []
     private var isLoading = false
-    private var message = "Enter a search term."
+    private var message = LegacyString("search.empty_term")
 
     init(sources: [AidokuRunnerLegacySource]) {
         self.sources = sources.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         super.init(style: .plain)
-        title = "Batch Search"
+        title = LegacyString("sources.batch_search.title")
     }
 
     @available(*, unavailable)
@@ -7836,7 +7840,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         tableView.backgroundColor = LegacyPalette.background
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
         tableView.rowHeight = 86
-        searchController.searchBar.placeholder = "Search all installed sources"
+        searchController.searchBar.placeholder = LegacyString("sources.batch_search.placeholder")
         searchController.searchBar.delegate = self
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
@@ -7860,7 +7864,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         guard !sections.isEmpty else { return nil }
         let section = sections[section]
         let count = section.entries.count
-        return count == 0 ? section.source.name : "\(section.source.name) (\(count))"
+        return count == 0 ? section.source.name : String(format: LegacyString("search.section.count"), section.source.name, count)
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -7873,7 +7877,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
 
         guard !sections.isEmpty else {
             cell.imageView?.image = nil
-            cell.textLabel?.text = isLoading ? "Searching..." : message
+            cell.textLabel?.text = isLoading ? LegacyString("search.searching") : message
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -7883,7 +7887,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         let section = sections[indexPath.section]
         guard !section.entries.isEmpty else {
             cell.imageView?.image = nil
-            cell.textLabel?.text = "Search failed"
+            cell.textLabel?.text = LegacyString("search.failed")
             cell.detailTextLabel?.text = section.error
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -7926,21 +7930,21 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
         guard trimmedQuery.count >= 2 else {
             sections = []
             isLoading = false
-            message = trimmedQuery.isEmpty ? "Enter a search term." : "Keep typing..."
+            message = trimmedQuery.isEmpty ? LegacyString("search.empty_term") : LegacyString("search.keep_typing")
             tableView.reloadData()
             return
         }
         guard !sources.isEmpty else {
             sections = []
             isLoading = false
-            message = "No sources installed."
+            message = LegacyString("search.no_sources")
             tableView.reloadData()
             return
         }
 
         isLoading = true
         sections = []
-        message = "Searching..."
+        message = LegacyString("search.searching")
         tableView.reloadData()
 
         let currentQuery = trimmedQuery
@@ -7975,7 +7979,7 @@ final class LegacyBatchMangaSearchViewController: UITableViewController {
                 lhs.source.name.localizedCaseInsensitiveCompare(rhs.source.name) == .orderedAscending
             }
             self.isLoading = false
-            self.message = self.sections.isEmpty ? "No manga found." : ""
+            self.message = self.sections.isEmpty ? LegacyString("search.no_results") : ""
             self.tableView.reloadData()
         }
     }
@@ -7996,7 +8000,7 @@ extension LegacyBatchMangaSearchViewController: UISearchResultsUpdating {
         guard trimmedQuery.count >= 2 else {
             sections = []
             isLoading = false
-            message = trimmedQuery.isEmpty ? "Enter a search term." : "Keep typing..."
+            message = trimmedQuery.isEmpty ? LegacyString("search.empty_term") : LegacyString("search.keep_typing")
             tableView.reloadData()
             return
         }
@@ -8491,7 +8495,7 @@ final class LegacySourceMenuViewController: UITableViewController {
         }
         rows.append(contentsOf: source.staticListings.map { .listing($0) })
         if source.runner.features.dynamicListings {
-            rows.append(.message(title: "Loading Listings...", subtitle: nil))
+            rows.append(.message(title: LegacyString("source.listings.loading"), subtitle: nil))
             loadDynamicListings()
         }
         if let url = source.urls.first {
@@ -8513,22 +8517,22 @@ final class LegacySourceMenuViewController: UITableViewController {
         cell.selectionStyle = .default
         switch rows[indexPath.row] {
             case .home:
-                cell.textLabel?.text = "Home"
-                cell.detailTextLabel?.text = "Run get_home"
+                cell.textLabel?.text = LegacyString("source.home")
+                cell.detailTextLabel?.text = LegacyString("source.home.detail")
             case .search:
-                cell.textLabel?.text = "Search Manga"
-                cell.detailTextLabel?.text = "Run get_search_manga_list"
+                cell.textLabel?.text = LegacyString("source.search_manga")
+                cell.detailTextLabel?.text = LegacyString("source.search_manga.detail")
             case .migration(let count):
                 cell.textLabel?.text = LegacyString("migration.source.title")
                 cell.detailTextLabel?.text = String(format: LegacyString("migration.source.detail_count"), count)
             case .settings:
-                cell.textLabel?.text = "Source Settings"
-                cell.detailTextLabel?.text = "Languages, content ratings, and source options"
+                cell.textLabel?.text = LegacyString("sources.source_settings.title")
+                cell.detailTextLabel?.text = LegacyString("source.settings.detail")
             case .listing(let listing):
                 cell.textLabel?.text = listing.name
-                cell.detailTextLabel?.text = "Run get_manga_list"
+                cell.detailTextLabel?.text = LegacyString("source.manga_list.detail")
             case .website(let url):
-                cell.textLabel?.text = "Browse Website"
+                cell.textLabel?.text = LegacyString("source.browse_website")
                 cell.detailTextLabel?.text = url.absoluteString
             case .message(let title, let subtitle):
                 cell.textLabel?.text = title
@@ -8584,7 +8588,8 @@ final class LegacySourceMenuViewController: UITableViewController {
                 guard let self = self else { return }
                 self.rows.removeAll {
                     if case .message(let title, _) = $0 {
-                        return title == "Loading Listings..." || title == "Listings Unavailable"
+                        return title == LegacyString("source.listings.loading")
+                            || title == LegacyString("source.listings.unavailable")
                     }
                     return false
                 }
@@ -8600,7 +8605,7 @@ final class LegacySourceMenuViewController: UITableViewController {
                     case .failure(let error):
                         let prefixCount = self.fixedPrefixCount
                         self.rows.insert(
-                            .message(title: "Listings Unavailable", subtitle: error.localizedDescription),
+                            .message(title: LegacyString("source.listings.unavailable"), subtitle: error.localizedDescription),
                             at: min(prefixCount + self.source.staticListings.count, self.rows.count)
                         )
                 }
@@ -9347,7 +9352,7 @@ final class LegacySourceHomeViewController: UITableViewController {
     @objc private func loadHome() {
         guard !isLoading else { return }
         isLoading = true
-        message = "Loading home..."
+        message = LegacyString("reader.loading_home")
         tableView.reloadData()
         source.runner.getHome { [weak self] result in
             guard let self = self else { return }
@@ -9356,7 +9361,7 @@ final class LegacySourceHomeViewController: UITableViewController {
             switch result {
                 case .success(let home):
                     self.rows = self.rows(from: home)
-                    self.message = self.rows.isEmpty ? "No home content." : ""
+                    self.message = self.rows.isEmpty ? LegacyString("source.home.empty") : ""
                 case .failure(let error):
                     self.rows = []
                     self.message = error.localizedDescription
@@ -9379,17 +9384,17 @@ final class LegacySourceHomeViewController: UITableViewController {
                 case .scroller(let entries, let listing):
                     rows.append(contentsOf: entries.map { .link($0) })
                     if let listing = listing {
-                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                        rows.append(.listing(listing, title: String(format: LegacyString("source.more_format"), component.title ?? listing.name)))
                     }
                 case .mangaList(_, _, let entries, let listing):
                     rows.append(contentsOf: entries.map { .link($0) })
                     if let listing = listing {
-                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                        rows.append(.listing(listing, title: String(format: LegacyString("source.more_format"), component.title ?? listing.name)))
                     }
                 case .mangaChapterList(_, let entries, let listing):
                     rows.append(contentsOf: entries.map { .chapter($0) })
                     if let listing = listing {
-                        rows.append(.listing(listing, title: "More \(component.title ?? listing.name)"))
+                        rows.append(.listing(listing, title: String(format: LegacyString("source.more_format"), component.title ?? listing.name)))
                     }
                 case .filters(let items):
                     rows.append(contentsOf: items.map { .filter($0) })
@@ -9447,11 +9452,11 @@ final class LegacySourceHomeViewController: UITableViewController {
 
     private func showUnavailableChapterAlert(for chapter: AidokuRunnerLegacyChapter) {
         let alert = UIAlertController(
-            title: "Chapter Unavailable",
-            message: "\(chapter.legacyFormattedTitle) is marked unavailable by this source.",
+            title: LegacyString("manga.unavailable.title"),
+            message: String(format: LegacyString("manga.unavailable.message"), chapter.legacyFormattedTitle),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 
@@ -9519,7 +9524,7 @@ final class LegacyMangaListViewController: UITableViewController {
     private var page = 1
     private var hasNextPage = false
     private var isLoading = false
-    private var message = "Enter a search term."
+    private var message = LegacyString("search.empty_term")
 
     init(
         source: AidokuRunnerLegacySource,
@@ -9533,7 +9538,7 @@ final class LegacyMangaListViewController: UITableViewController {
         self.initialFilters = initialFilters
         self.allowsEmptySearch = allowsEmptySearch
         super.init(style: .plain)
-        title = titleOverride ?? listing?.name ?? "Search"
+        title = titleOverride ?? listing?.name ?? LegacyString("search.title")
     }
 
     @available(*, unavailable)
@@ -9552,7 +9557,7 @@ final class LegacyMangaListViewController: UITableViewController {
         refreshControl?.addTarget(self, action: #selector(refresh), for: .valueChanged)
 
         if listing == nil {
-            searchController.searchBar.placeholder = "Search manga"
+            searchController.searchBar.placeholder = LegacyString("search.placeholder")
             searchController.searchBar.delegate = self
             searchController.searchResultsUpdater = self
             searchController.obscuresBackgroundDuringPresentation = false
@@ -9560,7 +9565,7 @@ final class LegacyMangaListViewController: UITableViewController {
             navigationItem.hidesSearchBarWhenScrolling = false
             definesPresentationContext = true
             navigationItem.rightBarButtonItem = UIBarButtonItem(
-                title: "Filters",
+                title: LegacyString("filters.title"),
                 style: .plain,
                 target: self,
                 action: #selector(openFilters)
@@ -9594,7 +9599,7 @@ final class LegacyMangaListViewController: UITableViewController {
 
         if entries.isEmpty {
             cell.imageView?.image = nil
-            cell.textLabel?.text = isLoading ? "Loading..." : message
+            cell.textLabel?.text = isLoading ? LegacyString("reader.loading") : message
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -9603,7 +9608,7 @@ final class LegacyMangaListViewController: UITableViewController {
 
         if indexPath.row == entries.count {
             cell.imageView?.image = nil
-            cell.textLabel?.text = isLoading ? "Loading..." : "Load Next Page"
+            cell.textLabel?.text = isLoading ? LegacyString("reader.loading") : LegacyString("search.load_next_page")
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             cell.selectionStyle = .default
@@ -9663,9 +9668,9 @@ final class LegacyMangaListViewController: UITableViewController {
             hasNextPage = false
         }
         isLoading = true
-        message = "Loading..."
+        message = LegacyString("reader.loading")
         if appending {
-            // Refresh only the footer ("Load Next Page" -> "Loading...") so an
+            // Refresh only the footer state so an
             // in-flight scroll isn't interrupted by a full table reload.
             let footer = IndexPath(row: entries.count, section: 0)
             if hasNextPage, tableView.numberOfRows(inSection: 0) > entries.count {
@@ -9722,7 +9727,7 @@ final class LegacyMangaListViewController: UITableViewController {
             }
             self.hasNextPage = pageResult.hasNextPage
             self.page += 1
-            self.message = self.entries.isEmpty ? "No manga found." : ""
+            self.message = self.entries.isEmpty ? LegacyString("search.no_results") : ""
             self.tableView.reloadData()
         }
 
@@ -9732,7 +9737,7 @@ final class LegacyMangaListViewController: UITableViewController {
             let query = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard allowsEmptySearch || !query.isEmpty || !enabledFilters.isEmpty else {
                 isLoading = false
-                message = "Enter a search term."
+                message = LegacyString("search.empty_term")
                 refreshControl?.endRefreshing()
                 tableView.reloadData()
                 return
@@ -9784,8 +9789,9 @@ final class LegacyMangaListViewController: UITableViewController {
 
     private func updateFilterButton() {
         navigationItem.rightBarButtonItem?.isEnabled = !availableFilters.isEmpty
-        let suffix = enabledFilters.isEmpty ? "" : " (\(enabledFilters.count))"
-        navigationItem.rightBarButtonItem?.title = "Filters\(suffix)"
+        navigationItem.rightBarButtonItem?.title = enabledFilters.isEmpty
+            ? LegacyString("filters.title")
+            : String(format: LegacyString("filters.count"), enabledFilters.count)
     }
 
     @objc private func openFilters() {
@@ -9819,7 +9825,7 @@ extension LegacyMangaListViewController: UISearchResultsUpdating {
         guard query.count >= 2 || allowsEmptySearch || !enabledFilters.isEmpty else {
             entries = []
             hasNextPage = false
-            message = query.isEmpty ? "Enter a search term." : "Keep typing..."
+            message = query.isEmpty ? LegacyString("search.empty_term") : LegacyString("search.keep_typing")
             tableView.reloadData()
             return
         }
@@ -9843,7 +9849,7 @@ final class LegacyFilterViewController: UITableViewController {
         self.selectedFilters = selectedFilters
         self.onApply = onApply
         super.init(style: .grouped)
-        title = "Filters"
+        title = LegacyString("filters.title")
     }
 
     @available(*, unavailable)
