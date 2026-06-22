@@ -8327,10 +8327,132 @@ extension LegacyMangaMigrationViewController: UISearchResultsUpdating {
     }
 }
 
+final class LegacySourceMigrationViewController: UITableViewController {
+    private let source: AidokuRunnerLegacySource
+    private var entries: [LegacyLibraryEntry] = []
+    private var libraryObserver: NSObjectProtocol?
+
+    init(source: AidokuRunnerLegacySource) {
+        self.source = source
+        super.init(style: .plain)
+        title = LegacyString("migration.source.title")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.rowHeight = 86
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+        libraryObserver = NotificationCenter.default.addObserver(
+            forName: .legacyLibraryDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reloadEntries()
+        }
+        reloadEntries()
+    }
+
+    deinit {
+        if let libraryObserver = libraryObserver {
+            NotificationCenter.default.removeObserver(libraryObserver)
+        }
+    }
+
+    private func reloadEntries() {
+        entries = LegacyLibraryStore.shared.rawEntries
+            .filter { $0.sourceKey == source.key }
+            .sorted { $0.manga.title.localizedCaseInsensitiveCompare($1.manga.title) == .orderedAscending }
+        tableView.reloadData()
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 1
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return entries.isEmpty ? 1 : entries.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard !entries.isEmpty else { return nil }
+        return String(format: LegacyString("migration.source.header"), source.name, entries.count)
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "SourceMigrationCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "SourceMigrationCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+
+        guard !entries.isEmpty else {
+            cell.imageView?.image = nil
+            cell.textLabel?.text = LegacyString("migration.source.empty.title")
+            cell.detailTextLabel?.text = LegacyString("migration.source.empty.detail")
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let entry = entries[indexPath.row]
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        LegacyImageLoader.shared.loadCover(
+            urls: entry.manga.coverURLCandidates(relativeTo: source.urls.first),
+            source: source,
+            targetHeight: 130
+        ) { image in
+            guard
+                let visibleIndexPath = tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+        }
+        cell.textLabel?.text = entry.manga.title
+        cell.detailTextLabel?.text = migrationDetailText(for: entry)
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard entries.indices.contains(indexPath.row) else { return }
+        let entry = entries[indexPath.row]
+        navigationController?.pushViewController(
+            LegacyMangaMigrationViewController(source: source, manga: entry.manga),
+            animated: true
+        )
+    }
+
+    private func migrationDetailText(for entry: LegacyLibraryEntry) -> String {
+        var parts: [String] = []
+        let categories = entry.displayCategories
+        if !categories.isEmpty {
+            parts.append(categories.joined(separator: ", "))
+        }
+        if let chapterCount = entry.manga.chapters?.count, chapterCount > 0 {
+            let key = chapterCount == 1 ? "migration.source.chapter_count.one" : "migration.source.chapter_count.many"
+            parts.append(String(format: LegacyString(key), chapterCount))
+        }
+        return parts.isEmpty ? LegacyString("migration.source.detail") : parts.joined(separator: " - ")
+    }
+}
+
 final class LegacySourceMenuViewController: UITableViewController {
     private enum Row {
         case home
         case search
+        case migration(count: Int)
         case settings
         case listing(AidokuRunnerLegacyListing)
         case website(URL)
@@ -8360,6 +8482,10 @@ final class LegacySourceMenuViewController: UITableViewController {
             rows.append(.home)
         }
         rows.append(.search)
+        let migrationCount = LegacyLibraryStore.shared.rawEntries.filter { $0.sourceKey == source.key }.count
+        if migrationCount > 0 {
+            rows.append(.migration(count: migrationCount))
+        }
         if source.hasConfigurableSettings {
             rows.append(.settings)
         }
@@ -8392,6 +8518,9 @@ final class LegacySourceMenuViewController: UITableViewController {
             case .search:
                 cell.textLabel?.text = "Search Manga"
                 cell.detailTextLabel?.text = "Run get_search_manga_list"
+            case .migration(let count):
+                cell.textLabel?.text = LegacyString("migration.source.title")
+                cell.detailTextLabel?.text = String(format: LegacyString("migration.source.detail_count"), count)
             case .settings:
                 cell.textLabel?.text = "Source Settings"
                 cell.detailTextLabel?.text = "Languages, content ratings, and source options"
@@ -8417,6 +8546,8 @@ final class LegacySourceMenuViewController: UITableViewController {
                 navigationController?.pushViewController(LegacySourceHomeViewController(source: source), animated: true)
             case .search:
                 navigationController?.pushViewController(LegacyMangaListViewController(source: source, listing: nil), animated: true)
+            case .migration:
+                navigationController?.pushViewController(LegacySourceMigrationViewController(source: source), animated: true)
             case .settings:
                 navigationController?.pushViewController(LegacySourceSettingsViewController(source: source), animated: true)
             case .listing(let listing):
@@ -8481,6 +8612,9 @@ final class LegacySourceMenuViewController: UITableViewController {
     private var fixedPrefixCount: Int {
         var count = 1 // Search
         if source.runner.features.providesHome {
+            count += 1
+        }
+        if LegacyLibraryStore.shared.rawEntries.contains(where: { $0.sourceKey == source.key }) {
             count += 1
         }
         if source.hasConfigurableSettings {

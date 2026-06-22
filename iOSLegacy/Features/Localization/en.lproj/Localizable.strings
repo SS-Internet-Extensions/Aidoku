@@ -327,6 +327,14 @@
 "migration.copied.message" = "The target entry was added with the same categories, history, updates, and tracker links. Downloads stay on the original entry.";
 "migration.completed.title" = "Migration Complete";
 "migration.completed.message" = "Library data, history, updates, and tracker links were moved to the target entry. Downloads stay on the original entry.";
+"migration.source.title" = "Migrate Source";
+"migration.source.detail" = "Search another source for this title.";
+"migration.source.detail_count" = "%d library title(s) from this source";
+"migration.source.header" = "%@ (%d)";
+"migration.source.empty.title" = "No Library Titles";
+"migration.source.empty.detail" = "Add titles from this source before migrating it.";
+"migration.source.chapter_count.one" = "%d chapter";
+"migration.source.chapter_count.many" = "%d chapters";
 
 /* MARK: - Chapters */
 "chapters.search_placeholder" = "Search chapters";
