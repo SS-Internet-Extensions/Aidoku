@@ -24,7 +24,7 @@ final class LegacyKomgaServerListViewController: UITableViewController {
 
     init() {
         super.init(style: .grouped)
-        title = "Self-Hosted Servers"
+        title = LegacyString("self_hosted.servers.title")
     }
 
     required init?(coder: NSCoder) {
@@ -88,7 +88,7 @@ final class LegacyKomgaServerListViewController: UITableViewController {
         cell.textLabel?.textColor = nil
 
         if indexPath.section == 1 {
-            cell.textLabel?.text = "+ Add Server"
+            cell.textLabel?.text = LegacyString("self_hosted.add_server")
             cell.textLabel?.textAlignment = .center
             cell.accessoryType = .none
             cell.selectionStyle = .default
@@ -98,7 +98,7 @@ final class LegacyKomgaServerListViewController: UITableViewController {
         cell.textLabel?.textAlignment = .natural
 
         guard !servers.isEmpty else {
-            cell.textLabel?.text = "No servers configured"
+            cell.textLabel?.text = LegacyString("self_hosted.empty")
             cell.textLabel?.textColor = .gray
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -107,7 +107,11 @@ final class LegacyKomgaServerListViewController: UITableViewController {
 
         let server = servers[indexPath.row]
         cell.textLabel?.text = server.name.isEmpty ? server.baseURL : server.name
-        cell.detailTextLabel?.text = "\(server.kind.displayName) - \(server.baseURL)"
+        cell.detailTextLabel?.text = String(
+            format: LegacyString("self_hosted.server_detail"),
+            server.kind.displayName,
+            server.baseURL
+        )
         cell.accessoryType = .disclosureIndicator
         cell.selectionStyle = .default
         return cell
@@ -159,7 +163,7 @@ final class LegacyKomgaServerListViewController: UITableViewController {
         _ tableView: UITableView,
         titleForDeleteConfirmationButtonForRowAt indexPath: IndexPath
     ) -> String? {
-        return "Delete"
+        return LegacyString("button.delete")
     }
 
     private func editServer(at indexPath: IndexPath) {
@@ -212,7 +216,9 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
         self.passwordValue = server?.password ?? ""
         self.kindValue = server?.kind ?? .komga
         super.init(style: .grouped)
-        title = server == nil ? "Add Server" : "Edit Server"
+        title = server == nil
+            ? LegacyString("self_hosted.form.add_title")
+            : LegacyString("self_hosted.form.edit_title")
     }
 
     required init?(coder: NSCoder) {
@@ -249,9 +255,9 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch section {
             case 0:
-                return "Server"
+                return LegacyString("self_hosted.section.server")
             case 1:
-                return "Type"
+                return LegacyString("self_hosted.section.type")
             default:
                 return nil
         }
@@ -283,20 +289,20 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
         switch row {
             case 0:
                 field.tag = FieldTag.name.rawValue
-                field.placeholder = "Name"
+                field.placeholder = LegacyString("self_hosted.field.name")
                 field.text = nameValue
             case 1:
                 field.tag = FieldTag.baseURL.rawValue
-                field.placeholder = "https://komga.example.com"
+                field.placeholder = LegacyString("self_hosted.field.url_placeholder")
                 field.text = baseURLValue
                 field.keyboardType = .URL
             case 2:
                 field.tag = FieldTag.username.rawValue
-                field.placeholder = "Username"
+                field.placeholder = LegacyString("self_hosted.field.username")
                 field.text = usernameValue
             default:
                 field.tag = FieldTag.password.rawValue
-                field.placeholder = "Password"
+                field.placeholder = LegacyString("self_hosted.field.password")
                 field.text = passwordValue
                 field.isSecureTextEntry = true
         }
@@ -321,7 +327,7 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
 
     private func saveCell() -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
-        cell.textLabel?.text = "Test & Save"
+        cell.textLabel?.text = LegacyString("self_hosted.test_and_save")
         cell.textLabel?.textAlignment = .center
         cell.textLabel?.textColor = view.tintColor
         cell.selectionStyle = .default
@@ -376,11 +382,18 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
         )
 
         guard candidate.url != nil else {
-            showAlert(title: "Invalid URL", message: "Enter a valid server address (e.g. https://komga.example.com).")
+            showAlert(
+                title: LegacyString("settings.invalid_url.title"),
+                message: LegacyString("self_hosted.invalid_url.message")
+            )
             return
         }
 
-        let loading = UIAlertController(title: nil, message: "Testing...", preferredStyle: .alert)
+        let loading = UIAlertController(
+            title: nil,
+            message: LegacyString("self_hosted.testing"),
+            preferredStyle: .alert
+        )
         present(loading, animated: true)
 
         let client = LegacyKomgaClient(server: candidate)
@@ -393,7 +406,7 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
                             self.save(candidate)
                         case .failure(let error):
                             self.showAlert(
-                                title: "Connection Failed",
+                                title: LegacyString("self_hosted.connection_failed.title"),
                                 message: error.localizedDescription
                             )
                     }
@@ -414,7 +427,7 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }

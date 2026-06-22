@@ -102,13 +102,13 @@ enum LegacyKomgaError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
             case .notConfigured:
-                return "The server is not configured correctly."
+                return LegacyString("self_hosted.error.not_configured")
             case .invalidResponse:
-                return "Received an invalid response from the server."
+                return LegacyString("self_hosted.error.invalid_response")
             case .requestFailed(let message):
                 return message
             case .unauthorized:
-                return "Authentication failed. Check the username and password."
+                return LegacyString("self_hosted.error.unauthorized")
         }
     }
 }

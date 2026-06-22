@@ -51,7 +51,9 @@ final class LegacyKomgaClient {
             case .komga:
                 listKomgaBooks(seriesId: seriesId, completion: completion)
             case .kavita:
-                completion(.failure(LegacyKomgaError.requestFailed("Kavita not yet supported")))
+                completion(.failure(LegacyKomgaError.requestFailed(
+                    LegacyString("self_hosted.error.kavita_books_unsupported")
+                )))
         }
     }
 
@@ -121,7 +123,7 @@ final class LegacyKomgaClient {
                         let metadata = item["metadata"] as? [String: Any]
                         let title = (metadata?["title"] as? String)
                             ?? (item["name"] as? String)
-                            ?? "Unknown"
+                            ?? LegacyString("self_hosted.unknown_title")
                         let booksCount = (item["booksCount"] as? Int)
                             ?? (item["booksCount"] as? NSNumber)?.intValue
                             ?? 0
@@ -176,7 +178,7 @@ final class LegacyKomgaClient {
                         let metadata = item["metadata"] as? [String: Any]
                         let title = (metadata?["title"] as? String)
                             ?? (item["name"] as? String)
-                            ?? "Unknown"
+                            ?? LegacyString("self_hosted.unknown_title")
                         // Komga exposes the chapter number as a string in metadata.number.
                         let numberString = (metadata?["number"] as? String)
                         let number = numberString.flatMap { Float($0) }
@@ -236,7 +238,7 @@ final class LegacyKomgaClient {
                                     guard let id = LegacyKomgaClient.stringId(item["id"]) else { return nil }
                                     let title = (item["name"] as? String)
                                         ?? (item["originalName"] as? String)
-                                        ?? "Unknown"
+                                        ?? LegacyString("self_hosted.unknown_title")
                                     let pages = (item["pages"] as? Int) ?? 0
                                     return LegacyKomgaSeries(
                                         id: id,
@@ -352,7 +354,10 @@ final class LegacyKomgaClient {
                 }
                 if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
                     completion(.failure(LegacyKomgaError.requestFailed(
-                        "Server returned status \(httpResponse.statusCode)."
+                        String(
+                            format: LegacyString("self_hosted.error.status_code"),
+                            httpResponse.statusCode
+                        )
                     )))
                     return
                 }

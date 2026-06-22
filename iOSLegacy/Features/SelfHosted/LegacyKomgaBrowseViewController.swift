@@ -44,7 +44,7 @@ final class LegacyKomgaSeriesListViewController: UITableViewController, UISearch
         navigationItem.largeTitleDisplayMode = .never
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search series"
+        searchController.searchBar.placeholder = LegacyString("self_hosted.search_series.placeholder")
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
@@ -80,7 +80,10 @@ final class LegacyKomgaSeriesListViewController: UITableViewController, UISearch
                     case .failure(let error):
                         self.reachedEnd = true
                         if self.series.isEmpty {
-                            self.showAlert(title: "Could Not Load Series", message: error.localizedDescription)
+                            self.showAlert(
+                                title: LegacyString("self_hosted.load_series_failed.title"),
+                                message: error.localizedDescription
+                            )
                         }
                 }
             }
@@ -111,7 +114,7 @@ final class LegacyKomgaSeriesListViewController: UITableViewController, UISearch
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: "Cell")
         let item = series[indexPath.row]
         cell.textLabel?.text = item.title
-        cell.detailTextLabel?.text = item.booksCount == 1 ? "1 book" : "\(item.booksCount) books"
+        cell.detailTextLabel?.text = bookCountText(item.booksCount)
         cell.accessoryType = .disclosureIndicator
         return cell
     }
@@ -131,8 +134,15 @@ final class LegacyKomgaSeriesListViewController: UITableViewController, UISearch
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
+    }
+
+    private func bookCountText(_ count: Int) -> String {
+        if count == 1 {
+            return LegacyString("self_hosted.book_count.one")
+        }
+        return String(format: LegacyString("self_hosted.book_count.many"), count)
     }
 }
 
@@ -176,7 +186,10 @@ final class LegacyKomgaBooksViewController: UITableViewController {
                         self.books = books
                         self.tableView.reloadData()
                     case .failure(let error):
-                        self.showAlert(title: "Could Not Load Books", message: error.localizedDescription)
+                        self.showAlert(
+                            title: LegacyString("self_hosted.load_books_failed.title"),
+                            message: error.localizedDescription
+                        )
                 }
             }
         }
@@ -191,7 +204,7 @@ final class LegacyKomgaBooksViewController: UITableViewController {
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: "Cell")
         let book = books[indexPath.row]
         cell.textLabel?.text = book.title
-        cell.detailTextLabel?.text = book.pageCount == 1 ? "1 page" : "\(book.pageCount) pages"
+        cell.detailTextLabel?.text = pageCountText(book.pageCount)
         cell.accessoryType = .disclosureIndicator
         return cell
     }
@@ -242,7 +255,14 @@ final class LegacyKomgaBooksViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
+    }
+
+    private func pageCountText(_ count: Int) -> String {
+        if count == 1 {
+            return LegacyString("self_hosted.page_count.one")
+        }
+        return String(format: LegacyString("self_hosted.page_count.many"), count)
     }
 }

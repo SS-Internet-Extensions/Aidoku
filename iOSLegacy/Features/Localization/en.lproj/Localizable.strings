@@ -208,6 +208,37 @@
 "local_files.chapter_prefix" = "Ch. %@";
 "local_files.chapter_title_format" = "%@ - %@";
 
+/* MARK: - Self-hosted servers */
+"self_hosted.servers.title" = "Self-Hosted Servers";
+"self_hosted.add_server" = "+ Add Server";
+"self_hosted.empty" = "No servers configured";
+"self_hosted.server_detail" = "%@ - %@";
+"self_hosted.form.add_title" = "Add Server";
+"self_hosted.form.edit_title" = "Edit Server";
+"self_hosted.section.server" = "Server";
+"self_hosted.section.type" = "Type";
+"self_hosted.field.name" = "Name";
+"self_hosted.field.url_placeholder" = "https://komga.example.com";
+"self_hosted.field.username" = "Username";
+"self_hosted.field.password" = "Password";
+"self_hosted.test_and_save" = "Test & Save";
+"self_hosted.invalid_url.message" = "Enter a valid server address (e.g. https://komga.example.com).";
+"self_hosted.testing" = "Testing...";
+"self_hosted.connection_failed.title" = "Connection Failed";
+"self_hosted.search_series.placeholder" = "Search series";
+"self_hosted.load_series_failed.title" = "Could Not Load Series";
+"self_hosted.load_books_failed.title" = "Could Not Load Books";
+"self_hosted.book_count.one" = "1 book";
+"self_hosted.book_count.many" = "%d books";
+"self_hosted.page_count.one" = "1 page";
+"self_hosted.page_count.many" = "%d pages";
+"self_hosted.unknown_title" = "Unknown";
+"self_hosted.error.not_configured" = "The server is not configured correctly.";
+"self_hosted.error.invalid_response" = "Received an invalid response from the server.";
+"self_hosted.error.unauthorized" = "Authentication failed. Check the username and password.";
+"self_hosted.error.kavita_books_unsupported" = "Kavita books are not supported yet.";
+"self_hosted.error.status_code" = "Server returned status %d.";
+
 /* MARK: - Backup / restore */
 "backup.restore.title" = "Restore Backup";
 "backup.restore.message" = "This replaces the local legacy library, history, updates, repositories, and settings.";
