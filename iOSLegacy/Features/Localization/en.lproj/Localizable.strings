@@ -27,6 +27,7 @@
 "button.rename" = "Rename";
 "button.remove" = "Remove";
 "button.copy" = "Copy";
+"button.apply" = "Apply";
 
 /* MARK: - Library screen */
 "library.title" = "Library";
@@ -451,6 +452,14 @@
 /* MARK: - Filters */
 "filters.title" = "Filters";
 "filters.count" = "Filters (%d)";
+"filters.reset" = "Reset";
+"filters.sort" = "Sort";
+"filters.select" = "Select";
+"filters.any" = "Any";
+"filters.default" = "Default";
+"filters.sort.ascending" = "%@, ascending";
+"filters.selected" = "%d selected";
+"filters.selected_excluded" = "%d selected, %d excluded";
 "filters.from.placeholder" = "From";
 "filters.to.placeholder" = "To";
 "filters.included" = "Included";

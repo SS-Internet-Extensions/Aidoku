@@ -9934,13 +9934,13 @@ final class LegacyFilterViewController: UITableViewController {
         super.viewDidLoad()
         tableView.backgroundColor = LegacyPalette.background
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Reset",
+            title: LegacyString("filters.reset"),
             style: .plain,
             target: self,
             action: #selector(resetFilters)
         )
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Apply",
+            title: LegacyString("button.apply"),
             style: .done,
             target: self,
             action: #selector(applyFilters)
@@ -9978,7 +9978,7 @@ final class LegacyFilterViewController: UITableViewController {
                 editText(filter: filter, placeholder: placeholder)
             case .sort(let canAscend, let options, let defaultValue):
                 let picker = LegacyFilterOptionPickerViewController(
-                    title: filter.title ?? "Sort",
+                    title: filter.title ?? LegacyString("filters.sort"),
                     options: options.enumerated().map { (label: $0.element, value: String($0.offset)) },
                     selectedValues: Set([String(sortValue(for: filter)?.index ?? defaultValue?.index ?? 0)]),
                     allowsMultiple: false,
@@ -9994,7 +9994,7 @@ final class LegacyFilterViewController: UITableViewController {
                 cycleCheck(filter: filter)
             case .select(let select):
                 let picker = LegacyFilterOptionPickerViewController(
-                    title: filter.title ?? "Select",
+                    title: filter.title ?? LegacyString("filters.select"),
                     options: select.options.enumerated().map {
                         let value = select.ids?.indices.contains($0.offset) == true ? select.ids![$0.offset] : $0.element
                         return (label: $0.element, value: value)
@@ -10011,7 +10011,7 @@ final class LegacyFilterViewController: UITableViewController {
             case .multiselect(let multiSelect):
                 let current = multiselectValue(for: filter)
                 let picker = LegacyFilterOptionPickerViewController(
-                    title: filter.title ?? "Select",
+                    title: filter.title ?? LegacyString("filters.select"),
                     options: multiSelect.options.enumerated().map {
                         let value = multiSelect.ids?.indices.contains($0.offset) == true ? multiSelect.ids![$0.offset] : $0.element
                         return (label: $0.element, value: value)
@@ -10039,21 +10039,27 @@ final class LegacyFilterViewController: UITableViewController {
                 if case .text(_, let value)? = value(for: filter.id), !value.isEmpty {
                     return value
                 }
-                return "Any"
+                return LegacyString("filters.any")
             case .sort(_, let options, let defaultValue):
                 let value = sortValue(for: filter)
                 let index = value?.index ?? defaultValue?.index ?? 0
-                let label = options.indices.contains(index) ? options[index] : "Default"
+                let label = options.indices.contains(index) ? options[index] : LegacyString("filters.default")
                 let ascending = value?.ascending ?? defaultValue?.ascending ?? false
-                return ascending ? "\(label), ascending" : label
+                return ascending ? String(format: LegacyString("filters.sort.ascending"), label) : label
             case .check:
                 if case .check(_, let value)? = value(for: filter.id) {
-                    return value < 0 ? "Excluded" : value > 0 ? "Included" : "Any"
+                    if value < 0 {
+                        return LegacyString("filters.excluded")
+                    }
+                    if value > 0 {
+                        return LegacyString("filters.included")
+                    }
+                    return LegacyString("filters.any")
                 }
-                return "Any"
+                return LegacyString("filters.any")
             case .select(let select):
                 let value = selectValue(for: filter) ?? select.defaultValue
-                guard let selected = value else { return "Default" }
+                guard let selected = value else { return LegacyString("filters.default") }
                 if let index = select.ids?.firstIndex(of: selected), select.options.indices.contains(index) {
                     return select.options[index]
                 }
@@ -10062,15 +10068,17 @@ final class LegacyFilterViewController: UITableViewController {
                 let current = multiselectValue(for: filter)
                 let included = current?.included.count ?? 0
                 let excluded = current?.excluded.count ?? 0
-                if included == 0 && excluded == 0 { return "Any" }
-                return excluded == 0 ? "\(included) selected" : "\(included) selected, \(excluded) excluded"
+                if included == 0 && excluded == 0 { return LegacyString("filters.any") }
+                return excluded == 0
+                    ? String(format: LegacyString("filters.selected"), included)
+                    : String(format: LegacyString("filters.selected_excluded"), included, excluded)
             case .note(let note):
                 return note
             case .range:
                 if case .range(_, let from, let to)? = value(for: filter.id) {
                     return "\(from.map { String($0) } ?? "-") - \(to.map { String($0) } ?? "-")"
                 }
-                return "Any"
+                return LegacyString("filters.any")
         }
     }
 
@@ -10082,12 +10090,12 @@ final class LegacyFilterViewController: UITableViewController {
                 textField.text = value
             }
         }
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             self.remove(id: filter.id)
             self.tableView.reloadData()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.done"), style: .default) { _ in
             let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if text.isEmpty {
                 self.remove(id: filter.id)
@@ -10103,21 +10111,21 @@ final class LegacyFilterViewController: UITableViewController {
         let alert = UIAlertController(title: filter.title ?? filter.id, message: nil, preferredStyle: .alert)
         let current = rangeValue(for: filter)
         alert.addTextField { textField in
-            textField.placeholder = "From"
+            textField.placeholder = LegacyString("filters.from.placeholder")
             textField.keyboardType = .decimalPad
             textField.text = current?.from.map { String($0) }
         }
         alert.addTextField { textField in
-            textField.placeholder = "To"
+            textField.placeholder = LegacyString("filters.to.placeholder")
             textField.keyboardType = .decimalPad
             textField.text = current?.to.map { String($0) }
         }
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             self.remove(id: filter.id)
             self.tableView.reloadData()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Done", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.done"), style: .default) { _ in
             let from = alert.textFields?[0].text.flatMap(Float.init)
             let to = alert.textFields?[1].text.flatMap(Float.init)
             if from == nil && to == nil {
@@ -10243,7 +10251,7 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
         tableView.backgroundColor = LegacyPalette.background
         if allowsMultiple {
             navigationItem.rightBarButtonItem = UIBarButtonItem(
-                title: "Done",
+                title: LegacyString("button.done"),
                 style: .done,
                 target: self,
                 action: #selector(done)
@@ -10265,10 +10273,10 @@ final class LegacyFilterOptionPickerViewController: UITableViewController {
         cell.textLabel?.text = option.label
         if selectedValues.contains(option.value) {
             cell.accessoryType = .checkmark
-            cell.detailTextLabel?.text = "Included"
+            cell.detailTextLabel?.text = LegacyString("filters.included")
         } else if excludedValues.contains(option.value) {
             cell.accessoryType = .detailButton
-            cell.detailTextLabel?.text = "Excluded"
+            cell.detailTextLabel?.text = LegacyString("filters.excluded")
         } else {
             cell.accessoryType = .none
             cell.detailTextLabel?.text = nil
