@@ -5258,7 +5258,9 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         isUpdatingLibrary = true
         updateNewChapterCount = 0
         updateNewMangaCount = 0
-        navigationItem.prompt = automatic ? "Updating library..." : "Updating \(items.count) manga..."
+        navigationItem.prompt = automatic
+            ? LegacyString("library.updating")
+            : String(format: LegacyString("library.updating_count"), items.count)
         updateLibraryItems(items, index: 0, automatic: automatic, completion: completion)
     }
 
@@ -5278,12 +5280,15 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
                 totalNewChapters: updateNewChapterCount
             )
             if !automatic {
-                showAlert(title: "Library Updated", message: "Finished checking \(items.count) manga.")
+                showAlert(
+                    title: LegacyString("library.updated.title"),
+                    message: String(format: LegacyString("library.updated.message"), items.count)
+                )
             }
             completion?(updateNewMangaCount, updateNewChapterCount)
             return
         }
-        navigationItem.prompt = "Updating \(index + 1) of \(items.count)..."
+        navigationItem.prompt = String(format: LegacyString("library.updating_progress"), index + 1, items.count)
         let item = items[index]
         item.1.runner.getMangaUpdate(manga: item.0.manga, needsDetails: true, needsChapters: true) { [weak self] result in
             DispatchQueue.main.async {
@@ -5328,7 +5333,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -5432,9 +5437,9 @@ final class LegacyHistoryViewController: UITableViewController {
         let daysAgo = calendar.dateComponents([.day], from: day, to: today).day ?? 0
         switch daysAgo {
         case ..<0: break
-        case 0: return "Today"
-        case 1: return "Yesterday"
-        case 2...6: return "\(daysAgo) days ago"
+        case 0: return LegacyString("history.day.today")
+        case 1: return LegacyString("history.day.yesterday")
+        case 2...6: return String(format: LegacyString("history.day.days_ago"), daysAgo)
         default: break
         }
         let formatter = DateFormatter()
@@ -5490,8 +5495,8 @@ final class LegacyHistoryViewController: UITableViewController {
 
         guard let entry = entry(at: indexPath) else {
             cell.imageView?.image = nil
-            cell.textLabel?.text = "No reading history."
-            cell.detailTextLabel?.text = "Open a chapter to start tracking progress."
+            cell.textLabel?.text = LegacyString("history.empty.title")
+            cell.detailTextLabel?.text = LegacyString("history.empty.detail")
             cell.accessoryView = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -5615,7 +5620,7 @@ final class LegacyHistoryViewController: UITableViewController {
     ) -> [UITableViewRowAction]? {
         guard let entry = entry(at: indexPath) else { return nil }
         // Each row is one read chapter, so removing clears just that entry.
-        let remove = UITableViewRowAction(style: .destructive, title: "Remove") { _, _ in
+        let remove = UITableViewRowAction(style: .destructive, title: LegacyString("button.remove")) { _, _ in
             LegacyHistoryStore.shared.remove(key: entry.key)
         }
         return [remove]
@@ -5631,11 +5636,11 @@ final class LegacyHistoryViewController: UITableViewController {
         let time = formatter.string(from: entry.dateRead)
         let label: String
         if let number = entry.chapter.chapterNumber {
-            label = "Ch. \(Self.formatChapterNumber(number))"
+            label = String(format: LegacyString("history.chapter_prefix"), Self.formatChapterNumber(number))
         } else {
             label = entry.chapter.legacyFormattedTitle
         }
-        return "\(label) - \(time)"
+        return String(format: LegacyString("history.subtitle"), label, time)
     }
 
     private static func formatChapterNumber(_ number: Float) -> String {
@@ -5748,7 +5753,7 @@ final class LegacyHistoryViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }

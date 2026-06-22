@@ -45,6 +45,10 @@
 "library.set_categories.message" = "Match manga by categories and tags. Separate values with commas.";
 "library.set_categories.placeholder" = "Reading, Favorites";
 "library.updated.title" = "Library Updated";
+"library.updated.message" = "Finished checking %d manga.";
+"library.updating" = "Updating library...";
+"library.updating_count" = "Updating %d manga...";
+"library.updating_progress" = "Updating %d of %d...";
 "library.options.button" = "Sort";
 "library.sort_scope" = "Sort applies to: %@";
 "library.view.grid_to_list" = "View: Grid (switch to List)";
@@ -103,6 +107,11 @@
 "history.title" = "History";
 "history.empty.title" = "No reading history.";
 "history.empty.detail" = "Open a chapter to start tracking progress.";
+"history.day.today" = "Today";
+"history.day.yesterday" = "Yesterday";
+"history.day.days_ago" = "%d days ago";
+"history.chapter_prefix" = "Ch. %@";
+"history.subtitle" = "%@ - %@";
 
 /* MARK: - Reading Insights screen */
 "reading_insights.title" = "Reading Insights";
