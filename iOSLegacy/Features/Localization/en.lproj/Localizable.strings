@@ -626,6 +626,8 @@
 "download.complete.message" = "Saved %d chapter(s) for offline reading.";
 "download.progress.chapter" = "Downloading %d of %d...";
 "download.progress.page" = "Downloading %d of %d - Page %d/%d";
+"download.zip_unsupported" = "ZIP pages are not supported in the legacy downloader yet.";
+"download.page_missing" = "Downloaded page %d is missing.";
 
 /* MARK: - Reader */
 "reader.loading" = "Loading...";

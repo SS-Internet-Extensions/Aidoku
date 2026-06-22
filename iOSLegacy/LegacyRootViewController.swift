@@ -3516,7 +3516,7 @@ final class LegacyDownloadManager {
                 writer.writeText(text, description: pageDescription)
                 self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
             case .zipFile(_, _):
-                writer.writeText("ZIP pages are not supported in the legacy downloader yet.", description: pageDescription)
+                writer.writeText(LegacyString("download.zip_unsupported"), description: pageDescription)
                 self.downloadPage(pages: pages, index: pageIndex + 1, source: source, writer: writer, progress: progress, completion: completion)
             case .url(let url, let context):
                 if url.isFileURL {
@@ -3573,7 +3573,16 @@ final class LegacyDownloadManager {
                     let data = try? Data(contentsOf: url)
                     guard let data = data, !data.isEmpty else {
                         writer.cancel()
-                        completion(.failure(NSError(domain: "AidokuLegacy", code: 4, userInfo: [NSLocalizedDescriptionKey: "Downloaded page \(pageIndex + 1) is missing."])))
+                        completion(.failure(NSError(
+                            domain: "AidokuLegacy",
+                            code: 4,
+                            userInfo: [
+                                NSLocalizedDescriptionKey: String(
+                                    format: LegacyString("download.page_missing"),
+                                    pageIndex + 1
+                                )
+                            ]
+                        )))
                         return
                     }
                     self.writeDownloadedPageData(
@@ -9295,7 +9304,7 @@ final class LegacySourceHomeViewController: UITableViewController {
 
     private let source: AidokuRunnerLegacySource
     private var rows: [Row] = []
-    private var message = "Loading home..."
+    private var message = LegacyString("reader.loading_home")
     private var isLoading = false
 
     init(source: AidokuRunnerLegacySource) {
@@ -10463,7 +10472,7 @@ final class LegacyChapterDownloadPickerViewController: UITableViewController, UI
         cell.imageView?.image = nil
 
         guard filteredChapters.indices.contains(indexPath.row) else {
-            cell.textLabel?.text = "No matching chapters."
+            cell.textLabel?.text = LegacyString("chapters.empty")
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -10478,7 +10487,9 @@ final class LegacyChapterDownloadPickerViewController: UITableViewController, UI
         )
         var subtitle = chapter.legacyFormattedSubtitle(sourceKey: sourceKey) ?? ""
         if downloaded {
-            subtitle = subtitle.isEmpty ? "Downloaded" : "\(subtitle)\nDownloaded"
+            subtitle = subtitle.isEmpty
+                ? LegacyString("manga.downloaded")
+                : String(format: LegacyString("manga.subtitle_with_download"), subtitle)
         }
         cell.textLabel?.text = chapter.legacyFormattedTitle
         cell.detailTextLabel?.text = subtitle.isEmpty ? nil : subtitle
