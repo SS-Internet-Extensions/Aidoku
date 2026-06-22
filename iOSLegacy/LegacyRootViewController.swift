@@ -7000,20 +7000,22 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func showTrackerOptions(from indexPath: IndexPath) {
         let manager = LegacyTrackerManager.shared
-        let alert = UIAlertController(title: "Trackers", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("settings.trackers"), message: nil, preferredStyle: .actionSheet)
         for trackerId in LegacyTrackerId.allCases {
             if manager.isLoggedIn(trackerId) {
-                alert.addAction(UIAlertAction(title: "Log Out of \(trackerId.displayName)", style: .destructive) { [weak self] _ in
+                let title = String(format: LegacyString("tracker.settings.logout_of"), trackerId.displayName)
+                alert.addAction(UIAlertAction(title: title, style: .destructive) { [weak self] _ in
                     manager.logout(trackerId)
                     self?.tableView.reloadData()
                 })
             } else {
-                alert.addAction(UIAlertAction(title: "Connect \(trackerId.displayName)", style: .default) { [weak self] _ in
+                let title = String(format: LegacyString("tracker.settings.connect"), trackerId.displayName)
+                alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                     self?.presentTrackerLogin(trackerId)
                 })
             }
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             if let cell = tableView.cellForRow(at: indexPath) {
                 popover.sourceView = cell
@@ -7052,18 +7054,17 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         let currentValue: String
         switch trackerId {
             case .anilist:
-                title = "AniList Client ID"
-                message = "Create an API client at anilist.co (Settings -> Developer) with redirect URL "
-                    + "https://anilist.co/api/v2/oauth/pin, then paste its Client ID here."
+                title = String(format: LegacyString("tracker.client_id.title"), trackerId.displayName)
+                message = LegacyString("tracker.client_id.anilist.message")
                 currentValue = LegacyAniListTracker.shared.isClientConfigured ? LegacyAniListTracker.shared.clientId : ""
             case .myanimelist:
-                title = "MyAnimeList Client ID"
-                message = "Create an API app at myanimelist.net (Account Settings -> API) and paste its Client ID here."
+                title = String(format: LegacyString("tracker.client_id.title"), trackerId.displayName)
+                message = LegacyString("tracker.client_id.myanimelist.message")
                 currentValue = LegacyMyAnimeListTracker.shared.isClientConfigured ? LegacyMyAnimeListTracker.shared.clientId : ""
         }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Client ID"
+            textField.placeholder = LegacyString("tracker.client_id.placeholder")
             if trackerId == .anilist {
                 textField.keyboardType = .numberPad
             }
@@ -7071,8 +7072,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             textField.autocapitalizationType = .none
             textField.text = currentValue
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save & Connect", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("tracker.client_id.save_connect"), style: .default) { [weak self, weak alert] _ in
             let value = alert?.textFields?.first?.text ?? ""
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
@@ -9008,12 +9009,14 @@ final class LegacySourceSettingsViewController: UITableViewController {
         let defaultsKey = "\(source.key).\(key)"
         let alert = UIAlertController(
             title: settingTitle(setting),
-            message: setting.subtitle ?? "Enter your source account credentials.",
+            message: setting.subtitle ?? LegacyString("source_login.credentials.message"),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
             textField.text = UserDefaults.standard.string(forKey: defaultsKey + LoginKeys.usernameSuffix)
-            textField.placeholder = (setting.useEmail ?? false) ? "Email" : "Username"
+            textField.placeholder = (setting.useEmail ?? false)
+                ? LegacyString("source_login.email.placeholder")
+                : LegacyString("source_login.username.placeholder")
             textField.keyboardType = (setting.useEmail ?? false) ? .emailAddress : .default
             textField.textContentType = (setting.useEmail ?? false) ? .emailAddress : .username
             textField.autocapitalizationType = .none
@@ -9021,12 +9024,12 @@ final class LegacySourceSettingsViewController: UITableViewController {
         }
         alert.addTextField { textField in
             textField.text = UserDefaults.standard.string(forKey: defaultsKey + LoginKeys.passwordSuffix)
-            textField.placeholder = "Password"
+            textField.placeholder = LegacyString("source_login.password.placeholder")
             textField.textContentType = .password
             textField.isSecureTextEntry = true
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Log In", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.login"), style: .default) { [weak self, weak alert] _ in
             guard
                 let self = self,
                 let textFields = alert?.textFields,
@@ -9054,16 +9057,16 @@ final class LegacySourceSettingsViewController: UITableViewController {
                     self.notifySettingChanged(setting)
                     self.tableView.reloadData()
                 case .success(false):
-                    self.showMessage(title: "Login Failed", message: "The source rejected the credentials.")
+                    self.showMessage(title: LegacyString("source_login.failed.title"), message: LegacyString("source_login.rejected.message"))
                 case .failure(let error):
-                    self.showMessage(title: "Login Failed", message: error.localizedDescription)
+                    self.showMessage(title: LegacyString("source_login.failed.title"), message: error.localizedDescription)
             }
         }
     }
 
     private func openWebLogin(_ setting: AidokuRunnerLegacySettingItem) {
         guard let url = resolvedURL(for: setting) else {
-            showMessage(title: "Login Failed", message: "This source did not provide a login URL.")
+            showMessage(title: LegacyString("source_login.failed.title"), message: LegacyString("source_login.no_url.message"))
             return
         }
         let controller = LegacySourceWebViewController(
@@ -9079,7 +9082,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
     private func finishWebLogin(setting: AidokuRunnerLegacySettingItem, result: LegacyWebLoginResult) {
         guard let key = setting.key else { return }
         guard !result.cookies.isEmpty || !result.localStorage.isEmpty else {
-            showMessage(title: "Login Failed", message: "No login cookies or local storage values were found.")
+            showMessage(title: LegacyString("source_login.failed.title"), message: LegacyString("source_login.no_credentials.message"))
             return
         }
         source.runner.handleWebLogin(key: key, cookies: result.cookies) { [weak self] loginResult in
@@ -9099,21 +9102,21 @@ final class LegacySourceSettingsViewController: UITableViewController {
                     self.tableView.reloadData()
                     self.navigationController?.popViewController(animated: true)
                 case .success(false):
-                    self.showMessage(title: "Login Failed", message: "The source did not accept the web login.")
+                    self.showMessage(title: LegacyString("source_login.failed.title"), message: LegacyString("login.failed.web_rejected"))
                 case .failure(let error):
-                    self.showMessage(title: "Login Failed", message: error.localizedDescription)
+                    self.showMessage(title: LegacyString("source_login.failed.title"), message: error.localizedDescription)
             }
         }
     }
 
     private func confirmLogout(_ setting: AidokuRunnerLegacySettingItem) {
         let alert = UIAlertController(
-            title: setting.logoutTitle ?? "Log Out",
-            message: "Remove saved login data for this source?",
+            title: setting.logoutTitle ?? LegacyString("button.logout"),
+            message: LegacyString("source_login.logout.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Log Out", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.logout"), style: .destructive) { [weak self] _ in
             self?.logout(setting)
         })
         present(alert, animated: true)
@@ -16985,7 +16988,7 @@ private final class LegacySourceWebViewController: UIViewController, WKNavigatio
             UIBarButtonItem(barButtonSystemItem: .refresh, target: self, action: #selector(reloadPage))
         ]
         if loginCompletion != nil {
-            rightItems.insert(UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(finishLogin)), at: 0)
+            rightItems.insert(UIBarButtonItem(title: LegacyString("button.done"), style: .done, target: self, action: #selector(finishLogin)), at: 0)
         }
         navigationItem.rightBarButtonItems = rightItems
         progressView.frame = CGRect(x: 0, y: 0, width: 120, height: 2)
@@ -17032,10 +17035,10 @@ private final class LegacySourceWebViewController: UIViewController, WKNavigatio
     }
 
     private func updateToolbar(animated: Bool) {
-        let back = UIBarButtonItem(title: "Back", style: .plain, target: self, action: #selector(goBack))
+        let back = UIBarButtonItem(title: LegacyString("webview.back"), style: .plain, target: self, action: #selector(goBack))
         back.isEnabled = webView?.canGoBack ?? false
 
-        let forward = UIBarButtonItem(title: "Forward", style: .plain, target: self, action: #selector(goForward))
+        let forward = UIBarButtonItem(title: LegacyString("webview.forward"), style: .plain, target: self, action: #selector(goForward))
         forward.isEnabled = webView?.canGoForward ?? false
 
         setToolbarItems(

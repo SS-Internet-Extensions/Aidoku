@@ -389,6 +389,15 @@
 "login.failed.no_url" = "This source did not provide a login URL.";
 "login.failed.no_cookies" = "No login cookies or local storage values were found.";
 "login.failed.web_rejected" = "The source did not accept the web login.";
+"source_login.credentials.message" = "Enter your source account credentials.";
+"source_login.email.placeholder" = "Email";
+"source_login.username.placeholder" = "Username";
+"source_login.password.placeholder" = "Password";
+"source_login.failed.title" = "Login Failed";
+"source_login.rejected.message" = "The source rejected the credentials.";
+"source_login.no_url.message" = "This source did not provide a login URL.";
+"source_login.no_credentials.message" = "No login cookies or local storage values were found.";
+"source_login.logout.message" = "Remove saved login data for this source?";
 "login.logout.message" = "Remove saved login data for this source?";
 
 /* MARK: - Search */
@@ -474,6 +483,19 @@
 "tracker.search.failed" = "Search Failed";
 "tracker.search.chapter_count" = "%d chapters";
 "tracker.search.unknown_length" = "Unknown length";
+"tracker.settings.logout_of" = "Log Out of %@";
+"tracker.settings.connect" = "Connect %@";
+"tracker.client_id.title" = "%@ Client ID";
+"tracker.client_id.anilist.message" = "Create an API client at anilist.co (Settings -> Developer) with redirect URL https://anilist.co/api/v2/oauth/pin, then paste its Client ID here.";
+"tracker.client_id.myanimelist.message" = "Create an API app at myanimelist.net (Account Settings -> API) and paste its Client ID here.";
+"tracker.client_id.placeholder" = "Client ID";
+"tracker.client_id.save_connect" = "Save & Connect";
+"tracker.login.title" = "%@ Login";
+"tracker.login.failed.title" = "Login Failed";
+
+/* MARK: - Web view */
+"webview.back" = "Back";
+"webview.forward" = "Forward";
 
 /* MARK: - Manga migration */
 "migration.title" = "Migrate";

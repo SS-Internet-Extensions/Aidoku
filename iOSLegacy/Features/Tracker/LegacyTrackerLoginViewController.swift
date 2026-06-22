@@ -60,7 +60,7 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "\(trackerId.displayName) Login"
+        title = String(format: LegacyString("tracker.login.title"), trackerId.displayName)
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel,
             target: self,
@@ -143,11 +143,11 @@ final class LegacyTrackerLoginViewController: UIViewController, WKNavigationDele
 
     private func presentExchangeFailure(_ error: Error) {
         let alert = UIAlertController(
-            title: "Login Failed",
+            title: LegacyString("tracker.login.failed.title"),
             message: error.localizedDescription,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default) { [weak self] _ in
             self?.finish(success: false)
         })
         present(alert, animated: true)
