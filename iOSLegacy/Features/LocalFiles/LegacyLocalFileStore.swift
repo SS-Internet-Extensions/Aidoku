@@ -2,7 +2,7 @@
 //  LegacyLocalFileStore.swift
 //  AidokuLegacy
 //
-//  Persists locally imported archives (cbz/zip/pdf) under Application Support
+//  Persists locally imported archives (cbz/zip/epub/pdf) under Application Support
 //  and exposes them as Legacy* manga/chapter models. The store copies the
 //  picked file into its own directory, determines a page count by listing
 //  image entries (ZIPFoundation) or PDF pages (PDFKit), writes a JSON manifest,
@@ -32,7 +32,7 @@ enum LegacyLocalFileError: LocalizedError {
     var errorDescription: String? {
         switch self {
             case .unreadableArchive:
-                return "The selected file could not be opened as a CBZ, ZIP, or PDF."
+                return "The selected file could not be opened as a CBZ, ZIP, EPUB, or PDF."
             case .emptyArchive:
                 return "The selected file did not contain any readable pages."
             case .copyFailed:
@@ -375,7 +375,7 @@ final class LegacyLocalFileStore {
     // MARK: - Watched Local Folder
 
     /// Scans Documents/Local for Mihon/Tachiyomi-style folders:
-    /// Documents/Local/<Series>/**/*.cbz|zip|pdf.
+    /// Documents/Local/<Series>/**/*.cbz|zip|epub|pdf.
     func scanLocalFolders() {
         guard !suppressFileEvents else { return }
         queue.async { [weak self] in
@@ -542,7 +542,7 @@ final class LegacyLocalFileStore {
 
     private func isSupportedLocalArchive(_ url: URL) -> Bool {
         switch url.pathExtension.lowercased() {
-            case "cbz", "zip", "pdf":
+            case "cbz", "zip", "epub", "pdf":
                 return true
             default:
                 return false
@@ -705,6 +705,8 @@ final class LegacyLocalFileStore {
                 return "cbz"
             case .zip:
                 return "zip"
+            case .epub:
+                return "epub"
             case .pdf:
                 return "pdf"
         }

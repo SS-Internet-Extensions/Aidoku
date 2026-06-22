@@ -2,7 +2,7 @@
 //  LegacyLocalFilesViewController.swift
 //  AidokuLegacy
 //
-//  Lists locally imported archives (cbz/zip/pdf) and lets the user add more via
+//  Lists locally imported archives (cbz/zip/epub/pdf) and lets the user add more via
 //  a document picker. Tapping a row asks the host to open the reader through the
 //  `onOpenChapter` closure, which receives the manga and its chapter so the host
 //  can build pages via LegacyLocalFilePageProvider and present its reader.
@@ -77,11 +77,12 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
     // MARK: - Importing
 
     @objc private func presentImportPicker() {
-        // iOS 12-safe document types. Includes the standard ZIP/PDF UTIs plus a
+        // iOS 12-safe document types. Includes standard ZIP/EPUB/PDF UTIs plus a
         // generic data type so `.cbz` (which has no system UTI) can be picked.
         let documentTypes = [
             "public.zip-archive",
             "com.pkware.zip-archive",
+            "org.idpf.epub-container",
             "com.adobe.pdf",
             "public.folder",
             "public.data"
@@ -223,6 +224,8 @@ final class LegacyLocalFilesViewController: UITableViewController, UIDocumentPic
                 return "CBZ"
             case .zip:
                 return "ZIP"
+            case .epub:
+                return "EPUB"
             case .pdf:
                 return "PDF"
         }
@@ -471,6 +474,8 @@ private final class LegacyLocalChaptersViewController: UITableViewController {
                 return "CBZ"
             case .zip:
                 return "ZIP"
+            case .epub:
+                return "EPUB"
             case .pdf:
                 return "PDF"
         }

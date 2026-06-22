@@ -4,7 +4,7 @@
 //
 //  Turns a locally imported chapter into reader pages.
 //
-//  - cbz/zip: returns one `.zipFile(url:filePath:)` page per sorted image
+//  - cbz/zip/epub: returns one `.zipFile(url:filePath:)` page per sorted image
 //    entry, so the existing LegacyZipPageResolver handles extraction (and the
 //    reader's low-memory handling relocates bytes to temp files per page).
 //  - pdf: renders each page to a JPEG in a temporary directory at a memory-safe
@@ -29,7 +29,7 @@ enum LegacyLocalFilePageProvider {
     /// Synchronously builds reader pages for a chapter.
     ///
     /// For PDFs this performs rendering on the calling thread, so callers should
-    /// invoke it from a background queue. For zip/cbz it is cheap (no extraction).
+    /// invoke it from a background queue. For zip/cbz/epub it is cheap (no extraction).
     /// Returns an empty array if the archive is missing or unreadable.
     static func pages(for chapter: LegacyLocalChapter, mangaId: String) -> [AidokuRunnerLegacyPage] {
         guard let archiveURL = LegacyLocalFileStore.shared.archiveURL(mangaId: mangaId, chapter: chapter) else {

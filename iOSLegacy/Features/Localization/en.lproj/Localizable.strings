@@ -149,7 +149,7 @@
 "settings.downloads.delete_after_reading" = "delete after reading";
 "settings.downloads.download_next_unread" = "download next unread";
 "settings.local_files" = "Local Files";
-"settings.local_files.zero" = "Import .cbz, .zip, or .pdf files to read offline.";
+"settings.local_files.zero" = "Import .cbz, .zip, .epub, or .pdf files to read offline.";
 "settings.local_files.one" = "1 imported item";
 "settings.local_files.many" = "%d imported items";
 "settings.self_hosted" = "Self-Hosted Servers";

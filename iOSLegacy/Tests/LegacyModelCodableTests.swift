@@ -84,6 +84,17 @@ final class LegacyModelCodableTests: XCTestCase {
         XCTAssertEqual(try roundTrip(chapter), chapter)
     }
 
+    func testLocalChapterKindMapsEpubAsZipContainer() {
+        XCTAssertEqual(LegacyLocalChapterKind.from(pathExtension: "cbz"), .cbz)
+        XCTAssertEqual(LegacyLocalChapterKind.from(pathExtension: "zip"), .zip)
+        XCTAssertEqual(LegacyLocalChapterKind.from(pathExtension: "epub"), .epub)
+        XCTAssertEqual(LegacyLocalChapterKind.from(pathExtension: "EPUB"), .epub)
+        XCTAssertEqual(LegacyLocalChapterKind.from(pathExtension: "pdf"), .pdf)
+
+        XCTAssertTrue(LegacyLocalChapterKind.epub.isZipContainer)
+        XCTAssertFalse(LegacyLocalChapterKind.pdf.isZipContainer)
+    }
+
     // MARK: - Derived properties
 
     func testNormalizedListTrimsAndDeduplicatesCaseInsensitively() {

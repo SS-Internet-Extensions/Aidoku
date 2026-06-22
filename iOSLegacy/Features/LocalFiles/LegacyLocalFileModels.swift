@@ -2,7 +2,7 @@
 //  LegacyLocalFileModels.swift
 //  AidokuLegacy
 //
-//  Codable models describing locally imported archives (cbz/zip/pdf) that
+//  Codable models describing locally imported archives (cbz/zip/epub/pdf) that
 //  are read entirely on-device, without any network source. These mirror the
 //  Legacy* naming used elsewhere in the iOS 12 fork and are persisted as a
 //  JSON manifest under Application Support by LegacyLocalFileStore.
@@ -16,13 +16,15 @@ enum LegacyLocalChapterKind: String, Codable, Hashable {
     case cbz
     /// A plain ZIP archive (`.zip`).
     case zip
+    /// An EPUB container (`.epub`), read as a ZIP-backed image archive.
+    case epub
     /// A PDF document (`.pdf`).
     case pdf
 
     /// Whether the kind is backed by a ZIP container (handled by ZIPFoundation).
     var isZipContainer: Bool {
         switch self {
-            case .cbz, .zip:
+            case .cbz, .zip, .epub:
                 return true
             case .pdf:
                 return false
@@ -35,6 +37,8 @@ enum LegacyLocalChapterKind: String, Codable, Hashable {
         switch pathExtension.lowercased() {
             case "cbz":
                 return .cbz
+            case "epub":
+                return .epub
             case "pdf":
                 return .pdf
             default:
