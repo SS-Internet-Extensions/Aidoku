@@ -227,6 +227,19 @@
 "settings.update_notifications.off" = "Do not send library update notifications.";
 "settings.notifications_disabled.title" = "Notifications Disabled";
 "settings.notifications_disabled.message" = "Enable notifications for Aidoku Legacy in the Settings app to receive update alerts.";
+
+/* MARK: - Notifications */
+"notification.action.open_updates" = "Open Updates";
+"notification.action.open_title" = "Open Title";
+"notification.action.mark_read" = "Mark Read";
+"notification.title_update.one" = "1 new chapter available";
+"notification.title_update.many" = "%d new chapters available";
+"notification.summary.chapter.one" = "1 new chapter";
+"notification.summary.chapter.many" = "%d new chapters";
+"notification.summary.title.one" = "1 title";
+"notification.summary.title.many" = "%d titles";
+"notification.summary.body" = "%@ across %@";
+
 "settings.reading_insights" = "Reading Insights";
 "settings.reading_insights.zero" = "Track chapters read, active days, and streaks.";
 "settings.reading_insights.one" = "1 chapter read all-time";

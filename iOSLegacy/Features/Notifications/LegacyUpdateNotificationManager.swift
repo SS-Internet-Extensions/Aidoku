@@ -53,17 +53,17 @@ final class LegacyUpdateNotificationManager {
     func configureNotificationCenter(delegate: UNUserNotificationCenterDelegate?) {
         let openUpdates = UNNotificationAction(
             identifier: Self.actionOpenUpdates,
-            title: "Open Updates",
+            title: LegacyString("notification.action.open_updates"),
             options: [.foreground]
         )
         let openTitle = UNNotificationAction(
             identifier: Self.actionOpenTitle,
-            title: "Open Title",
+            title: LegacyString("notification.action.open_title"),
             options: [.foreground]
         )
         let markTitleRead = UNNotificationAction(
             identifier: Self.actionMarkTitleRead,
-            title: "Mark Read",
+            title: LegacyString("notification.action.mark_read"),
             options: []
         )
         let summaryCategory = UNNotificationCategory(
@@ -137,9 +137,9 @@ final class LegacyUpdateNotificationManager {
         let content = UNMutableNotificationContent()
         content.title = mangaTitle
         if newChapterCount == 1 {
-            content.body = "1 new chapter available"
+            content.body = LegacyString("notification.title_update.one")
         } else {
-            content.body = "\(newChapterCount) new chapters available"
+            content.body = String(format: LegacyString("notification.title_update.many"), newChapterCount)
         }
         content.sound = .default
         content.categoryIdentifier = Self.categoryTitleUpdate
@@ -165,21 +165,21 @@ final class LegacyUpdateNotificationManager {
         guard totalNewChapters > 0 else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Library Updated"
+        content.title = LegacyString("library.updated.title")
 
         let chapterText: String
         if totalNewChapters == 1 {
-            chapterText = "1 new chapter"
+            chapterText = LegacyString("notification.summary.chapter.one")
         } else {
-            chapterText = "\(totalNewChapters) new chapters"
+            chapterText = String(format: LegacyString("notification.summary.chapter.many"), totalNewChapters)
         }
         let titleText: String
         if updatedMangaCount == 1 {
-            titleText = "1 title"
+            titleText = LegacyString("notification.summary.title.one")
         } else {
-            titleText = "\(updatedMangaCount) titles"
+            titleText = String(format: LegacyString("notification.summary.title.many"), updatedMangaCount)
         }
-        content.body = "\(chapterText) across \(titleText)"
+        content.body = String(format: LegacyString("notification.summary.body"), chapterText, titleText)
         content.sound = .default
         content.categoryIdentifier = Self.categoryLibrarySummary
         content.threadIdentifier = "AidokuLegacyLibraryUpdates"
