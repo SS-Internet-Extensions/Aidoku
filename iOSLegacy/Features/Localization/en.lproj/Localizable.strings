@@ -24,16 +24,51 @@
 "button.update" = "Update";
 "button.login" = "Log In";
 "button.logout" = "Log Out";
+"button.rename" = "Rename";
 
 /* MARK: - Library screen */
 "library.title" = "Library";
 "library.search_placeholder" = "Search library";
 "library.empty.title" = "No manga in Library.";
 "library.empty.detail" = "Open Sources, browse manga, then tap Add.";
+"library.empty.label" = "No manga in Library.\nOpen Sources, browse manga, then tap Add.";
+"library.source_missing.title" = "Source Missing";
+"library.source_missing.message" = "Install %@ again to open this manga.";
+"library.source_missing.view_message" = "Install %@ again to view this manga.";
+"library.source_missing.resume_message" = "Install %@ again to resume this chapter.";
+"library.source_missing.read_download_message" = "Install %@ again to read this download.";
+"library.remove_from_library" = "Remove from Library";
 "library.set_categories.title" = "Set Categories";
 "library.set_categories.message" = "Match manga by categories and tags. Separate values with commas.";
 "library.set_categories.placeholder" = "Reading, Favorites";
 "library.updated.title" = "Library Updated";
+"library.options.button" = "Sort";
+"library.sort_scope" = "Sort applies to: %@";
+"library.view.grid_to_list" = "View: Grid (switch to List)";
+"library.view.list_to_grid" = "View: List (switch to Grid)";
+"library.sort.action" = "Sort: %@";
+"library.sort.recently_added" = "Recently Added";
+"library.sort.title" = "Title";
+"library.sort.source" = "Source";
+"library.sort.unread" = "Unread Count";
+"library.sort.last_read" = "Last Read";
+"library.sort.total_chapters" = "Total Chapters";
+"library.filters" = "Filters...";
+"library.filters.active" = "%@ (Active)";
+"library.filters.title" = "Library Filters";
+"library.filters.message" = "Tap to cycle: off -> include -> exclude.";
+"library.filters.clear" = "Clear Filters";
+"library.filter_state.include" = " - Include";
+"library.filter_state.exclude" = " - Exclude";
+"library.filter.downloaded" = "Downloaded";
+"library.filter.unread" = "Unread";
+"library.filter.started" = "Started";
+"library.filter.tracked" = "Tracked";
+"library.categories.all" = "All Categories";
+"library.categories.all.short" = "All";
+"library.categories.uncategorized" = "Uncategorized";
+"library.categories.manage" = "Manage Categories";
+"library.filter_group.action" = "Filter: %@";
 
 /* MARK: - Categories / filter groups */
 "category.group_name.placeholder" = "Group name";
@@ -43,6 +78,23 @@
 "category.delete_group" = "Delete Current Filter Group";
 "category.save_match_any" = "Save Match Any";
 "category.save_match_all" = "Save Match All";
+"category.default.header" = "Default Category";
+"category.categories.footer" = "Tap a category to rename it, set its own sort order, make it the default, or remove it.";
+"category.default.footer" = "New manga added to the Library are filed under the default category.";
+"category.empty.title" = "No categories yet";
+"category.empty.detail" = "Add a category to organize your library.";
+"category.sort.detail" = "Sort: %@";
+"category.sort.detail.default" = "%@ - Default";
+"category.add" = "Add Category";
+"category.none" = "None";
+"category.add.placeholder" = "Reading";
+"category.exists.title" = "Category Exists";
+"category.exists.message" = "A category with that name already exists.";
+"category.make_default" = "Make Default";
+"category.remove_default" = "Remove as Default";
+"category.remove" = "Remove Category";
+"category.sort.title" = "Sort - %@";
+"category.rename.title" = "Rename Category";
 
 /* MARK: - History screen */
 "history.title" = "History";

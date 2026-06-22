@@ -1355,23 +1355,23 @@ final class LegacyTabBarController: UITabBarController {
 
         let library = UINavigationController(rootViewController: LegacyLibraryViewController())
         library.tabBarItem = UITabBarItem(tabBarSystemItem: .favorites, tag: 0)
-        library.tabBarItem.title = "Library"
+        library.tabBarItem.title = LegacyString("tab.library")
 
         let history = UINavigationController(rootViewController: LegacyHistoryViewController())
         history.tabBarItem = UITabBarItem(tabBarSystemItem: .history, tag: 1)
-        history.tabBarItem.title = "History"
+        history.tabBarItem.title = LegacyString("tab.history")
 
         let sources = UINavigationController(rootViewController: LegacyInstalledSourcesViewController())
         sources.tabBarItem = UITabBarItem(tabBarSystemItem: .search, tag: 2)
-        sources.tabBarItem.title = "Sources"
+        sources.tabBarItem.title = LegacyString("tab.sources")
 
         let browse = UINavigationController(rootViewController: LegacyRootViewController())
         browse.tabBarItem = UITabBarItem(tabBarSystemItem: .downloads, tag: 3)
-        browse.tabBarItem.title = "Browse"
+        browse.tabBarItem.title = LegacyString("tab.browse")
 
         let settings = UINavigationController(rootViewController: LegacySettingsViewController())
         settings.tabBarItem = UITabBarItem(tabBarSystemItem: .more, tag: 4)
-        settings.tabBarItem.title = "Settings"
+        settings.tabBarItem.title = LegacyString("tab.settings")
 
         viewControllers = [library, history, sources, browse, settings]
         selectedIndex = LegacyLibraryStore.shared.entries.isEmpty ? 2 : 0
@@ -1577,17 +1577,17 @@ enum LegacyLibrarySortOption: String, CaseIterable {
     var title: String {
         switch self {
             case .recentlyAdded:
-                return "Recently Added"
+                return LegacyString("library.sort.recently_added")
             case .title:
-                return "Title"
+                return LegacyString("library.sort.title")
             case .source:
-                return "Source"
+                return LegacyString("library.sort.source")
             case .unread:
-                return "Unread Count"
+                return LegacyString("library.sort.unread")
             case .lastRead:
-                return "Last Read"
+                return LegacyString("library.sort.last_read")
             case .totalChapters:
-                return "Total Chapters"
+                return LegacyString("library.sort.total_chapters")
         }
     }
 }
@@ -1608,9 +1608,12 @@ enum LegacyLibraryFilterState: Int {
 
     var indicator: String {
         switch self {
-            case .off: return ""
-            case .include: return " — Include"
-            case .exclude: return " — Exclude"
+            case .off:
+                return ""
+            case .include:
+                return LegacyString("library.filter_state.include")
+            case .exclude:
+                return LegacyString("library.filter_state.exclude")
         }
     }
 }
@@ -1624,10 +1627,14 @@ enum LegacyLibraryStatusFilter: String, CaseIterable {
 
     var title: String {
         switch self {
-            case .downloaded: return "Downloaded"
-            case .unread: return "Unread"
-            case .started: return "Started"
-            case .tracked: return "Tracked"
+            case .downloaded:
+                return LegacyString("library.filter.downloaded")
+            case .unread:
+                return LegacyString("library.filter.unread")
+            case .started:
+                return LegacyString("library.filter.started")
+            case .tracked:
+                return LegacyString("library.filter.tracked")
         }
     }
 }
@@ -4560,21 +4567,21 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Library"
+        title = LegacyString("library.title")
         view.backgroundColor = LegacyPalette.background
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = LegacyPalette.accent
 
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search library"
+        searchController.searchBar.placeholder = LegacyString("library.search_placeholder")
         navigationItem.searchController = searchController
         definesPresentationContext = true
 
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Updates", style: .plain, target: self, action: #selector(openUpdates))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: LegacyString("updates.title"), style: .plain, target: self, action: #selector(openUpdates))
         navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "Sort", style: .plain, target: self, action: #selector(showLibraryOptions)),
-            UIBarButtonItem(title: "Update", style: .plain, target: self, action: #selector(updateLibraryManually))
+            UIBarButtonItem(title: LegacyString("library.options.button"), style: .plain, target: self, action: #selector(showLibraryOptions)),
+            UIBarButtonItem(title: LegacyString("button.update"), style: .plain, target: self, action: #selector(updateLibraryManually))
         ]
 
         setupTabBar()
@@ -4633,7 +4640,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         if let activeFilterGroup = activeFilterGroup {
             title = activeFilterGroup.name
         } else {
-            title = "Library"
+            title = LegacyString("library.title")
         }
         rebuildTabs()
         gridRefreshControl.endRefreshing()
@@ -4674,7 +4681,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         emptyLabel.textAlignment = .center
         emptyLabel.textColor = LegacyPalette.secondaryText
         emptyLabel.font = .systemFont(ofSize: 15)
-        emptyLabel.text = "No manga in Library.\nOpen Sources, browse manga, then tap Add."
+        emptyLabel.text = LegacyString("library.empty.label")
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
@@ -4722,7 +4729,10 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         guard entries.indices.contains(indexPath.item) else { return }
         let entry = entries[indexPath.item]
         guard let source = source(for: entry) else {
-            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to open this manga.")
+            showAlert(
+                title: LegacyString("library.source_missing.title"),
+                message: String(format: LegacyString("library.source_missing.message"), entry.sourceName)
+            )
             return
         }
         navigationController?.pushViewController(
@@ -4771,13 +4781,13 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
         else { return }
         let entry = entries[indexPath.item]
         let alert = UIAlertController(title: entry.manga.title, message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Categories", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("category.categories.placeholder"), style: .default) { [weak self] _ in
             self?.showCategoriesPrompt(for: entry)
         })
-        alert.addAction(UIAlertAction(title: "Remove from Library", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("library.remove_from_library"), style: .destructive) { _ in
             LegacyLibraryStore.shared.remove(sourceKey: entry.sourceKey, mangaKey: entry.manga.key)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.sourceView = collectionView
             popover.sourceRect = CGRect(origin: point, size: .zero)
@@ -4825,7 +4835,7 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
 
     private func rebuildTabs() {
         let categories = LegacyCategoryStore.shared.allCategories()
-        let titles = categories.isEmpty ? [] : (["All"] + categories)
+        let titles = categories.isEmpty ? [] : ([LegacyString("library.categories.all.short")] + categories)
         if titles != tabTitles {
             tabTitles = titles
             tabStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -4989,16 +4999,22 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
     @objc private func showLibraryOptions() {
         let sortScope: String
         if activeFilterGroup != nil {
-            sortScope = "All"
+            sortScope = LegacyString("library.categories.all")
         } else if let category = activeCategory {
-            sortScope = category.isEmpty ? "Uncategorized" : category
+            sortScope = category.isEmpty ? LegacyString("library.categories.uncategorized") : category
         } else {
-            sortScope = "All"
+            sortScope = LegacyString("library.categories.all")
         }
-        let alert = UIAlertController(title: "Library", message: "Sort applies to: \(sortScope)", preferredStyle: .actionSheet)
+        let alert = UIAlertController(
+            title: LegacyString("library.title"),
+            message: String(format: LegacyString("library.sort_scope"), sortScope),
+            preferredStyle: .actionSheet
+        )
         let nextMode: LegacyLibraryDisplayMode = displayMode == .grid ? .list : .grid
         alert.addAction(UIAlertAction(
-            title: displayMode == .grid ? "View: Grid (switch to List)" : "View: List (switch to Grid)",
+            title: displayMode == .grid
+                ? LegacyString("library.view.grid_to_list")
+                : LegacyString("library.view.list_to_grid"),
             style: .default
         ) { [weak self] _ in
             guard let self = self else { return }
@@ -5007,7 +5023,10 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             self.applyDisplayMode()
         })
         for option in LegacyLibrarySortOption.allCases {
-            let title = option == sortOption ? "Sort: \(option.title) (Current)" : "Sort: \(option.title)"
+            let optionTitle = String(format: LegacyString("library.sort.action"), option.title)
+            let title = option == sortOption
+                ? String(format: LegacyString("settings.option.current"), optionTitle)
+                : optionTitle
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 guard let self = self else { return }
                 LegacyCategoryStore.shared.setSort(option, forKey: self.currentSortKey)
@@ -5015,51 +5034,64 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
                 self.reloadData()
             })
         }
-        let filtersTitle = LegacyLibraryStatusFilterStore.hasActiveFilters ? "Filters… (Active)" : "Filters…"
+        let filtersTitle = LegacyLibraryStatusFilterStore.hasActiveFilters
+            ? String(format: LegacyString("library.filters.active"), LegacyString("library.filters"))
+            : LegacyString("library.filters")
         alert.addAction(UIAlertAction(title: filtersTitle, style: .default) { [weak self] _ in
             self?.showLibraryFilters()
         })
-        alert.addAction(UIAlertAction(title: activeCategory == nil ? "All Categories (Current)" : "All Categories", style: .default) { [weak self] _ in
+        let allCategoriesTitle = activeCategory == nil
+            ? String(format: LegacyString("settings.option.current"), LegacyString("library.categories.all"))
+            : LegacyString("library.categories.all")
+        alert.addAction(UIAlertAction(title: allCategoriesTitle, style: .default) { [weak self] _ in
             self?.activeFilterGroup = nil
             self?.activeCategory = nil
             self?.reloadData()
         })
-        alert.addAction(UIAlertAction(title: activeCategory == "" ? "Uncategorized (Current)" : "Uncategorized", style: .default) { [weak self] _ in
+        let uncategorizedTitle = activeCategory == ""
+            ? String(format: LegacyString("settings.option.current"), LegacyString("library.categories.uncategorized"))
+            : LegacyString("library.categories.uncategorized")
+        alert.addAction(UIAlertAction(title: uncategorizedTitle, style: .default) { [weak self] _ in
             self?.activeFilterGroup = nil
             self?.activeCategory = ""
             self?.reloadData()
         })
         for category in LegacyCategoryStore.shared.allCategories() {
-            let title = activeFilterGroup == nil && activeCategory == category ? "\(category) (Current)" : category
+            let title = activeFilterGroup == nil && activeCategory == category
+                ? String(format: LegacyString("settings.option.current"), category)
+                : category
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 self?.activeFilterGroup = nil
                 self?.activeCategory = category
                 self?.reloadData()
             })
         }
-        alert.addAction(UIAlertAction(title: "Manage Categories", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("library.categories.manage"), style: .default) { [weak self] _ in
             self?.navigationController?.pushViewController(LegacyCategoryManagerViewController(), animated: true)
         })
         let filterGroups = LegacyLibraryFilterGroupStore.shared.groups
         for group in filterGroups {
-            let title = activeFilterGroup?.id == group.id ? "Filter: \(group.name) (Current)" : "Filter: \(group.name)"
+            let groupTitle = String(format: LegacyString("library.filter_group.action"), group.name)
+            let title = activeFilterGroup?.id == group.id
+                ? String(format: LegacyString("settings.option.current"), groupTitle)
+                : groupTitle
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 self?.activeCategory = nil
                 self?.activeFilterGroup = group
                 self?.reloadData()
             })
         }
-        alert.addAction(UIAlertAction(title: "Create Filter Group", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("category.create_group"), style: .default) { [weak self] _ in
             self?.showFilterGroupPrompt()
         })
         if let activeFilterGroup = activeFilterGroup {
-            alert.addAction(UIAlertAction(title: "Delete Current Filter Group", style: .destructive) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("category.delete_group"), style: .destructive) { [weak self] _ in
                 LegacyLibraryFilterGroupStore.shared.remove(id: activeFilterGroup.id)
                 self?.activeFilterGroup = nil
                 self?.reloadData()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = navigationItem.rightBarButtonItems?.first
         }
@@ -5068,8 +5100,8 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
 
     private func showLibraryFilters() {
         let alert = UIAlertController(
-            title: "Library Filters",
-            message: "Tap to cycle: off → include → exclude.",
+            title: LegacyString("library.filters.title"),
+            message: LegacyString("library.filters.message"),
             preferredStyle: .actionSheet
         )
         for filter in LegacyLibraryStatusFilter.allCases {
@@ -5082,12 +5114,12 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
             })
         }
         if LegacyLibraryStatusFilterStore.hasActiveFilters {
-            alert.addAction(UIAlertAction(title: "Clear Filters", style: .destructive) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("library.filters.clear"), style: .destructive) { [weak self] _ in
                 LegacyLibraryStatusFilterStore.clearAll()
                 self?.reloadData()
             })
         }
-        alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.done"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = navigationItem.rightBarButtonItems?.first
         }
@@ -5095,17 +5127,17 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
     }
 
     private func showCategoriesPrompt(for entry: LegacyLibraryEntry) {
-        let alert = UIAlertController(title: "Set Categories", message: entry.manga.title, preferredStyle: .alert)
+        let alert = UIAlertController(title: LegacyString("library.set_categories.title"), message: entry.manga.title, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Reading, Favorites"
+            textField.placeholder = LegacyString("library.set_categories.placeholder")
             textField.text = entry.displayCategories.joined(separator: ", ")
             textField.autocapitalizationType = .words
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             LegacyLibraryStore.shared.setCategories(sourceKey: entry.sourceKey, mangaKey: entry.manga.key, categories: [])
         })
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak alert] _ in
             let categories = aidokuLegacySplitList(alert?.textFields?.first?.text)
             for category in categories {
                 LegacyCategoryStore.shared.add(category)
@@ -5121,27 +5153,27 @@ final class LegacyLibraryViewController: UIViewController, UICollectionViewDataS
 
     private func showFilterGroupPrompt() {
         let alert = UIAlertController(
-            title: "Create Filter Group",
-            message: "Match manga by categories and tags. Separate values with commas.",
+            title: LegacyString("category.create_group"),
+            message: LegacyString("library.set_categories.message"),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
-            textField.placeholder = "Group name"
+            textField.placeholder = LegacyString("category.group_name.placeholder")
             textField.autocapitalizationType = .words
         }
         alert.addTextField { textField in
-            textField.placeholder = "Categories"
+            textField.placeholder = LegacyString("category.categories.placeholder")
             textField.autocapitalizationType = .words
         }
         alert.addTextField { textField in
-            textField.placeholder = "Tags"
+            textField.placeholder = LegacyString("category.tags.placeholder")
             textField.autocapitalizationType = .words
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save Match Any", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("category.save_match_any"), style: .default) { [weak self, weak alert] _ in
             self?.saveFilterGroup(from: alert, matchAll: false)
         })
-        alert.addAction(UIAlertAction(title: "Save Match All", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("category.save_match_all"), style: .default) { [weak self, weak alert] _ in
             self?.saveFilterGroup(from: alert, matchAll: true)
         })
         present(alert, animated: true)
@@ -5323,7 +5355,7 @@ final class LegacyHistoryViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "History"
+        title = LegacyString("history.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
@@ -5535,7 +5567,10 @@ final class LegacyHistoryViewController: UITableViewController {
             let entry = entry(at: indexPath)
         else { return }
         guard let source = source(for: entry) else {
-            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to view this manga.")
+            showAlert(
+                title: LegacyString("library.source_missing.title"),
+                message: String(format: LegacyString("library.source_missing.view_message"), entry.sourceName)
+            )
             return
         }
         navigationController?.pushViewController(
@@ -5548,7 +5583,10 @@ final class LegacyHistoryViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let entry = entry(at: indexPath) else { return }
         guard let source = source(for: entry) else {
-            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to resume this chapter.")
+            showAlert(
+                title: LegacyString("library.source_missing.title"),
+                message: String(format: LegacyString("library.source_missing.resume_message"), entry.sourceName)
+            )
             return
         }
         navigationController?.pushViewController(
@@ -5724,11 +5762,11 @@ final class LegacyUpdatesViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Updates"
+        title = LegacyString("updates.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         tableView.rowHeight = 86
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Clear", style: .plain, target: self, action: #selector(confirmClear))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: LegacyString("button.clear"), style: .plain, target: self, action: #selector(confirmClear))
         observer = NotificationCenter.default.addObserver(
             forName: .legacyUpdatesDidChange,
             object: nil,
@@ -5764,8 +5802,8 @@ final class LegacyUpdatesViewController: UITableViewController {
         cell.detailTextLabel?.numberOfLines = 2
         guard !entries.isEmpty else {
             cell.imageView?.image = nil
-            cell.textLabel?.text = "No new chapters recorded."
-            cell.detailTextLabel?.text = "Use Library Update to check saved manga."
+            cell.textLabel?.text = LegacyString("updates.empty.title")
+            cell.detailTextLabel?.text = LegacyString("updates.empty.detail")
             cell.accessoryType = .none
             cell.selectionStyle = .none
             return cell
@@ -5785,7 +5823,10 @@ final class LegacyUpdatesViewController: UITableViewController {
         guard entries.indices.contains(indexPath.row) else { return }
         let entry = entries[indexPath.row]
         guard let source = sources.first(where: { $0.key == entry.sourceKey }) else {
-            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to open this manga.")
+            showAlert(
+                title: LegacyString("library.source_missing.title"),
+                message: String(format: LegacyString("library.source_missing.message"), entry.sourceName)
+            )
             return
         }
         navigationController?.pushViewController(
@@ -5928,7 +5969,10 @@ final class LegacyDownloadsViewController: UITableViewController {
         guard entries.indices.contains(indexPath.row) else { return }
         let entry = entries[indexPath.row]
         guard let source = sources.first(where: { $0.key == entry.sourceKey }) else {
-            showAlert(title: "Source Missing", message: "Install \(entry.sourceName) again to read this download.")
+            showAlert(
+                title: LegacyString("library.source_missing.title"),
+                message: String(format: LegacyString("library.source_missing.read_download_message"), entry.sourceName)
+            )
             return
         }
         navigationController?.pushViewController(
@@ -6116,7 +6160,7 @@ final class LegacyCategoryManagerViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Library Categories"
+        title = LegacyString("settings.library_categories")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         navigationItem.rightBarButtonItem = editButtonItem
@@ -6150,20 +6194,20 @@ final class LegacyCategoryManagerViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch kind(for: section) {
             case .categories:
-                return "Categories"
+                return LegacyString("category.categories.placeholder")
             case .add:
                 return nil
             case .defaultCategory:
-                return "Default Category"
+                return LegacyString("category.default.header")
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch kind(for: section) {
             case .categories:
-                return "Tap a category to rename it, set its own sort order, make it the default, or remove it."
+                return LegacyString("category.categories.footer")
             case .defaultCategory:
-                return "New manga added to the Library are filed under the default category."
+                return LegacyString("category.default.footer")
             case .add:
                 return nil
         }
@@ -6181,27 +6225,28 @@ final class LegacyCategoryManagerViewController: UITableViewController {
         switch kind(for: indexPath.section) {
             case .categories:
                 if categories.isEmpty {
-                    cell.textLabel?.text = "No categories yet"
-                    cell.detailTextLabel?.text = "Add a category to organize your library."
+                    cell.textLabel?.text = LegacyString("category.empty.title")
+                    cell.detailTextLabel?.text = LegacyString("category.empty.detail")
                     cell.selectionStyle = .none
                 } else {
                     let name = categories[indexPath.row]
                     cell.textLabel?.text = name
                     let sort = LegacyCategoryStore.shared.sort(forKey: name)
                     let isDefault = LegacyCategoryStore.shared.defaultCategory.caseInsensitiveCompare(name) == .orderedSame
-                    var detail = "Sort: \(sort.title)"
-                    if isDefault { detail += " - Default" }
-                    cell.detailTextLabel?.text = detail
+                    let sortDetail = String(format: LegacyString("category.sort.detail"), sort.title)
+                    cell.detailTextLabel?.text = isDefault
+                        ? String(format: LegacyString("category.sort.detail.default"), sortDetail)
+                        : sortDetail
                     cell.accessoryType = .disclosureIndicator
                 }
             case .add:
-                cell.textLabel?.text = "Add Category"
+                cell.textLabel?.text = LegacyString("category.add")
                 cell.textLabel?.textColor = LegacyPalette.accent
                 cell.detailTextLabel?.text = nil
             case .defaultCategory:
                 let isNone = indexPath.row == 0
                 let name = isNone ? "" : categories[indexPath.row - 1]
-                cell.textLabel?.text = isNone ? "None" : name
+                cell.textLabel?.text = isNone ? LegacyString("category.none") : name
                 cell.detailTextLabel?.text = nil
                 let current = LegacyCategoryStore.shared.defaultCategory
                 let selected = isNone ? current.isEmpty : current.caseInsensitiveCompare(name) == .orderedSame
@@ -6284,17 +6329,17 @@ final class LegacyCategoryManagerViewController: UITableViewController {
     // MARK: Actions
 
     private func promptAddCategory() {
-        let alert = UIAlertController(title: "Add Category", message: nil, preferredStyle: .alert)
+        let alert = UIAlertController(title: LegacyString("category.add"), message: nil, preferredStyle: .alert)
         alert.addTextField { textField in
-            textField.placeholder = "Reading"
+            textField.placeholder = LegacyString("category.add.placeholder")
             textField.autocapitalizationType = .words
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.add"), style: .default) { [weak self, weak alert] _ in
             let name = alert?.textFields?.first?.text ?? ""
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             if !LegacyCategoryStore.shared.add(name) {
-                self?.showAlert(title: "Category Exists", message: "A category with that name already exists.")
+                self?.showAlert(title: LegacyString("category.exists.title"), message: LegacyString("category.exists.message"))
             }
             self?.reloadCategories()
         })
@@ -6303,48 +6348,50 @@ final class LegacyCategoryManagerViewController: UITableViewController {
 
     private func showCategoryOptions(for name: String, at indexPath: IndexPath) {
         let alert = UIAlertController(title: name, message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.rename"), style: .default) { [weak self] _ in
             self?.promptRenameCategory(name)
         })
         let sort = LegacyCategoryStore.shared.sort(forKey: name)
-        alert.addAction(UIAlertAction(title: "Sort: \(sort.title)", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: String(format: LegacyString("category.sort.detail"), sort.title), style: .default) { [weak self] _ in
             self?.showSortOptions(for: name, at: indexPath)
         })
         let isDefault = LegacyCategoryStore.shared.defaultCategory.caseInsensitiveCompare(name) == .orderedSame
-        alert.addAction(UIAlertAction(title: isDefault ? "Remove as Default" : "Make Default", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: isDefault ? LegacyString("category.remove_default") : LegacyString("category.make_default"), style: .default) { [weak self] _ in
             LegacyCategoryStore.shared.defaultCategory = isDefault ? "" : name
             self?.reloadCategories()
         })
-        alert.addAction(UIAlertAction(title: "Remove Category", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("category.remove"), style: .destructive) { [weak self] _ in
             LegacyCategoryStore.shared.remove(name)
             self?.reloadCategories()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func showSortOptions(for name: String, at indexPath: IndexPath) {
         let current = LegacyCategoryStore.shared.sort(forKey: name)
-        let alert = UIAlertController(title: "Sort - \(name)", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: String(format: LegacyString("category.sort.title"), name), message: nil, preferredStyle: .actionSheet)
         for option in LegacyLibrarySortOption.allCases {
-            let title = option == current ? "\(option.title) (Current)" : option.title
+            let title = option == current
+                ? String(format: LegacyString("settings.option.current"), option.title)
+                : option.title
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 LegacyCategoryStore.shared.setSort(option, forKey: name)
                 self?.reloadCategories()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, at: indexPath)
     }
 
     private func promptRenameCategory(_ name: String) {
-        let alert = UIAlertController(title: "Rename Category", message: name, preferredStyle: .alert)
+        let alert = UIAlertController(title: LegacyString("category.rename.title"), message: name, preferredStyle: .alert)
         alert.addTextField { textField in
             textField.text = name
             textField.autocapitalizationType = .words
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             let newName = alert?.textFields?.first?.text ?? ""
             guard !newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             LegacyCategoryStore.shared.rename(name, to: newName)
@@ -6368,7 +6415,7 @@ final class LegacyCategoryManagerViewController: UITableViewController {
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
