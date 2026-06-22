@@ -9337,7 +9337,7 @@ final class LegacySourceHomeViewController: UITableViewController {
 
         guard !rows.isEmpty else {
             cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
-            cell.textLabel?.text = isLoading ? "Loading..." : message
+            cell.textLabel?.text = isLoading ? LegacyString("reader.loading") : message
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -9347,7 +9347,7 @@ final class LegacySourceHomeViewController: UITableViewController {
         switch rows[indexPath.row] {
             case .header(let title, let subtitle):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .headline)
-                cell.textLabel?.text = title ?? "Home"
+                cell.textLabel?.text = title ?? LegacyString("source.home")
                 cell.detailTextLabel?.text = subtitle
                 cell.accessoryType = .none
                 cell.selectionStyle = .none
@@ -9377,11 +9377,11 @@ final class LegacySourceHomeViewController: UITableViewController {
             case .filter(let item):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
                 cell.textLabel?.text = item.title
-                cell.detailTextLabel?.text = "Search with this filter"
+                cell.detailTextLabel?.text = LegacyString("search.with_filter")
             case .listing(_, let title):
                 cell.textLabel?.font = UIFont.preferredFont(forTextStyle: .body)
                 cell.textLabel?.text = title
-                cell.detailTextLabel?.text = "View more"
+                cell.detailTextLabel?.text = LegacyString("search.view_more")
         }
         return cell
     }
@@ -12404,7 +12404,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
     private let chapter: AidokuRunnerLegacyChapter
     private let initialPageIndex: Int
     private var pages: [AidokuRunnerLegacyPage] = []
-    private var message = "Loading pages..."
+    private var message = LegacyString("reader.loading_pages")
     private var didScrollToInitialPage = false
     private var currentPageIndex: Int?
     private var lastSavedHistoryPageIndex: Int?
@@ -12465,7 +12465,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
         let pageButton = UIBarButtonItem(
-            title: "Page",
+            title: LegacyString("reader.page_button"),
             style: .plain,
             target: self,
             action: #selector(showCurrentPageActions)
@@ -12480,7 +12480,7 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             navigationItem.rightBarButtonItems = [
                 settingsButton,
                 pageButton,
-                UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
+                UIBarButtonItem(title: LegacyString("reader.web_button"), style: .plain, target: self, action: #selector(openChapterWebPage))
             ]
         } else {
             navigationItem.rightBarButtonItems = [settingsButton, pageButton]
@@ -13290,7 +13290,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
     private let initialPageIndex: Int
     private var collectionView: UICollectionView!
     private var pages: [AidokuRunnerLegacyPage] = []
-    private var message = "Loading pages..."
+    private var message = LegacyString("reader.loading_pages")
     private var didScrollToInitialPage = false
     private var currentPageIndex: Int?
     private var lastSavedHistoryPageIndex: Int?
@@ -13350,7 +13350,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
         edgesForExtendedLayout = []
         navigationItem.largeTitleDisplayMode = .never
         let pageButton = UIBarButtonItem(
-            title: "Page",
+            title: LegacyString("reader.page_button"),
             style: .plain,
             target: self,
             action: #selector(showCurrentPageActions)
@@ -13365,7 +13365,7 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             navigationItem.rightBarButtonItems = [
                 settingsButton,
                 pageButton,
-                UIBarButtonItem(title: "Web", style: .plain, target: self, action: #selector(openChapterWebPage))
+                UIBarButtonItem(title: LegacyString("reader.web_button"), style: .plain, target: self, action: #selector(openChapterWebPage))
             ]
         } else {
             navigationItem.rightBarButtonItems = [settingsButton, pageButton]
@@ -14495,14 +14495,14 @@ private final class LegacyReaderTransitionView: UIView {
         super.init(frame: frame)
         backgroundColor = UIColor.black
 
-        configureHeader(finishedHeader, text: "Finished:")
+        configureHeader(finishedHeader, text: LegacyString("reader.transition.finished"))
         configureTitle(finishedTitle)
         configureSubtitle(finishedUploader)
-        configureHeader(nextHeader, text: "Next:")
+        configureHeader(nextHeader, text: LegacyString("reader.transition.next"))
         configureTitle(nextTitle)
         configureSubtitle(nextUploader)
         configureSubtitle(noNextLabel)
-        noNextLabel.text = "There's no next chapter."
+        noNextLabel.text = LegacyString("reader.transition.no_next")
 
         finishedGroup.axis = .vertical
         finishedGroup.alignment = .fill
@@ -14564,7 +14564,7 @@ private final class LegacyReaderTransitionView: UIView {
     ) {
         self.finishedTitle.text = finishedTitle
         if let finishedUploader = finishedUploader, !finishedUploader.isEmpty {
-            self.finishedUploader.text = "Uploaded by \(finishedUploader)"
+            self.finishedUploader.text = String(format: LegacyString("reader.transition.uploaded_by"), finishedUploader)
             self.finishedUploader.isHidden = false
         } else {
             self.finishedUploader.isHidden = true
@@ -14573,7 +14573,7 @@ private final class LegacyReaderTransitionView: UIView {
         if let nextTitle = nextTitle {
             self.nextTitle.text = nextTitle
             if let nextUploader = nextUploader, !nextUploader.isEmpty {
-                self.nextUploader.text = "Uploaded by \(nextUploader)"
+                self.nextUploader.text = String(format: LegacyString("reader.transition.uploaded_by"), nextUploader)
                 self.nextUploader.isHidden = false
             } else {
                 self.nextUploader.isHidden = true
@@ -15311,8 +15311,8 @@ private final class LegacyReaderOverlayView: UIView {
         isUserInteractionEnabled = true
         backgroundColor = .clear
 
-        configureZone(leftZone, text: "Prev", color: LegacyReaderOverlayView.prevZoneColor)
-        configureZone(rightZone, text: "Next", color: LegacyReaderOverlayView.nextZoneColor)
+        configureZone(leftZone, text: LegacyString("reader.tap.previous"), color: LegacyReaderOverlayView.prevZoneColor)
+        configureZone(rightZone, text: LegacyString("reader.tap.next"), color: LegacyReaderOverlayView.nextZoneColor)
         configurePill(modeLabel, fontSize: 22)
         configurePill(pageLabel, fontSize: 15)
         configureSlider()
@@ -15396,7 +15396,7 @@ private final class LegacyReaderOverlayView: UIView {
             pageLabel.alpha = 0
             return
         }
-        pageLabel.text = "\(min(max(index + 1, 1), count)) / \(count)"
+        pageLabel.text = String(format: LegacyString("reader.page_count"), min(max(index + 1, 1), count), count)
         pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
     }
 
@@ -15447,14 +15447,14 @@ private final class LegacyReaderOverlayView: UIView {
 
     private func applyZoneDirection(nextOnLeft: Bool) {
         if nextOnLeft {
-            leftZone.text = "Next"
+            leftZone.text = LegacyString("reader.tap.next")
             leftZone.backgroundColor = LegacyReaderOverlayView.nextZoneColor
-            rightZone.text = "Prev"
+            rightZone.text = LegacyString("reader.tap.previous")
             rightZone.backgroundColor = LegacyReaderOverlayView.prevZoneColor
         } else {
-            leftZone.text = "Prev"
+            leftZone.text = LegacyString("reader.tap.previous")
             leftZone.backgroundColor = LegacyReaderOverlayView.prevZoneColor
-            rightZone.text = "Next"
+            rightZone.text = LegacyString("reader.tap.next")
             rightZone.backgroundColor = LegacyReaderOverlayView.nextZoneColor
         }
     }
@@ -15521,7 +15521,7 @@ private final class LegacyReaderOverlayView: UIView {
         guard !isUpdatingSlider, pageCount > 1 else { return }
         let pageIndex = min(max(Int(round(pageSlider.value)), 0), pageCount - 1)
         pageSlider.setValue(Float(pageIndex), animated: false)
-        pageLabel.text = "\(pageIndex + 1) / \(pageCount)"
+        pageLabel.text = String(format: LegacyString("reader.page_count"), pageIndex + 1, pageCount)
         pageLabel.alpha = !controlsHidden && aidokuLegacyReaderShowsPageNumber() ? 0.95 : 0
         onPageSelected?(pageIndex)
     }
@@ -15756,13 +15756,13 @@ private final class LegacyPageImageCell: UITableViewCell {
         heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         switch page.content {
             case .url(let url, let context):
-                pageLabel.text = "Loading..."
+                pageLabel.text = LegacyString("reader.loading")
                 LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source) { [weak self] image in
                     guard let self = self, self.representedLoadID == loadID else { return }
                     if let image = image {
                         self.setImage(image, loadID: loadID)
                     } else {
-                        self.showFailure("Image failed to load.", loadID: loadID)
+                        self.showFailure(LegacyString("reader.image_failed"), loadID: loadID)
                     }
                 }
             case .image(let data):
@@ -15774,12 +15774,12 @@ private final class LegacyPageImageCell: UITableViewCell {
             case .zipFile(_, _):
                 pageImageView.isHidden = true
                 heightConstraint.constant = 180
-                pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
+                pageLabel.text = LegacyString("reader.zip_unsupported")
         }
     }
 
     private func loadLocalImage(url: URL, loadID: UUID) {
-        pageLabel.text = "Loading..."
+        pageLabel.text = LegacyString("reader.loading")
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool { () -> UIImage? in
@@ -15792,7 +15792,7 @@ private final class LegacyPageImageCell: UITableViewCell {
                 if let image = image {
                     self.setImage(image, loadID: loadID)
                 } else {
-                    self.showFailure("Downloaded image failed to decode.", loadID: loadID)
+                    self.showFailure(LegacyString("reader.downloaded_image_decode_failed"), loadID: loadID)
                 }
             }
         }
@@ -15985,7 +15985,7 @@ private final class LegacyPageImageCell: UITableViewCell {
     private func setImage(
         from data: Data,
         loadID: UUID,
-        failureMessage: String = "Image failed to load."
+        failureMessage: String = LegacyString("reader.image_failed")
     ) {
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
@@ -16069,7 +16069,7 @@ private final class LegacyPageImageCell: UITableViewCell {
         task = nil
         pageImageView.image = nil
         pageImageView.isHidden = false
-        pageLabel.text = "Loading..."
+        pageLabel.text = LegacyString("reader.loading")
         reloadButton.isHidden = true
         heightConstraint.constant = fitsViewport ? max(320, availableSize.height) : 420
         onHeightChange?()
@@ -16109,7 +16109,7 @@ private final class LegacyPageImageCell: UITableViewCell {
                 pageLabel.text = text
                 onHeightChange?()
             case .zipFile(_, _):
-                showFailure("ZIP pages are not supported in the legacy reader yet.", loadID: loadID)
+                showFailure(LegacyString("reader.zip_unsupported"), loadID: loadID)
         }
     }
 
@@ -16124,33 +16124,33 @@ private final class LegacyPageImageCell: UITableViewCell {
             return httpFailureMessage(statusCode: statusCode, response: response)
         }
         if let error = error {
-            return "Image failed to load: \(error.localizedDescription)"
+            return String(format: LegacyString("reader.image_failed_with_error"), error.localizedDescription)
         }
-        return "Image failed to load."
+        return LegacyString("reader.image_failed")
     }
 
     private func httpFailureMessage(statusCode: Int, response: HTTPURLResponse?) -> String {
         if let contentType = headerValue("Content-Type", in: response), !contentType.isEmpty {
-            return "Image failed to load. HTTP \(statusCode). \(contentType)"
+            return String(format: LegacyString("reader.image_failed_http_type"), statusCode, contentType)
         }
-        return "Image failed to load. HTTP \(statusCode)."
+        return String(format: LegacyString("reader.image_failed_http"), statusCode)
     }
 
     private func decodeFailureMessage(data: Data, response: HTTPURLResponse?) -> String {
         let contentType = headerValue("Content-Type", in: response)?.lowercased() ?? ""
         if contentType.contains("webp") {
-            return "WebP image failed to decode."
+            return LegacyString("reader.webp_decode_failed")
         }
         if contentType.contains("avif") {
-            return "AVIF image failed to decode."
+            return LegacyString("reader.avif_decode_failed")
         }
         if contentType.contains("html") || looksLikeHTML(data) {
-            return "Image request returned HTML instead of an image."
+            return LegacyString("reader.image_returned_html")
         }
         if !contentType.isEmpty && !contentType.contains("image") {
-            return "Image request returned \(contentType)."
+            return String(format: LegacyString("reader.image_returned_type"), contentType)
         }
-        return "Image failed to decode."
+        return LegacyString("reader.image_decode_failed")
     }
 
     private func headerValue(_ name: String, in response: HTTPURLResponse?) -> String? {
@@ -16414,13 +16414,13 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         reloadButton.isHidden = true
         switch page.content {
             case .url(let url, let context):
-                pageLabel.text = "Loading..."
+                pageLabel.text = LegacyString("reader.loading")
                 LegacyReaderImagePipeline.shared.load(url: url, context: context, source: source) { [weak self] image in
                     guard let self = self, self.representedLoadID == loadID else { return }
                     if let image = image {
                         self.setImage(image, loadID: loadID)
                     } else {
-                        self.showFailure("Image failed to load.", loadID: loadID)
+                        self.showFailure(LegacyString("reader.image_failed"), loadID: loadID)
                     }
                 }
             case .image(let data):
@@ -16430,12 +16430,12 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                 pageLabel.text = text
             case .zipFile(_, _):
                 pageImageView.isHidden = true
-                pageLabel.text = "ZIP pages are not supported in the legacy reader yet."
+                pageLabel.text = LegacyString("reader.zip_unsupported")
         }
     }
 
     private func loadLocalImage(url: URL, loadID: UUID) {
-        pageLabel.text = "Loading..."
+        pageLabel.text = LegacyString("reader.loading")
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
             let image = autoreleasepool { () -> UIImage? in
@@ -16448,7 +16448,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                 if let image = image {
                     self.setImage(image, loadID: loadID)
                 } else {
-                    self.showFailure("Downloaded image failed to decode.", loadID: loadID)
+                    self.showFailure(LegacyString("reader.downloaded_image_decode_failed"), loadID: loadID)
                 }
             }
         }
@@ -16639,7 +16639,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
     private func setImage(
         from data: Data,
         loadID: UUID,
-        failureMessage: String = "Image failed to load."
+        failureMessage: String = LegacyString("reader.image_failed")
     ) {
         aidokuLegacyImageDecodeQueue.async { [weak self] in
             let maxHeight = aidokuLegacyReaderMaxPixelHeight()
@@ -16705,7 +16705,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
         task = nil
         pageImageView.image = nil
         pageImageView.isHidden = false
-        pageLabel.text = "Loading..."
+        pageLabel.text = LegacyString("reader.loading")
         reloadButton.isHidden = true
 
         switch page.content {
@@ -16741,7 +16741,7 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
                 pageImageView.isHidden = true
                 pageLabel.text = text
             case .zipFile(_, _):
-                showFailure("ZIP pages are not supported in the legacy reader yet.", loadID: loadID)
+                showFailure(LegacyString("reader.zip_unsupported"), loadID: loadID)
         }
     }
 
@@ -16756,33 +16756,33 @@ private final class LegacyPagedImageCell: UICollectionViewCell {
             return httpFailureMessage(statusCode: statusCode, response: response)
         }
         if let error = error {
-            return "Image failed to load: \(error.localizedDescription)"
+            return String(format: LegacyString("reader.image_failed_with_error"), error.localizedDescription)
         }
-        return "Image failed to load."
+        return LegacyString("reader.image_failed")
     }
 
     private func httpFailureMessage(statusCode: Int, response: HTTPURLResponse?) -> String {
         if let contentType = headerValue("Content-Type", in: response), !contentType.isEmpty {
-            return "Image failed to load. HTTP \(statusCode). \(contentType)"
+            return String(format: LegacyString("reader.image_failed_http_type"), statusCode, contentType)
         }
-        return "Image failed to load. HTTP \(statusCode)."
+        return String(format: LegacyString("reader.image_failed_http"), statusCode)
     }
 
     private func decodeFailureMessage(data: Data, response: HTTPURLResponse?) -> String {
         let contentType = headerValue("Content-Type", in: response)?.lowercased() ?? ""
         if contentType.contains("webp") {
-            return "WebP image failed to decode."
+            return LegacyString("reader.webp_decode_failed")
         }
         if contentType.contains("avif") {
-            return "AVIF image failed to decode."
+            return LegacyString("reader.avif_decode_failed")
         }
         if contentType.contains("html") || looksLikeHTML(data) {
-            return "Image request returned HTML instead of an image."
+            return LegacyString("reader.image_returned_html")
         }
         if !contentType.isEmpty && !contentType.contains("image") {
-            return "Image request returned \(contentType)."
+            return String(format: LegacyString("reader.image_returned_type"), contentType)
         }
-        return "Image failed to decode."
+        return LegacyString("reader.image_decode_failed")
     }
 
     private func headerValue(_ name: String, in response: HTTPURLResponse?) -> String? {

@@ -634,6 +634,25 @@
 "reader.no_pages" = "No pages.";
 "reader.zip_unsupported" = "ZIP pages are not supported in the legacy reader yet.";
 "reader.unavailable.message" = "%@ is unavailable from this source.";
+"reader.page_button" = "Page";
+"reader.web_button" = "Web";
+"reader.page_count" = "%d / %d";
+"reader.image_failed" = "Image failed to load.";
+"reader.image_failed_with_error" = "Image failed to load: %@";
+"reader.image_failed_http" = "Image failed to load. HTTP %d.";
+"reader.image_failed_http_type" = "Image failed to load. HTTP %d. %@";
+"reader.image_decode_failed" = "Image failed to decode.";
+"reader.webp_decode_failed" = "WebP image failed to decode.";
+"reader.avif_decode_failed" = "AVIF image failed to decode.";
+"reader.image_returned_html" = "Image request returned HTML instead of an image.";
+"reader.image_returned_type" = "Image request returned %@.";
+"reader.downloaded_image_decode_failed" = "Downloaded image failed to decode.";
+"reader.transition.finished" = "Finished:";
+"reader.transition.next" = "Next:";
+"reader.transition.no_next" = "There's no next chapter.";
+"reader.transition.uploaded_by" = "Uploaded by %@";
+"reader.tap.next" = "Next";
+"reader.tap.previous" = "Prev";
 
 /* MARK: - Reader settings */
 "reader_settings.title" = "Reader Settings";
