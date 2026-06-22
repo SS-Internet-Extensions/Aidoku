@@ -8729,7 +8729,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
         self.source = source
         self.settings = source.staticSettings
         super.init(style: .grouped)
-        title = "Source Settings"
+        title = LegacyString("sources.source_settings.title")
     }
 
     @available(*, unavailable)
@@ -8768,10 +8768,10 @@ final class LegacySourceSettingsViewController: UITableViewController {
 
         switch sections[indexPath.section].rows[indexPath.row] {
             case .languages:
-                cell.textLabel?.text = "Languages"
+                cell.textLabel?.text = LegacyString("source_settings.languages")
                 cell.detailTextLabel?.text = selectedLanguages().joined(separator: ", ")
             case .baseURL:
-                cell.textLabel?.text = "Base URL"
+                cell.textLabel?.text = LegacyString("source_settings.base_url")
                 cell.detailTextLabel?.text = currentBaseURL()
             case .setting(let setting):
                 cell.textLabel?.text = settingTitle(setting)
@@ -8805,7 +8805,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
             sourceRows.append(.baseURL)
         }
         if !sourceRows.isEmpty {
-            sections.append(Section(title: "Source", rows: sourceRows))
+            sections.append(Section(title: LegacyString("source_settings.section.source"), rows: sourceRows))
         }
 
         var looseRows: [Row] = []
@@ -8820,7 +8820,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
             }
         }
         if !looseRows.isEmpty {
-            sections.append(Section(title: "Settings", rows: looseRows))
+            sections.append(Section(title: LegacyString("source_settings.section.settings"), rows: looseRows))
         }
     }
 
@@ -8835,7 +8835,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
                         self.buildSections()
                         self.tableView.reloadData()
                     case .failure(let error):
-                        self.showMessage(title: "Settings Failed", message: error.localizedDescription)
+                        self.showMessage(title: LegacyString("source.settings_failed.title"), message: error.localizedDescription)
                 }
             }
         }
@@ -8877,7 +8877,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
             return (label, language)
         }
         let picker = LegacyFilterOptionPickerViewController(
-            title: "Languages",
+            title: LegacyString("source_settings.languages"),
             options: options,
             selectedValues: selected,
             allowsMultiple: allowsMultiple,
@@ -8898,7 +8898,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
     private func openBaseURLPicker() {
         let options = source.urls.map { ($0.absoluteString, $0.absoluteString) }
         let picker = LegacyFilterOptionPickerViewController(
-            title: "Base URL",
+            title: LegacyString("source_settings.base_url"),
             options: options,
             selectedValues: Set([currentBaseURL()]),
             allowsMultiple: false,
@@ -8973,8 +8973,8 @@ final class LegacySourceSettingsViewController: UITableViewController {
                 textField.keyboardType = .decimalPad
             }
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             guard let self = self, let text = alert?.textFields?.first?.text else { return }
             if setting.type == "stepper", let number = Double(text) {
                 UserDefaults.standard.set(number, forKey: defaultsKey)
@@ -8992,14 +8992,14 @@ final class LegacySourceSettingsViewController: UITableViewController {
         let defaultsKey = "\(source.key).\(key)"
         let alert = UIAlertController(
             title: settingTitle(setting),
-            message: "Enter comma-separated values.",
+            message: LegacyString("source_settings.editable_list.message"),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
             textField.text = (UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []).joined(separator: ", ")
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             guard let self = self, let text = alert?.textFields?.first?.text else { return }
             let values = text
                 .components(separatedBy: ",")
@@ -9203,7 +9203,7 @@ final class LegacySourceSettingsViewController: UITableViewController {
 
     private func showMessage(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         (navigationController?.topViewController ?? self).present(alert, animated: true)
     }
 

@@ -409,6 +409,13 @@
 "source.listings.loading" = "Loading Listings...";
 "source.listings.unavailable" = "Listings Unavailable";
 
+/* MARK: - Source Settings screen */
+"source_settings.section.source" = "Source";
+"source_settings.section.settings" = "Settings";
+"source_settings.languages" = "Languages";
+"source_settings.base_url" = "Base URL";
+"source_settings.editable_list.message" = "Enter comma-separated values.";
+
 /* MARK: - Source login */
 "login.password.placeholder" = "Password";
 "login.failed.title" = "Login Failed";
