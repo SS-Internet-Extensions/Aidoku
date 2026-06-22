@@ -25,6 +25,8 @@
 "button.login" = "Log In";
 "button.logout" = "Log Out";
 "button.rename" = "Rename";
+"button.remove" = "Remove";
+"button.copy" = "Copy";
 
 /* MARK: - Library screen */
 "library.title" = "Library";
@@ -412,10 +414,66 @@
 "filters.excluded" = "Excluded";
 
 /* MARK: - Manga detail */
+"manga.header.in_library" = "In library";
+"manga.header.add_to_library" = "Add to library";
+"manga.updated.unknown" = "Unknown";
+"manga.updated.today" = "Today";
+"manga.updated.yesterday" = "Yesterday";
+"manga.updated.days" = "%d days";
+"manga.updated.month.one" = "1 month";
+"manga.updated.month.many" = "%d months";
+"manga.updated.year.one" = "1 year";
+"manga.updated.year.many" = "%d years";
+"manga.tracking" = "Tracking";
+"manga.track" = "Track";
+"manga.tracked" = "Tracked";
+"manga.webview" = "WebView";
+"manga.share_cover" = "Share Cover Image";
+"manga.set_cover" = "Set as Cover";
+"manga.no_cover.title" = "No Cover";
+"manga.no_cover.message" = "The cover image is not available yet.";
+"manga.section.reading" = "Reading";
+"manga.section.chapters" = "Chapters";
+"manga.section.no_chapters" = "No Chapters";
+"manga.section.chapters_language" = "Chapters - %@";
+"manga.chapter_count.one" = "1 Chapter";
+"manga.chapter_count.many" = "%d Chapters";
 "manga.resume_reading" = "Resume Reading";
 "manga.read_first_chapter" = "Read from First Chapter";
+"manga.resume.subtitle" = "%@ - Page %d of %d";
+"manga.loading_chapters" = "Loading chapters...";
+"manga.no_chapters.row" = "No chapters.";
+"manga.downloaded" = "Downloaded";
+"manga.subtitle_with_download" = "%@\nDownloaded";
 "manga.unavailable.title" = "Chapter Unavailable";
 "manga.unavailable.message" = "%@ is marked unavailable by this source.";
+
+/* MARK: - Tracker */
+"tracker.status.reading" = "Reading";
+"tracker.status.planning" = "Plan to Read";
+"tracker.status.completed" = "Completed";
+"tracker.status.dropped" = "Dropped";
+"tracker.status.paused" = "On Hold";
+"tracker.status.rereading" = "Rereading";
+"tracker.none_connected.title" = "No Tracker Connected";
+"tracker.none_connected.message" = "Connect AniList or MyAnimeList in Settings -> Trackers first.";
+"tracker.status.action" = "%@: %@";
+"tracker.link_to" = "Link to %@";
+"tracker.linked_warnings.title" = "Linked With Warnings";
+"tracker.status.title" = "Status";
+"tracker.update_failed.title" = "Update Failed";
+"tracker.set_score.action" = "Set Score... (%@)";
+"tracker.clear_score" = "Clear Score";
+"tracker.unlink" = "Unlink";
+"tracker.set_score.title" = "Set %@ Score";
+"tracker.set_score.message" = "Enter a score from 0 to %@.";
+"tracker.set_score.placeholder" = "0-%@";
+"tracker.invalid_score.title" = "Invalid Score";
+"tracker.score.not_set" = "Not set";
+"tracker.search.placeholder" = "Search %@";
+"tracker.search.failed" = "Search Failed";
+"tracker.search.chapter_count" = "%d chapters";
+"tracker.search.unknown_length" = "Unknown length";
 
 /* MARK: - Manga migration */
 "migration.title" = "Migrate";
@@ -449,7 +507,10 @@
 "chapters.search_placeholder" = "Search chapters";
 "chapters.empty" = "No matching chapters.";
 "chapters.language.title" = "Chapter Language";
+"chapters.language.button" = "Language";
 "chapters.language.all" = "All Languages";
+"chapters.language.count" = "%@ (%d)";
+"chapters.language.unknown" = "Unknown Language";
 
 /* MARK: - Cover selection */
 "cover.select.title" = "Select Cover";
@@ -457,6 +518,8 @@
 "cover.unavailable.message" = "This source did not return alternate covers.";
 "cover.none.title" = "No Covers";
 "cover.none.message" = "No alternate covers are available for this manga.";
+"cover.current" = "Current Cover";
+"cover.numbered" = "Cover %d";
 
 /* MARK: - Page actions */
 "page.copy_description" = "Copy Description";
@@ -479,11 +542,15 @@
 "download.specific" = "Download Specific Chapter";
 "download.all" = "Download All Chapters";
 "download.open" = "Open Downloads";
+"download.remove" = "Remove Download";
 "download.no_chapters.title" = "No Chapters";
 "download.no_chapters.message" = "No readable chapters are available to download.";
 "download.already.title" = "Already Downloaded";
 "download.already.message" = "Selected chapters are already saved offline.";
 "download.complete.title" = "Download Complete";
+"download.complete.message" = "Saved %d chapter(s) for offline reading.";
+"download.progress.chapter" = "Downloading %d of %d...";
+"download.progress.page" = "Downloading %d of %d - Page %d/%d";
 
 /* MARK: - Reader */
 "reader.loading" = "Loading...";

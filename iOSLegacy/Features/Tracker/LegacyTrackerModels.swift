@@ -56,17 +56,17 @@ enum LegacyTrackStatus: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
             case .reading:
-                return "Reading"
+                return LegacyString("tracker.status.reading")
             case .planning:
-                return "Plan to Read"
+                return LegacyString("tracker.status.planning")
             case .completed:
-                return "Completed"
+                return LegacyString("tracker.status.completed")
             case .dropped:
-                return "Dropped"
+                return LegacyString("tracker.status.dropped")
             case .paused:
-                return "On Hold"
+                return LegacyString("tracker.status.paused")
             case .rereading:
-                return "Rereading"
+                return LegacyString("tracker.status.rereading")
         }
     }
 }

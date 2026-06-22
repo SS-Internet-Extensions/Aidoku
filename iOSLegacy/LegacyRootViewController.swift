@@ -10914,25 +10914,25 @@ final class LegacyMangaDetailHeaderView: UIView {
 
         libraryButton.configure(
             glyph: config.inLibrary ? .heartFilled : .heartOutline,
-            title: config.inLibrary ? "In library" : "Add to library",
+            title: config.inLibrary ? LegacyString("manga.header.in_library") : LegacyString("manga.header.add_to_library"),
             tint: config.inLibrary ? LegacyPalette.accent : LegacyPalette.primaryText,
             enabled: true
         )
         updatedButton.configure(
             glyph: .clock,
-            title: config.updatedText ?? "Unknown",
+            title: config.updatedText ?? LegacyString("manga.updated.unknown"),
             tint: LegacyPalette.secondaryText,
             enabled: config.updatedText != nil
         )
         trackingButton.configure(
             glyph: .sync,
-            title: "Tracking",
+            title: LegacyString("manga.tracking"),
             tint: config.tracking ? LegacyPalette.accent : LegacyPalette.primaryText,
             enabled: true
         )
         webViewButton.configure(
             glyph: .globe,
-            title: "WebView",
+            title: LegacyString("manga.webview"),
             tint: LegacyPalette.primaryText,
             enabled: config.hasURL
         )
@@ -11136,10 +11136,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private var isDownloading = false
     private var errorMessage: String?
     private var readChapterKeys: Set<String> = []
-    private lazy var bookmarkButton = UIBarButtonItem(title: "Add", style: .plain, target: self, action: #selector(toggleBookmark))
-    private lazy var downloadButton = UIBarButtonItem(title: "Download", style: .plain, target: self, action: #selector(showDownloadOptions))
-    private lazy var languageButton = UIBarButtonItem(title: "Language", style: .plain, target: self, action: #selector(showChapterLanguagePicker))
-    private lazy var trackerButton = UIBarButtonItem(title: "Track", style: .plain, target: self, action: #selector(showTrackerLinkOptions))
+    private lazy var bookmarkButton = UIBarButtonItem(title: LegacyString("button.add"), style: .plain, target: self, action: #selector(toggleBookmark))
+    private lazy var downloadButton = UIBarButtonItem(title: LegacyString("download.title"), style: .plain, target: self, action: #selector(showDownloadOptions))
+    private lazy var languageButton = UIBarButtonItem(title: LegacyString("chapters.language.button"), style: .plain, target: self, action: #selector(showChapterLanguagePicker))
+    private lazy var trackerButton = UIBarButtonItem(title: LegacyString("manga.track"), style: .plain, target: self, action: #selector(showTrackerLinkOptions))
 
     private var descriptionExpanded = false
     private lazy var headerView = LegacyMangaDetailHeaderView()
@@ -11230,13 +11230,19 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let dates = (manga.chapters ?? []).compactMap { $0.dateUploaded }
         guard let newest = dates.max() else { return nil }
         let days = Calendar.current.dateComponents([.day], from: newest, to: Date()).day ?? 0
-        if days <= 0 { return "Today" }
-        if days == 1 { return "Yesterday" }
-        if days < 30 { return "\(days) days" }
+        if days <= 0 { return LegacyString("manga.updated.today") }
+        if days == 1 { return LegacyString("manga.updated.yesterday") }
+        if days < 30 { return String(format: LegacyString("manga.updated.days"), days) }
         let months = days / 30
-        if months < 12 { return months == 1 ? "1 month" : "\(months) months" }
+        if months < 12 {
+            return months == 1
+                ? LegacyString("manga.updated.month.one")
+                : String(format: LegacyString("manga.updated.month.many"), months)
+        }
         let years = months / 12
-        return years == 1 ? "1 year" : "\(years) years"
+        return years == 1
+            ? LegacyString("manga.updated.year.one")
+            : String(format: LegacyString("manga.updated.year.many"), years)
     }
 
     private func configureHeader() {
@@ -11288,24 +11294,24 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func showMangaActions(from sourceView: UIView?) {
         let alert = UIAlertController(title: manga.title, message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Download", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("download.title"), style: .default) { [weak self] _ in
             self?.showDownloadOptions()
         })
         alert.addAction(UIAlertAction(title: LegacyString("migration.title"), style: .default) { [weak self] _ in
             self?.openMigration()
         })
-        alert.addAction(UIAlertAction(title: "Share Cover Image", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("manga.share_cover"), style: .default) { [weak self] _ in
             self?.shareCoverImage(from: sourceView)
         })
         if source.runner.features.providesAlternateCovers {
-            alert.addAction(UIAlertAction(title: "Set as Cover", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("manga.set_cover"), style: .default) { [weak self] _ in
                 self?.showAlternateCoverPicker(from: sourceView)
             })
         }
-        alert.addAction(UIAlertAction(title: "Copy", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.copy"), style: .default) { [weak self] _ in
             self?.copyMangaInfo()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.sourceView = sourceView ?? view
             popover.sourceRect = (sourceView ?? view).bounds
@@ -11328,7 +11334,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
         ) { [weak self] image in
             guard let self = self else { return }
             guard let image = image else {
-                self.showAlert(title: "No Cover", message: "The cover image is not available yet.")
+                self.showAlert(title: LegacyString("manga.no_cover.title"), message: LegacyString("manga.no_cover.message"))
                 return
             }
             let controller = UIActivityViewController(activityItems: [image], applicationActivities: nil)
@@ -11361,15 +11367,17 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return nil
         }
         if section == 1 {
-            return readingActions.isEmpty ? nil : "Reading"
+            return readingActions.isEmpty ? nil : LegacyString("manga.section.reading")
         }
         let groups = chapterGroups
         if groups.isEmpty {
-            return isLoading ? "Chapters" : "No Chapters"
+            return isLoading ? LegacyString("manga.section.chapters") : LegacyString("manga.section.no_chapters")
         }
         if groups.count == 1 {
             let count = groups[0].chapters.count
-            return count == 1 ? "1 Chapter" : "\(count) Chapters"
+            return count == 1
+                ? LegacyString("manga.chapter_count.one")
+                : String(format: LegacyString("manga.chapter_count.many"), count)
         }
         return groups[section - 2].title
     }
@@ -11419,10 +11427,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
             guard actions.indices.contains(indexPath.row) else { return cell }
             switch actions[indexPath.row] {
                 case .resume(let entry):
-                    cell.textLabel?.text = "Resume Reading"
+                    cell.textLabel?.text = LegacyString("manga.resume_reading")
                     cell.detailTextLabel?.text = resumeSubtitle(for: entry)
                 case .start(let chapter):
-                    cell.textLabel?.text = "Read from First Chapter"
+                    cell.textLabel?.text = LegacyString("manga.read_first_chapter")
                     cell.detailTextLabel?.text = chapter.legacyFormattedTitle
             }
             cell.imageView?.image = nil
@@ -11434,7 +11442,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let groups = chapterGroups
         guard groups.indices.contains(indexPath.section - 2), !groups[indexPath.section - 2].chapters.isEmpty else {
             cell.imageView?.image = nil
-            cell.textLabel?.text = isLoading ? "Loading chapters..." : "No chapters."
+            cell.textLabel?.text = isLoading ? LegacyString("manga.loading_chapters") : LegacyString("manga.no_chapters.row")
             cell.detailTextLabel?.text = nil
             cell.accessoryType = .none
             return cell
@@ -11445,7 +11453,9 @@ final class LegacyMangaDetailViewController: UITableViewController {
         cell.textLabel?.text = chapter.legacyFormattedTitle
         var subtitle = chapter.legacyFormattedSubtitle(sourceKey: source.key) ?? ""
         if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
-            subtitle = subtitle.isEmpty ? "Downloaded" : "\(subtitle)\nDownloaded"
+            subtitle = subtitle.isEmpty
+                ? LegacyString("manga.downloaded")
+                : String(format: LegacyString("manga.subtitle_with_download"), subtitle)
         }
         cell.detailTextLabel?.text = subtitle.isEmpty ? nil : subtitle
         if chapter.locked {
@@ -11514,7 +11524,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 guard case .success(let covers) = result else {
-                    self.showAlert(title: "Covers Unavailable", message: "This source did not return alternate covers.")
+                    self.showAlert(title: LegacyString("cover.unavailable.title"), message: LegacyString("cover.unavailable.message"))
                     return
                 }
                 let coverValues = covers
@@ -11526,18 +11536,20 @@ final class LegacyMangaDetailViewController: UITableViewController {
                         }
                     }
                 guard !coverValues.isEmpty else {
-                    self.showAlert(title: "No Covers", message: "No alternate covers are available for this manga.")
+                    self.showAlert(title: LegacyString("cover.none.title"), message: LegacyString("cover.none.message"))
                     return
                 }
 
-                let alert = UIAlertController(title: "Select Cover", message: self.manga.title, preferredStyle: .actionSheet)
+                let alert = UIAlertController(title: LegacyString("cover.select.title"), message: self.manga.title, preferredStyle: .actionSheet)
                 for (index, cover) in coverValues.enumerated() {
-                    let title = cover == self.manga.cover ? "Current Cover" : "Cover \(index + 1)"
+                    let title = cover == self.manga.cover
+                        ? LegacyString("cover.current")
+                        : String(format: LegacyString("cover.numbered"), index + 1)
                     alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                         self?.applyAlternateCover(cover)
                     })
                 }
-                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
                 if let popover = alert.popoverPresentationController {
                     popover.sourceView = sourceView ?? self.view
                     popover.sourceRect = (sourceView ?? self.view).bounds
@@ -11572,14 +11584,14 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let chapter = chapterGroups[indexPath.section - 2].chapters[indexPath.row]
         guard !chapter.locked else { return nil }
         if LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: chapter.key) {
-            let remove = UITableViewRowAction(style: .destructive, title: "Remove Download") { [weak self] _, _ in
+            let remove = UITableViewRowAction(style: .destructive, title: LegacyString("download.remove")) { [weak self] _, _ in
                 guard let self = self else { return }
                 LegacyDownloadStore.shared.delete(sourceKey: self.source.key, mangaKey: self.manga.key, chapterKey: chapter.key)
                 self.tableView.reloadData()
             }
             return [remove]
         }
-        let download = UITableViewRowAction(style: .normal, title: "Download") { [weak self] _, _ in
+        let download = UITableViewRowAction(style: .normal, title: LegacyString("download.title")) { [weak self] _, _ in
             self?.download(chapters: [chapter])
         }
         return [download]
@@ -11621,7 +11633,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func updateBookmarkButton() {
         let inLibrary = LegacyLibraryStore.shared.contains(sourceKey: source.key, mangaKey: manga.key)
-        bookmarkButton.title = inLibrary ? "Remove" : "Add"
+        bookmarkButton.title = inLibrary ? LegacyString("button.remove") : LegacyString("button.add")
     }
 
     private func updateLanguageButton() {
@@ -11631,7 +11643,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
         if let language = activeChapterLanguage(in: chapters) {
             languageButton.title = language.uppercased()
         } else {
-            languageButton.title = "Language"
+            languageButton.title = LegacyString("chapters.language.button")
         }
     }
 
@@ -11639,7 +11651,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func updateTrackerButton() {
         let linked = !LegacyTrackerManager.shared.entries(sourceKey: sourceKey, mangaKey: mangaKey).isEmpty
-        trackerButton.title = linked ? "Tracked" : "Track"
+        trackerButton.title = linked ? LegacyString("manga.tracked") : LegacyString("manga.track")
     }
 
     @objc private func showTrackerLinkOptions() {
@@ -11647,25 +11659,27 @@ final class LegacyMangaDetailViewController: UITableViewController {
         let loggedIn = manager.loggedInTrackers
         guard !loggedIn.isEmpty else {
             presentDetailAlert(
-                title: "No Tracker Connected",
-                message: "Connect AniList or MyAnimeList in Settings -> Trackers first."
+                title: LegacyString("tracker.none_connected.title"),
+                message: LegacyString("tracker.none_connected.message")
             )
             return
         }
 
-        let alert = UIAlertController(title: "Tracking", message: manga.title, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("manga.tracking"), message: manga.title, preferredStyle: .actionSheet)
         for trackerId in loggedIn {
             if let entry = manager.entry(trackerId: trackerId, sourceKey: sourceKey, mangaKey: mangaKey) {
-                alert.addAction(UIAlertAction(title: "\(trackerId.displayName): \(entry.status.displayName)", style: .default) { [weak self] _ in
+                let title = String(format: LegacyString("tracker.status.action"), trackerId.displayName, entry.status.displayName)
+                alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                     self?.presentTrackerStatusOptions(entry: entry)
                 })
             } else {
-                alert.addAction(UIAlertAction(title: "Link to \(trackerId.displayName)", style: .default) { [weak self] _ in
+                let title = String(format: LegacyString("tracker.link_to"), trackerId.displayName)
+                alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                     self?.beginLink(trackerId: trackerId)
                 })
             }
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = trackerButton
         }
@@ -11687,7 +11701,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 DispatchQueue.main.async {
                     self.updateTrackerButton()
                     if case .failure(let error) = linkResult {
-                        self.presentDetailAlert(title: "Linked With Warnings", message: error.localizedDescription)
+                        self.presentDetailAlert(title: LegacyString("tracker.linked_warnings.title"), message: error.localizedDescription)
                     }
                 }
             }
@@ -11696,34 +11710,40 @@ final class LegacyMangaDetailViewController: UITableViewController {
     }
 
     private func presentTrackerStatusOptions(entry: LegacyTrackEntry) {
-        let alert = UIAlertController(title: "Status", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("tracker.status.title"), message: nil, preferredStyle: .actionSheet)
         for status in LegacyTrackStatus.allCases {
-            let title = status == entry.status ? "\(status.displayName) (Current)" : status.displayName
+            let title = status == entry.status
+                ? String(format: LegacyString("settings.option.current"), status.displayName)
+                : status.displayName
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 LegacyTrackerManager.shared.updateEntry(entry, status: status, score: nil) { result in
                     DispatchQueue.main.async {
                         if case .failure(let error) = result {
-                            self?.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                            self?.presentDetailAlert(title: LegacyString("tracker.update_failed.title"), message: error.localizedDescription)
                         }
                     }
                 }
             })
         }
-        alert.addAction(UIAlertAction(title: "Set Score... (\(trackerScoreText(entry.score, trackerId: entry.trackerId)))", style: .default) { [weak self] _ in
+        let scoreTitle = String(
+            format: LegacyString("tracker.set_score.action"),
+            trackerScoreText(entry.score, trackerId: entry.trackerId)
+        )
+        alert.addAction(UIAlertAction(title: scoreTitle, style: .default) { [weak self] _ in
             self?.presentTrackerScoreEditor(entry: entry)
         })
         if entry.score > 0 {
-            alert.addAction(UIAlertAction(title: "Clear Score", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("tracker.clear_score"), style: .default) { [weak self] _ in
                 LegacyTrackerManager.shared.updateEntry(entry, status: nil, score: 0) { result in
                     DispatchQueue.main.async {
                         if case .failure(let error) = result {
-                            self?.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                            self?.presentDetailAlert(title: LegacyString("tracker.update_failed.title"), message: error.localizedDescription)
                         }
                     }
                 }
             })
         }
-        alert.addAction(UIAlertAction(title: "Unlink", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("tracker.unlink"), style: .destructive) { [weak self] _ in
             guard let self = self else { return }
             LegacyTrackerManager.shared.unlink(
                 trackerId: entry.trackerId,
@@ -11732,7 +11752,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
             )
             self.updateTrackerButton()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = trackerButton
         }
@@ -11742,32 +11762,32 @@ final class LegacyMangaDetailViewController: UITableViewController {
     private func presentTrackerScoreEditor(entry: LegacyTrackEntry) {
         let maxScore: Float = entry.trackerId == .anilist ? 100 : 10
         let alert = UIAlertController(
-            title: "Set \(entry.trackerId.displayName) Score",
-            message: "Enter a score from 0 to \(trackerScoreText(maxScore, trackerId: entry.trackerId)).",
+            title: String(format: LegacyString("tracker.set_score.title"), entry.trackerId.displayName),
+            message: String(format: LegacyString("tracker.set_score.message"), trackerScoreText(maxScore, trackerId: entry.trackerId)),
             preferredStyle: .alert
         )
         alert.addTextField { textField in
             textField.keyboardType = .decimalPad
-            textField.placeholder = "0-\(self.trackerScoreText(maxScore, trackerId: entry.trackerId))"
+            textField.placeholder = String(format: LegacyString("tracker.set_score.placeholder"), self.trackerScoreText(maxScore, trackerId: entry.trackerId))
             textField.text = entry.score > 0 ? self.trackerScoreText(entry.score, trackerId: entry.trackerId) : nil
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self, weak alert] _ in
             guard let self = self else { return }
             let raw = alert?.textFields?.first?.text?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: ",", with: ".") ?? ""
             guard let value = Float(raw), value >= 0, value <= maxScore else {
                 self.presentDetailAlert(
-                    title: "Invalid Score",
-                    message: "Enter a score from 0 to \(self.trackerScoreText(maxScore, trackerId: entry.trackerId))."
+                    title: LegacyString("tracker.invalid_score.title"),
+                    message: String(format: LegacyString("tracker.set_score.message"), self.trackerScoreText(maxScore, trackerId: entry.trackerId))
                 )
                 return
             }
             LegacyTrackerManager.shared.updateEntry(entry, status: nil, score: value) { result in
                 DispatchQueue.main.async {
                     if case .failure(let error) = result {
-                        self.presentDetailAlert(title: "Update Failed", message: error.localizedDescription)
+                        self.presentDetailAlert(title: LegacyString("tracker.update_failed.title"), message: error.localizedDescription)
                     }
                 }
             }
@@ -11776,7 +11796,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
     }
 
     private func trackerScoreText(_ score: Float, trackerId: LegacyTrackerId) -> String {
-        guard score > 0 else { return "Not set" }
+        guard score > 0 else { return LegacyString("tracker.score.not_set") }
         let clamped: Float
         switch trackerId {
             case .anilist:
@@ -11792,7 +11812,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func presentDetailAlert(title: String, message: String?) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 
@@ -11802,8 +11822,8 @@ final class LegacyMangaDetailViewController: UITableViewController {
         guard languages.count > 1 else { return }
 
         let selectedLanguage = activeChapterLanguage(in: chapters)
-        let alert = UIAlertController(title: "Chapter Language", message: manga.title, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "All Languages", style: .default) { [weak self] _ in
+        let alert = UIAlertController(title: LegacyString("chapters.language.title"), message: manga.title, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: LegacyString("chapters.language.all"), style: .default) { [weak self] _ in
             guard let self = self else { return }
             UserDefaults.standard.removeObject(forKey: self.chapterLanguageDefaultsKey)
             self.updateLanguageButton()
@@ -11811,8 +11831,10 @@ final class LegacyMangaDetailViewController: UITableViewController {
         })
         for language in languages {
             let count = chapters.filter { $0.normalizedLanguage == language && !$0.locked }.count
-            let suffix = selectedLanguage == language ? " Selected" : ""
-            let title = "\(languageTitle(language)) (\(count))\(suffix)"
+            let languageCount = String(format: LegacyString("chapters.language.count"), languageTitle(language), count)
+            let title = selectedLanguage == language
+                ? String(format: LegacyString("settings.option.current"), languageCount)
+                : languageCount
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 guard let self = self else { return }
                 UserDefaults.standard.set(language, forKey: self.chapterLanguageDefaultsKey)
@@ -11820,7 +11842,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                 self.tableView.reloadData()
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = languageButton
         }
@@ -11830,25 +11852,25 @@ final class LegacyMangaDetailViewController: UITableViewController {
     @objc private func showDownloadOptions() {
         let readableChapters = displayChapters.filter { !$0.locked }
         guard !readableChapters.isEmpty else {
-            showAlert(title: "No Chapters", message: "No readable chapters are available to download.")
+            showAlert(title: LegacyString("download.no_chapters.title"), message: LegacyString("download.no_chapters.message"))
             return
         }
-        let alert = UIAlertController(title: "Download", message: manga.title, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("download.title"), message: manga.title, preferredStyle: .actionSheet)
         if let first = firstReadableChapter {
-            alert.addAction(UIAlertAction(title: "Download First Chapter", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("download.first"), style: .default) { [weak self] _ in
                 self?.download(chapters: [first])
             })
         }
-        alert.addAction(UIAlertAction(title: "Download Specific Chapter", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("download.specific"), style: .default) { [weak self] _ in
             self?.showSpecificChapterDownloadPicker(chapters: readableChapters)
         })
-        alert.addAction(UIAlertAction(title: "Download All Chapters", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("download.all"), style: .default) { [weak self] _ in
             self?.download(chapters: readableChapters)
         })
-        alert.addAction(UIAlertAction(title: "Open Downloads", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("download.open"), style: .default) { [weak self] _ in
             self?.navigationController?.pushViewController(LegacyDownloadsViewController(), animated: true)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             popover.barButtonItem = downloadButton
         }
@@ -11872,7 +11894,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
             !LegacyDownloadStore.shared.hasChapter(sourceKey: source.key, mangaKey: manga.key, chapterKey: $0.key)
         }
         guard !pending.isEmpty else {
-            showAlert(title: "Already Downloaded", message: "Selected chapters are already saved offline.")
+            showAlert(title: LegacyString("download.already.title"), message: LegacyString("download.already.message"))
             return
         }
         isDownloading = true
@@ -11886,18 +11908,27 @@ final class LegacyMangaDetailViewController: UITableViewController {
             downloadButton.isEnabled = true
             navigationItem.prompt = nil
             tableView.reloadData()
-            showAlert(title: "Download Complete", message: "Saved \(completed) chapter(s) for offline reading.")
+            showAlert(
+                title: LegacyString("download.complete.title"),
+                message: String(format: LegacyString("download.complete.message"), completed)
+            )
             return
         }
         let chapter = chapters[index]
-        navigationItem.prompt = "Downloading \(index + 1) of \(chapters.count)..."
+        navigationItem.prompt = String(format: LegacyString("download.progress.chapter"), index + 1, chapters.count)
         LegacyDownloadManager.shared.download(
             source: source,
             manga: manga,
             chapter: chapter,
             progress: { [weak self] page, total in
                 DispatchQueue.main.async {
-                    self?.navigationItem.prompt = "Downloading \(index + 1) of \(chapters.count) - Page \(page)/\(total)"
+                    self?.navigationItem.prompt = String(
+                        format: LegacyString("download.progress.page"),
+                        index + 1,
+                        chapters.count,
+                        page,
+                        total
+                    )
                 }
             },
             completion: { [weak self] result in
@@ -11911,7 +11942,7 @@ final class LegacyMangaDetailViewController: UITableViewController {
                             self.downloadButton.isEnabled = true
                             self.navigationItem.prompt = nil
                             self.tableView.reloadData()
-                            self.showAlert(title: "Download Failed", message: error.localizedDescription)
+                            self.showAlert(title: LegacyString("source.download_failed.title"), message: error.localizedDescription)
                     }
                 }
             }
@@ -11945,12 +11976,15 @@ final class LegacyMangaDetailViewController: UITableViewController {
             return chapter.normalizedLanguage ?? "unknown"
         }
         guard grouped.keys.count > 1 else {
-            return [ChapterGroup(title: "Chapters", chapters: chapters)]
+            return [ChapterGroup(title: LegacyString("manga.section.chapters"), chapters: chapters)]
         }
         let knownKeys = orderedLanguages(grouped.keys.filter { $0 != "unknown" })
         let orderedKeys = grouped.keys.contains("unknown") ? knownKeys + ["unknown"] : knownKeys
         return orderedKeys.map { key in
-            ChapterGroup(title: "Chapters - \(languageTitle(key))", chapters: grouped[key] ?? [])
+            ChapterGroup(
+                title: String(format: LegacyString("manga.section.chapters_language"), languageTitle(key)),
+                chapters: grouped[key] ?? []
+            )
         }
     }
 
@@ -12042,14 +12076,19 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func languageTitle(_ language: String) -> String {
         if language == "unknown" {
-            return "Unknown Language"
+            return LegacyString("chapters.language.unknown")
         }
         return Locale.current.localizedString(forIdentifier: language) ?? language.uppercased()
     }
 
     private func resumeSubtitle(for entry: LegacyHistoryEntry) -> String {
         if entry.pageCount > 0 {
-            return "\(entry.chapter.legacyFormattedTitle) - Page \(entry.pageIndex + 1) of \(entry.pageCount)"
+            return String(
+                format: LegacyString("manga.resume.subtitle"),
+                entry.chapter.legacyFormattedTitle,
+                entry.pageIndex + 1,
+                entry.pageCount
+            )
         }
         return entry.chapter.legacyFormattedTitle
     }
@@ -12066,17 +12105,17 @@ final class LegacyMangaDetailViewController: UITableViewController {
 
     private func showUnavailableChapterAlert(for chapter: AidokuRunnerLegacyChapter) {
         let alert = UIAlertController(
-            title: "Chapter Unavailable",
-            message: "\(chapter.legacyFormattedTitle) is marked unavailable by this source.",
+            title: LegacyString("manga.unavailable.title"),
+            message: String(format: LegacyString("manga.unavailable.message"), chapter.legacyFormattedTitle),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -17125,7 +17164,7 @@ final class LegacyTrackerSearchViewController: UITableViewController, UISearchRe
         self.currentQuery = initialQuery
         self.onPick = onPick
         super.init(style: .plain)
-        title = "Link to \(trackerId.displayName)"
+        title = String(format: LegacyString("tracker.link_to"), trackerId.displayName)
     }
 
     required init?(coder: NSCoder) {
@@ -17137,7 +17176,7 @@ final class LegacyTrackerSearchViewController: UITableViewController, UISearchRe
         navigationItem.largeTitleDisplayMode = .never
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search \(trackerId.displayName)"
+        searchController.searchBar.placeholder = String(format: LegacyString("tracker.search.placeholder"), trackerId.displayName)
         searchController.searchBar.text = currentQuery
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
@@ -17164,8 +17203,8 @@ final class LegacyTrackerSearchViewController: UITableViewController, UISearchRe
                     case .failure(let error):
                         self.results = []
                         self.tableView.reloadData()
-                        let alert = UIAlertController(title: "Search Failed", message: error.localizedDescription, preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        let alert = UIAlertController(title: LegacyString("tracker.search.failed"), message: error.localizedDescription, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
                         self.present(alert, animated: true)
                 }
             }
@@ -17191,7 +17230,9 @@ final class LegacyTrackerSearchViewController: UITableViewController, UISearchRe
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: "Cell")
         let item = results[indexPath.row]
         cell.textLabel?.text = item.title
-        cell.detailTextLabel?.text = item.totalChapters > 0 ? "\(item.totalChapters) chapters" : "Unknown length"
+        cell.detailTextLabel?.text = item.totalChapters > 0
+            ? String(format: LegacyString("tracker.search.chapter_count"), item.totalChapters)
+            : LegacyString("tracker.search.unknown_length")
         cell.accessoryType = .none
         return cell
     }
