@@ -155,7 +155,7 @@
 "settings.local_files.one" = "1 imported item";
 "settings.local_files.many" = "%d imported items";
 "settings.self_hosted" = "Self-Hosted Servers";
-"settings.self_hosted.zero" = "Add a Komga or Kavita server to browse and read.";
+"settings.self_hosted.zero" = "Add a Komga, Kavita, or OPDS server to browse and read.";
 "settings.self_hosted.one" = "1 server configured";
 "settings.self_hosted.many" = "%d servers configured";
 "settings.trackers" = "Trackers";

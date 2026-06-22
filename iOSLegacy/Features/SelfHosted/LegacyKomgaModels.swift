@@ -13,6 +13,7 @@ import Foundation
 enum LegacyKomgaServerKind: String, Codable {
     case komga
     case kavita
+    case opds
 
     // Human-readable name shown in the UI.
     var displayName: String {
@@ -21,6 +22,8 @@ enum LegacyKomgaServerKind: String, Codable {
                 return "Komga"
             case .kavita:
                 return "Kavita"
+            case .opds:
+                return "OPDS"
         }
     }
 }
@@ -83,12 +86,23 @@ struct LegacyKomgaBook {
     var title: String
     var number: Float
     var pageCount: Int
+    var downloadURL: URL?
+    var acquisitionKind: LegacyLocalChapterKind?
 
-    init(id: String, title: String, number: Float = 0, pageCount: Int = 0) {
+    init(
+        id: String,
+        title: String,
+        number: Float = 0,
+        pageCount: Int = 0,
+        downloadURL: URL? = nil,
+        acquisitionKind: LegacyLocalChapterKind? = nil
+    ) {
         self.id = id
         self.title = title
         self.number = number
         self.pageCount = pageCount
+        self.downloadURL = downloadURL
+        self.acquisitionKind = acquisitionKind
     }
 }
 

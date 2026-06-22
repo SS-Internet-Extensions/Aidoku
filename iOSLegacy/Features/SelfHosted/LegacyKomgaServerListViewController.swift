@@ -205,7 +205,8 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
 
     private let kindControl = UISegmentedControl(items: [
         LegacyKomgaServerKind.komga.displayName,
-        LegacyKomgaServerKind.kavita.displayName
+        LegacyKomgaServerKind.kavita.displayName,
+        LegacyKomgaServerKind.opds.displayName
     ])
 
     init(server: LegacyKomgaServer?) {
@@ -228,12 +229,34 @@ final class LegacyKomgaServerFormViewController: UITableViewController, UITextFi
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
-        kindControl.selectedSegmentIndex = (kindValue == .kavita) ? 1 : 0
+        kindControl.selectedSegmentIndex = segmentIndex(for: kindValue)
         kindControl.addTarget(self, action: #selector(kindChanged), for: .valueChanged)
     }
 
     @objc private func kindChanged() {
-        kindValue = kindControl.selectedSegmentIndex == 1 ? .kavita : .komga
+        kindValue = kind(for: kindControl.selectedSegmentIndex)
+    }
+
+    private func segmentIndex(for kind: LegacyKomgaServerKind) -> Int {
+        switch kind {
+            case .komga:
+                return 0
+            case .kavita:
+                return 1
+            case .opds:
+                return 2
+        }
+    }
+
+    private func kind(for index: Int) -> LegacyKomgaServerKind {
+        switch index {
+            case 1:
+                return .kavita
+            case 2:
+                return .opds
+            default:
+                return .komga
+        }
     }
 
     // MARK: - UITableViewDataSource

@@ -36,10 +36,27 @@ enum LegacyLocalFilePageProvider {
             return []
         }
 
-        if chapter.kind.isZipContainer {
+        return pages(
+            archiveURL: archiveURL,
+            kind: chapter.kind,
+            mangaId: mangaId,
+            chapterId: chapter.id
+        )
+    }
+
+    /// Builds reader pages from a concrete archive URL. Used by managed local
+    /// files and by temporary self-hosted/OPDS downloads that should not be
+    /// persisted into the local-files library.
+    static func pages(
+        archiveURL: URL,
+        kind: LegacyLocalChapterKind,
+        mangaId: String,
+        chapterId: String
+    ) -> [AidokuRunnerLegacyPage] {
+        if kind.isZipContainer {
             return zipPages(archiveURL: archiveURL)
         } else {
-            return pdfPages(archiveURL: archiveURL, mangaId: mangaId, chapterId: chapter.id)
+            return pdfPages(archiveURL: archiveURL, mangaId: mangaId, chapterId: chapterId)
         }
     }
 

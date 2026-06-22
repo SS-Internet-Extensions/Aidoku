@@ -49,6 +49,11 @@ final class LegacyKomgaRunner: AidokuRunnerLegacyRunner {
         chapter: AidokuRunnerLegacyChapter,
         completion: @escaping (Result<[AidokuRunnerLegacyPage], Error>) -> Void
     ) {
+        if server.kind == .opds, let downloadURL = book.downloadURL {
+            downloadOPDSBook(url: downloadURL, manga: manga, chapter: chapter, completion: completion)
+            return
+        }
+
         guard book.pageCount > 0 else {
             completion(.failure(LegacyKomgaError.invalidResponse))
             return
@@ -87,6 +92,91 @@ final class LegacyKomgaRunner: AidokuRunnerLegacyRunner {
                     completion(.failure(error))
             }
         }
+    }
+
+    private func downloadOPDSBook(
+        url: URL,
+        manga: AidokuRunnerLegacyManga,
+        chapter: AidokuRunnerLegacyChapter,
+        completion: @escaping (Result<[AidokuRunnerLegacyPage], Error>) -> Void
+    ) {
+        let kind = book.acquisitionKind
+            ?? LegacyKomgaClient.opdsAcquisitionKind(url: url, type: nil)
+            ?? LegacyLocalChapterKind.from(pathExtension: url.pathExtension)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if !server.username.isEmpty || !server.password.isEmpty {
+            let raw = "\(server.username):\(server.password)"
+            if let encoded = raw.data(using: .utf8)?.base64EncodedString() {
+                request.setValue("Basic \(encoded)", forHTTPHeaderField: "Authorization")
+            }
+        }
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+                return
+            }
+            if let httpResponse = response as? HTTPURLResponse,
+               httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
+                DispatchQueue.main.async {
+                    completion(.failure(LegacyKomgaError.requestFailed(
+                        String(
+                            format: LegacyString("self_hosted.error.status_code"),
+                            httpResponse.statusCode
+                        )
+                    )))
+                }
+                return
+            }
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    completion(.failure(LegacyKomgaError.invalidResponse))
+                }
+                return
+            }
+
+            let fileURL = self.opdsArchiveURL(kind: kind)
+            do {
+                try FileManager.default.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: fileURL, options: .atomic)
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+                return
+            }
+
+            let pages = LegacyLocalFilePageProvider.pages(
+                archiveURL: fileURL,
+                kind: kind,
+                mangaId: manga.key,
+                chapterId: chapter.key
+            )
+            DispatchQueue.main.async {
+                if pages.isEmpty {
+                    completion(.failure(LegacyKomgaError.invalidResponse))
+                } else {
+                    completion(.success(pages))
+                }
+            }
+        }.resume()
+    }
+
+    private func opdsArchiveURL(kind: LegacyLocalChapterKind) -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("AidokuLegacyOPDS", isDirectory: true)
+            .appendingPathComponent(aidokuLegacySanitizedPathComponent(server.id), isDirectory: true)
+        return directory.appendingPathComponent(
+            "\(aidokuLegacySanitizedPathComponent(book.id)).\(kind.rawValue)"
+        )
     }
 
     // MARK: - Unsupported capabilities

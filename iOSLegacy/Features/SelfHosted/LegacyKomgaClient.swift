@@ -39,6 +39,8 @@ final class LegacyKomgaClient {
                 listKomgaSeries(query: query, page: page, completion: completion)
             case .kavita:
                 listKavitaSeries(query: query, page: page, completion: completion)
+            case .opds:
+                listOPDSSeries(query: query, page: page, completion: completion)
         }
     }
 
@@ -52,6 +54,8 @@ final class LegacyKomgaClient {
                 listKomgaBooks(seriesId: seriesId, completion: completion)
             case .kavita:
                 listKavitaBooks(seriesId: seriesId, completion: completion)
+            case .opds:
+                listOPDSBooks(seriesId: seriesId, completion: completion)
         }
     }
 
@@ -75,6 +79,8 @@ final class LegacyKomgaClient {
                     URLQueryItem(name: "extractPdf", value: "true")
                 ]
                 return components.url
+            case .opds:
+                return nil
         }
     }
 
@@ -85,6 +91,8 @@ final class LegacyKomgaClient {
             case .komga:
                 return base.appendingPathComponent("api/v1/series/\(seriesId)/thumbnail")
             case .kavita:
+                return nil
+            case .opds:
                 return nil
         }
     }
@@ -111,6 +119,8 @@ final class LegacyKomgaClient {
                             completion(.failure(error))
                     }
                 }
+            case .opds:
+                completion(.success(["Accept": "image/*"]))
         }
     }
 
@@ -405,6 +415,179 @@ final class LegacyKomgaClient {
             .map { $0.book }
     }
 
+    // MARK: - OPDS implementation
+
+    private func listOPDSSeries(
+        query: String?,
+        page: Int,
+        completion: @escaping (Result<[LegacyKomgaSeries], Error>) -> Void
+    ) {
+        guard let feedURL = server.url else {
+            completion(.failure(LegacyKomgaError.notConfigured))
+            return
+        }
+
+        fetchOPDSEntries(feedURL: feedURL) { result in
+            switch result {
+                case .success(let entries):
+                    let series = entries.compactMap { entry -> LegacyKomgaSeries? in
+                        if entry.supportedAcquisitionKind != nil {
+                            return LegacyKomgaSeries(
+                                id: Self.opdsBookId(entry.url),
+                                title: entry.title,
+                                booksCount: 1,
+                                coverURL: nil
+                            )
+                        }
+                        if entry.isNavigationFeed {
+                            return LegacyKomgaSeries(
+                                id: Self.opdsFeedId(entry.url),
+                                title: entry.title,
+                                booksCount: 0,
+                                coverURL: nil
+                            )
+                        }
+                        return nil
+                    }
+                    completion(.success(Self.pageOPDSSeries(series, query: query, page: page)))
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
+    }
+
+    private func listOPDSBooks(
+        seriesId: String,
+        completion: @escaping (Result<[LegacyKomgaBook], Error>) -> Void
+    ) {
+        if let url = Self.opdsURL(fromBookId: seriesId),
+           let kind = Self.opdsAcquisitionKind(url: url, type: nil) {
+            completion(.success([
+                LegacyKomgaBook(
+                    id: Self.opdsBookId(url),
+                    title: url.deletingPathExtension().lastPathComponent.removingPercentEncoding
+                        ?? LegacyString("self_hosted.unknown_title"),
+                    number: 1,
+                    pageCount: 1,
+                    downloadURL: url,
+                    acquisitionKind: kind
+                )
+            ]))
+            return
+        }
+
+        guard let feedURL = Self.opdsURL(fromFeedId: seriesId) else {
+            completion(.failure(LegacyKomgaError.invalidResponse))
+            return
+        }
+
+        fetchOPDSEntries(feedURL: feedURL) { result in
+            switch result {
+                case .success(let entries):
+                    let books = entries.enumerated().compactMap { index, entry -> LegacyKomgaBook? in
+                        guard let kind = entry.supportedAcquisitionKind else { return nil }
+                        return LegacyKomgaBook(
+                            id: Self.opdsBookId(entry.url),
+                            title: entry.title,
+                            number: Float(index + 1),
+                            pageCount: 1,
+                            downloadURL: entry.url,
+                            acquisitionKind: kind
+                        )
+                    }
+                    completion(.success(books))
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
+    }
+
+    private func fetchOPDSEntries(
+        feedURL: URL,
+        completion: @escaping (Result<[LegacyOPDSEntry], Error>) -> Void
+    ) {
+        performData(request: opdsRequest(url: feedURL)) { result in
+            switch result {
+                case .success(let data):
+                    let parser = LegacyOPDSFeedParser(baseURL: feedURL)
+                    let entries = parser.parse(data: data)
+                    if parser.parseFailed {
+                        completion(.failure(LegacyKomgaError.invalidResponse))
+                    } else {
+                        completion(.success(entries))
+                    }
+                case .failure(let error):
+                    completion(.failure(error))
+            }
+        }
+    }
+
+    private func opdsRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(
+            "application/atom+xml, application/xml, text/xml, */*",
+            forHTTPHeaderField: "Accept"
+        )
+        if let basicAuthValue = basicAuthValue, !server.username.isEmpty || !server.password.isEmpty {
+            request.setValue(basicAuthValue, forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private static func pageOPDSSeries(
+        _ series: [LegacyKomgaSeries],
+        query: String?,
+        page: Int
+    ) -> [LegacyKomgaSeries] {
+        let filtered: [LegacyKomgaSeries]
+        if let query = query, !query.isEmpty {
+            filtered = series.filter {
+                $0.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            }
+        } else {
+            filtered = series
+        }
+        let start = max(0, page) * 20
+        return Array(filtered.dropFirst(start).prefix(20))
+    }
+
+    private static func opdsBookId(_ url: URL) -> String {
+        return "opds-book:\(url.absoluteString)"
+    }
+
+    private static func opdsFeedId(_ url: URL) -> String {
+        return "opds-feed:\(url.absoluteString)"
+    }
+
+    private static func opdsURL(fromBookId id: String) -> URL? {
+        guard id.hasPrefix("opds-book:") else { return nil }
+        return URL(string: String(id.dropFirst("opds-book:".count)))
+    }
+
+    private static func opdsURL(fromFeedId id: String) -> URL? {
+        guard id.hasPrefix("opds-feed:") else { return nil }
+        return URL(string: String(id.dropFirst("opds-feed:".count)))
+    }
+
+    static func opdsAcquisitionKind(url: URL, type: String?) -> LegacyLocalChapterKind? {
+        let lowerType = type?.lowercased() ?? ""
+        let ext = url.pathExtension.lowercased()
+        if lowerType.contains("pdf") || ext == "pdf" {
+            return .pdf
+        }
+        if lowerType.contains("epub") || ext == "epub" {
+            return .epub
+        }
+        if lowerType.contains("cbz") || ext == "cbz" {
+            return .cbz
+        }
+        if lowerType.contains("zip") || ext == "zip" {
+            return .zip
+        }
+        return nil
+    }
+
     // Logs in to Kavita and caches the returned JWT token.
     private func authenticateKavita(completion: @escaping (Result<String, Error>) -> Void) {
         if let token = kavitaToken, !token.isEmpty {
@@ -557,5 +740,151 @@ final class LegacyKomgaClient {
         guard let string = value as? String else { return nil }
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct LegacyOPDSEntry {
+    let title: String
+    let url: URL
+    let type: String?
+    let rel: String?
+
+    var supportedAcquisitionKind: LegacyLocalChapterKind? {
+        guard isAcquisition else { return nil }
+        return LegacyKomgaClient.opdsAcquisitionKind(url: url, type: type)
+    }
+
+    var isNavigationFeed: Bool {
+        let lowerType = type?.lowercased() ?? ""
+        let lowerRel = rel?.lowercased() ?? ""
+        return lowerType.contains("atom+xml")
+            || lowerType.contains("opds")
+            || lowerRel.contains("subsection")
+    }
+
+    private var isAcquisition: Bool {
+        let lowerType = type?.lowercased() ?? ""
+        let lowerRel = rel?.lowercased() ?? ""
+        return lowerRel.contains("acquisition")
+            || lowerType.contains("epub")
+            || lowerType.contains("pdf")
+            || lowerType.contains("zip")
+            || lowerType.contains("cbz")
+    }
+}
+
+private final class LegacyOPDSFeedParser: NSObject, XMLParserDelegate {
+    private struct Link {
+        let url: URL
+        let type: String?
+        let rel: String?
+    }
+
+    private let baseURL: URL
+    private var entries: [LegacyOPDSEntry] = []
+    private var currentTitle = ""
+    private var currentLinks: [Link] = []
+    private var inEntry = false
+    private var collectingTitle = false
+
+    private(set) var parseFailed = false
+
+    init(baseURL: URL) {
+        self.baseURL = baseURL
+    }
+
+    func parse(data: Data) -> [LegacyOPDSEntry] {
+        entries = []
+        currentTitle = ""
+        currentLinks = []
+        inEntry = false
+        collectingTitle = false
+        parseFailed = false
+
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parseFailed = !parser.parse()
+        return entries
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        let name = normalizedName(elementName)
+        if name == "entry" {
+            inEntry = true
+            currentTitle = ""
+            currentLinks = []
+            return
+        }
+        guard inEntry else { return }
+        if name == "title" {
+            collectingTitle = true
+        } else if name == "link" {
+            appendLink(attributes: attributeDict)
+        }
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        let name = normalizedName(elementName)
+        if name == "title" {
+            collectingTitle = false
+        } else if name == "entry" {
+            appendCurrentEntry()
+            inEntry = false
+            currentTitle = ""
+            currentLinks = []
+            collectingTitle = false
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if inEntry && collectingTitle {
+            currentTitle += string
+        }
+    }
+
+    private func appendLink(attributes: [String: String]) {
+        guard let href = attributes["href"] else { return }
+        let url = URL(string: href, relativeTo: baseURL)?.absoluteURL
+        guard let resolvedURL = url else { return }
+        currentLinks.append(Link(url: resolvedURL, type: attributes["type"], rel: attributes["rel"]))
+    }
+
+    private func appendCurrentEntry() {
+        let title = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        let preferredLink = currentLinks.first {
+            let rel = $0.rel?.lowercased() ?? ""
+            let type = $0.type?.lowercased() ?? ""
+            return rel.contains("acquisition")
+                || type.contains("epub")
+                || type.contains("pdf")
+                || type.contains("zip")
+                || type.contains("cbz")
+        } ?? currentLinks.first {
+            let type = $0.type?.lowercased() ?? ""
+            return type.contains("atom+xml") || type.contains("opds")
+        } ?? currentLinks.first
+
+        guard let link = preferredLink else { return }
+        entries.append(LegacyOPDSEntry(title: title, url: link.url, type: link.type, rel: link.rel))
+    }
+
+    private func normalizedName(_ name: String) -> String {
+        if let suffix = name.split(separator: ":").last {
+            return suffix.lowercased()
+        }
+        return name.lowercased()
     }
 }
