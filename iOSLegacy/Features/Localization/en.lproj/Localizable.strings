@@ -308,6 +308,26 @@
 "manga.read_first_chapter" = "Read from First Chapter";
 "manga.unavailable.message" = "%@ is marked unavailable by this source.";
 
+/* MARK: - Manga migration */
+"migration.title" = "Migrate";
+"migration.search.placeholder" = "Search other sources";
+"migration.search.empty_term" = "Enter a search term.";
+"migration.search.keep_typing" = "Keep typing...";
+"migration.search.searching" = "Searching...";
+"migration.search.failed" = "Search failed";
+"migration.search.no_results" = "No matching manga found.";
+"migration.section.count" = "%@ (%d)";
+"migration.no_sources" = "No other sources installed.";
+"migration.copy" = "Copy to Library";
+"migration.migrate" = "Migrate";
+"migration.show_entry" = "Show Entry";
+"migration.loading_details" = "Loading target details...";
+"migration.failed.title" = "Migration Failed";
+"migration.copied.title" = "Copied to Library";
+"migration.copied.message" = "The target entry was added with the same categories, history, updates, and tracker links. Downloads stay on the original entry.";
+"migration.completed.title" = "Migration Complete";
+"migration.completed.message" = "Library data, history, updates, and tracker links were moved to the target entry. Downloads stay on the original entry.";
+
 /* MARK: - Chapters */
 "chapters.search_placeholder" = "Search chapters";
 "chapters.empty" = "No matching chapters.";

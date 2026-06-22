@@ -70,6 +70,140 @@ final class LegacyModelCodableTests: XCTestCase {
         XCTAssertEqual(update.key, "s::m::c")
     }
 
+    func testMangaMigrationCopyKeepsOriginalAndMapsState() {
+        let oldSource = LegacyFixtures.source(info: LegacyFixtures.sourceInfo(id: "old.source", name: "Old Source"))
+        let newSource = LegacyFixtures.source(info: LegacyFixtures.sourceInfo(id: "new.source", name: "New Source"))
+        var oldManga = LegacyFixtures.manga(sourceKey: oldSource.key, key: "old-manga", title: "Old Manga")
+        oldManga.chapters = [LegacyFixtures.chapter(key: "old-c1", number: 1)]
+        var newManga = LegacyFixtures.manga(sourceKey: newSource.key, key: "new-manga", title: "New Manga")
+        newManga.chapters = [LegacyFixtures.chapter(key: "new-c1", number: 1)]
+        let dateAdded = Date(timeIntervalSince1970: 100)
+        let dateRead = Date(timeIntervalSince1970: 200)
+        let dateFound = Date(timeIntervalSince1970: 300)
+
+        let library = LegacyMangaMigrationEngine.migratedLibraryEntries(
+            current: [
+                LegacyLibraryEntry(
+                    sourceKey: oldSource.key,
+                    sourceName: oldSource.name,
+                    manga: oldManga,
+                    dateAdded: dateAdded,
+                    category: "Reading",
+                    categories: ["Reading", "Favorites"]
+                )
+            ],
+            fromSourceKey: oldSource.key,
+            fromMangaKey: oldManga.key,
+            toSource: newSource,
+            toManga: newManga,
+            keepOriginal: true,
+            now: Date(timeIntervalSince1970: 400)
+        )
+
+        XCTAssertEqual(library.count, 2)
+        let copiedLibrary = library.first { $0.sourceKey == newSource.key && $0.manga.key == newManga.key }
+        XCTAssertEqual(copiedLibrary?.dateAdded, dateAdded)
+        XCTAssertEqual(copiedLibrary?.displayCategories, ["Reading", "Favorites"])
+        XCTAssertTrue(library.contains { $0.sourceKey == oldSource.key && $0.manga.key == oldManga.key })
+
+        let history = LegacyMangaMigrationEngine.migratedHistoryEntries(
+            current: [
+                LegacyHistoryEntry(
+                    sourceKey: oldSource.key,
+                    sourceName: oldSource.name,
+                    manga: oldManga,
+                    chapter: oldManga.chapters![0],
+                    pageIndex: 7,
+                    pageCount: 10,
+                    dateRead: dateRead
+                )
+            ],
+            fromSourceKey: oldSource.key,
+            fromMangaKey: oldManga.key,
+            toSource: newSource,
+            toManga: newManga,
+            keepOriginal: true
+        )
+        XCTAssertEqual(history.count, 2)
+        let copiedHistory = history.first { $0.sourceKey == newSource.key && $0.manga.key == newManga.key }
+        XCTAssertEqual(copiedHistory?.chapter.key, "new-c1")
+        XCTAssertEqual(copiedHistory?.pageIndex, 7)
+        XCTAssertEqual(copiedHistory?.dateRead, dateRead)
+
+        let updates = LegacyMangaMigrationEngine.migratedUpdateEntries(
+            current: [
+                LegacyUpdateEntry(
+                    sourceKey: oldSource.key,
+                    sourceName: oldSource.name,
+                    manga: oldManga,
+                    chapter: oldManga.chapters![0],
+                    dateFound: dateFound
+                )
+            ],
+            fromSourceKey: oldSource.key,
+            fromMangaKey: oldManga.key,
+            toSource: newSource,
+            toManga: newManga,
+            keepOriginal: true
+        )
+        XCTAssertEqual(updates.count, 2)
+        let copiedUpdate = updates.first { $0.sourceKey == newSource.key && $0.manga.key == newManga.key }
+        XCTAssertEqual(copiedUpdate?.chapter.key, "new-c1")
+        XCTAssertEqual(copiedUpdate?.dateFound, dateFound)
+    }
+
+    func testMangaMigrationMoveRekeysTrackerEntriesAndDropsOriginal() {
+        let original = LegacyTrackEntry(
+            sourceKey: "old.source",
+            mangaKey: "old-manga",
+            trackerId: .anilist,
+            remoteId: 123,
+            status: .reading,
+            lastReadChapter: 12,
+            score: 80,
+            totalChapters: 24
+        )
+        let staleTarget = LegacyTrackEntry(
+            sourceKey: "new.source",
+            mangaKey: "new-manga",
+            trackerId: .anilist,
+            remoteId: 999
+        )
+        let targetOtherTracker = LegacyTrackEntry(
+            sourceKey: "new.source",
+            mangaKey: "new-manga",
+            trackerId: .myanimelist,
+            remoteId: 777
+        )
+        let unrelated = LegacyTrackEntry(
+            sourceKey: "other.source",
+            mangaKey: "other-manga",
+            trackerId: .myanimelist,
+            remoteId: 456
+        )
+
+        let entries = LegacyMangaMigrationEngine.migratedTrackEntries(
+            current: [original, staleTarget, targetOtherTracker, unrelated],
+            fromSourceKey: "old.source",
+            fromMangaKey: "old-manga",
+            toSourceKey: "new.source",
+            toMangaKey: "new-manga",
+            keepOriginal: false
+        )
+
+        XCTAssertFalse(entries.contains { $0.sourceKey == "old.source" && $0.mangaKey == "old-manga" })
+        XCTAssertTrue(entries.contains(unrelated))
+        XCTAssertTrue(entries.contains(targetOtherTracker))
+        let migrated = entries.first { $0.sourceKey == "new.source" && $0.mangaKey == "new-manga" }
+        XCTAssertEqual(migrated?.remoteId, 123)
+        XCTAssertEqual(migrated?.lastReadChapter, 12)
+        XCTAssertEqual(migrated?.score, 80)
+        XCTAssertEqual(
+            entries.filter { $0.trackerId == .anilist && $0.sourceKey == "new.source" && $0.mangaKey == "new-manga" }.count,
+            1
+        )
+    }
+
     func testDownloadedChapterRoundTripAndKey() throws {
         let chapter = LegacyDownloadedChapter(
             sourceKey: "s",

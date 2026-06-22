@@ -2959,6 +2959,198 @@ final class LegacyUpdateStore {
     }
 }
 
+enum LegacyMangaMigrationMode: Equatable {
+    case copy
+    case migrate
+}
+
+enum LegacyMangaMigrationEngine {
+    static func apply(
+        fromSource: AidokuRunnerLegacySource,
+        fromManga: AidokuRunnerLegacyManga,
+        toSource: AidokuRunnerLegacySource,
+        toManga: AidokuRunnerLegacyManga,
+        mode: LegacyMangaMigrationMode,
+        now: Date = Date()
+    ) {
+        let normalizedTargetManga = normalizedManga(toManga, sourceKey: toSource.key)
+        let shouldKeepOriginal = mode == .copy
+
+        LegacyLibraryStore.shared.replace(migratedLibraryEntries(
+            current: LegacyLibraryStore.shared.rawEntries,
+            fromSourceKey: fromSource.key,
+            fromMangaKey: fromManga.key,
+            toSource: toSource,
+            toManga: normalizedTargetManga,
+            keepOriginal: shouldKeepOriginal,
+            now: now
+        ))
+        LegacyHistoryStore.shared.replace(migratedHistoryEntries(
+            current: LegacyHistoryStore.shared.entries,
+            fromSourceKey: fromSource.key,
+            fromMangaKey: fromManga.key,
+            toSource: toSource,
+            toManga: normalizedTargetManga,
+            keepOriginal: shouldKeepOriginal
+        ))
+        LegacyUpdateStore.shared.replace(migratedUpdateEntries(
+            current: LegacyUpdateStore.shared.entries,
+            fromSourceKey: fromSource.key,
+            fromMangaKey: fromManga.key,
+            toSource: toSource,
+            toManga: normalizedTargetManga,
+            keepOriginal: shouldKeepOriginal
+        ))
+        LegacyTrackerStore.shared.replace(migratedTrackEntries(
+            current: LegacyTrackerStore.shared.entries,
+            fromSourceKey: fromSource.key,
+            fromMangaKey: fromManga.key,
+            toSourceKey: toSource.key,
+            toMangaKey: normalizedTargetManga.key,
+            keepOriginal: shouldKeepOriginal
+        ))
+    }
+
+    static func migratedLibraryEntries(
+        current: [LegacyLibraryEntry],
+        fromSourceKey: String,
+        fromMangaKey: String,
+        toSource: AidokuRunnerLegacySource,
+        toManga: AidokuRunnerLegacyManga,
+        keepOriginal: Bool,
+        now: Date
+    ) -> [LegacyLibraryEntry] {
+        let sourceEntry = current.first { $0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey }
+        let categories = sourceEntry?.displayCategories ?? LegacyCategoryStore.shared.defaultCategoriesForNewEntry()
+        var next = current.filter {
+            !($0.sourceKey == toSource.key && $0.manga.key == toManga.key)
+                && (keepOriginal || !($0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey))
+        }
+        next.insert(
+            LegacyLibraryEntry(
+                sourceKey: toSource.key,
+                sourceName: toSource.name,
+                manga: normalizedManga(toManga, sourceKey: toSource.key),
+                dateAdded: sourceEntry?.dateAdded ?? now,
+                category: categories.first,
+                categories: categories
+            ),
+            at: 0
+        )
+        return next
+    }
+
+    static func migratedHistoryEntries(
+        current: [LegacyHistoryEntry],
+        fromSourceKey: String,
+        fromMangaKey: String,
+        toSource: AidokuRunnerLegacySource,
+        toManga: AidokuRunnerLegacyManga,
+        keepOriginal: Bool
+    ) -> [LegacyHistoryEntry] {
+        let targetManga = normalizedManga(toManga, sourceKey: toSource.key)
+        let targetChapters = targetManga.chapters ?? []
+        let matching = current.filter { $0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey }
+        var next = current.filter {
+            !($0.sourceKey == toSource.key && $0.manga.key == targetManga.key)
+                && (keepOriginal || !($0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey))
+        }
+        let migrated = matching.map { entry -> LegacyHistoryEntry in
+            LegacyHistoryEntry(
+                sourceKey: toSource.key,
+                sourceName: toSource.name,
+                manga: targetManga,
+                chapter: bestMatchingChapter(for: entry.chapter, in: targetChapters),
+                pageIndex: entry.pageIndex,
+                pageCount: entry.pageCount,
+                dateRead: entry.dateRead
+            )
+        }
+        next.insert(contentsOf: migrated, at: 0)
+        return next
+    }
+
+    static func migratedUpdateEntries(
+        current: [LegacyUpdateEntry],
+        fromSourceKey: String,
+        fromMangaKey: String,
+        toSource: AidokuRunnerLegacySource,
+        toManga: AidokuRunnerLegacyManga,
+        keepOriginal: Bool
+    ) -> [LegacyUpdateEntry] {
+        let targetManga = normalizedManga(toManga, sourceKey: toSource.key)
+        let targetChapters = targetManga.chapters ?? []
+        let matching = current.filter { $0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey }
+        var next = current.filter {
+            !($0.sourceKey == toSource.key && $0.manga.key == targetManga.key)
+                && (keepOriginal || !($0.sourceKey == fromSourceKey && $0.manga.key == fromMangaKey))
+        }
+        let migrated = matching.map { entry -> LegacyUpdateEntry in
+            LegacyUpdateEntry(
+                sourceKey: toSource.key,
+                sourceName: toSource.name,
+                manga: targetManga,
+                chapter: bestMatchingChapter(for: entry.chapter, in: targetChapters),
+                dateFound: entry.dateFound
+            )
+        }
+        next.insert(contentsOf: migrated, at: 0)
+        return next
+    }
+
+    static func migratedTrackEntries(
+        current: [LegacyTrackEntry],
+        fromSourceKey: String,
+        fromMangaKey: String,
+        toSourceKey: String,
+        toMangaKey: String,
+        keepOriginal: Bool
+    ) -> [LegacyTrackEntry] {
+        let matching = current.filter { $0.sourceKey == fromSourceKey && $0.mangaKey == fromMangaKey }
+        let migratedTrackerIds = Set(matching.map { $0.trackerId })
+        var next = current.filter {
+            !(migratedTrackerIds.contains($0.trackerId) && $0.sourceKey == toSourceKey && $0.mangaKey == toMangaKey)
+                && (keepOriginal || !($0.sourceKey == fromSourceKey && $0.mangaKey == fromMangaKey))
+        }
+        let migrated = matching.map { entry -> LegacyTrackEntry in
+            var updated = entry
+            updated.sourceKey = toSourceKey
+            updated.mangaKey = toMangaKey
+            return updated
+        }
+        next.insert(contentsOf: migrated, at: 0)
+        return next
+    }
+
+    private static func normalizedManga(_ manga: AidokuRunnerLegacyManga, sourceKey: String) -> AidokuRunnerLegacyManga {
+        var target = manga
+        target.sourceKey = sourceKey
+        return target
+    }
+
+    private static func bestMatchingChapter(
+        for chapter: AidokuRunnerLegacyChapter,
+        in candidates: [AidokuRunnerLegacyChapter]
+    ) -> AidokuRunnerLegacyChapter {
+        guard !candidates.isEmpty else { return chapter }
+        if let match = candidates.first(where: { $0.key == chapter.key }) {
+            return match
+        }
+        if let chapterNumber = chapter.chapterNumber,
+           let match = candidates.first(where: { $0.chapterNumber == chapterNumber }) {
+            return match
+        }
+        let title = chapter.title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let title = title, !title.isEmpty,
+           let match = candidates.first(where: {
+               $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == title
+           }) {
+            return match
+        }
+        return chapter
+    }
+}
+
 struct LegacyDownloadedChapter: Codable, Hashable {
     var sourceKey: String
     var sourceName: String
@@ -7814,6 +8006,327 @@ extension LegacyBatchMangaSearchViewController: UISearchResultsUpdating {
     }
 }
 
+final class LegacyMangaMigrationViewController: UITableViewController {
+    private struct Section {
+        let source: AidokuRunnerLegacySource
+        var entries: [AidokuRunnerLegacyManga]
+        var error: String?
+    }
+
+    private let source: AidokuRunnerLegacySource
+    private let manga: AidokuRunnerLegacyManga
+    private let sources: [AidokuRunnerLegacySource]
+    private let searchController = UISearchController(searchResultsController: nil)
+    private var searchDebounceTimer: Timer?
+    private var sections: [Section] = []
+    private var isLoading = false
+    private var message = LegacyString("migration.search.empty_term")
+
+    init(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
+        self.source = source
+        self.manga = manga
+        self.sources = AidokuRunnerLegacyPackageInstaller()
+            .loadInstalledSources()
+            .filter { $0.key != source.key }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        super.init(style: .plain)
+        title = LegacyString("migration.title")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.largeTitleDisplayMode = .never
+        view.backgroundColor = LegacyPalette.background
+        tableView.backgroundColor = LegacyPalette.background
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+        tableView.rowHeight = 86
+        searchController.searchBar.placeholder = LegacyString("migration.search.placeholder")
+        searchController.searchBar.text = manga.title
+        searchController.searchBar.delegate = self
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+        search(query: manga.title)
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.isEmpty ? 1 : sections.count
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        guard !sections.isEmpty else { return 1 }
+        let section = sections[section]
+        if !section.entries.isEmpty { return section.entries.count }
+        return section.error == nil ? 0 : 1
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard !sections.isEmpty else { return nil }
+        let section = sections[section]
+        let count = section.entries.count
+        return count == 0 ? section.source.name : String(format: LegacyString("migration.section.count"), section.source.name, count)
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "MigrationSearchCell")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "MigrationSearchCell")
+        cell.backgroundColor = LegacyPalette.panel
+        cell.textLabel?.textColor = LegacyPalette.primaryText
+        cell.detailTextLabel?.textColor = LegacyPalette.secondaryText
+        cell.detailTextLabel?.numberOfLines = 2
+
+        guard !sections.isEmpty else {
+            cell.imageView?.image = nil
+            cell.textLabel?.text = isLoading ? LegacyString("migration.search.searching") : message
+            cell.detailTextLabel?.text = nil
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let section = sections[indexPath.section]
+        guard !section.entries.isEmpty else {
+            cell.imageView?.image = nil
+            cell.textLabel?.text = LegacyString("migration.search.failed")
+            cell.detailTextLabel?.text = section.error
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+
+        let result = section.entries[indexPath.row]
+        cell.imageView?.image = LegacyImageLoader.placeholder()
+        LegacyImageLoader.shared.loadCover(
+            urls: result.coverURLCandidates(relativeTo: section.source.urls.first),
+            source: section.source,
+            targetHeight: 130
+        ) { image in
+            guard
+                let visibleIndexPath = tableView.indexPath(for: cell),
+                visibleIndexPath == indexPath
+            else { return }
+            cell.imageView?.image = image ?? LegacyImageLoader.placeholder()
+            cell.setNeedsLayout()
+        }
+        cell.textLabel?.text = result.title
+        cell.detailTextLabel?.text = result.legacySummaryText ?? section.source.name
+        cell.accessoryType = .disclosureIndicator
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard !sections.isEmpty, sections[indexPath.section].entries.indices.contains(indexPath.row) else { return }
+        let section = sections[indexPath.section]
+        let targetManga = section.entries[indexPath.row]
+        presentActions(targetSource: section.source, targetManga: targetManga, sourceView: tableView.cellForRow(at: indexPath))
+    }
+
+    private func presentActions(
+        targetSource: AidokuRunnerLegacySource,
+        targetManga: AidokuRunnerLegacyManga,
+        sourceView: UIView?
+    ) {
+        let alert = UIAlertController(title: targetManga.title, message: targetSource.name, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: LegacyString("migration.copy"), style: .default) { [weak self] _ in
+            self?.loadAndApply(targetSource: targetSource, targetManga: targetManga, mode: .copy)
+        })
+        alert.addAction(UIAlertAction(title: LegacyString("migration.migrate"), style: .default) { [weak self] _ in
+            self?.loadAndApply(targetSource: targetSource, targetManga: targetManga, mode: .migrate)
+        })
+        alert.addAction(UIAlertAction(title: LegacyString("migration.show_entry"), style: .default) { [weak self] _ in
+            self?.showEntry(source: targetSource, manga: targetManga)
+        })
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sourceView ?? view
+            popover.sourceRect = (sourceView ?? view).bounds
+        }
+        present(alert, animated: true)
+    }
+
+    private func loadAndApply(
+        targetSource: AidokuRunnerLegacySource,
+        targetManga: AidokuRunnerLegacyManga,
+        mode: LegacyMangaMigrationMode
+    ) {
+        navigationItem.prompt = LegacyString("migration.loading_details")
+        targetSource.runner.getMangaUpdate(manga: targetManga, needsDetails: true, needsChapters: true) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.navigationItem.prompt = nil
+                switch result {
+                    case .success(let updatedManga):
+                        let mergedManga = targetManga.mergedWithUpdate(updatedManga)
+                        LegacyMangaMigrationEngine.apply(
+                            fromSource: self.source,
+                            fromManga: self.manga,
+                            toSource: targetSource,
+                            toManga: mergedManga,
+                            mode: mode
+                        )
+                        self.presentCompletion(mode: mode, targetSource: targetSource, targetManga: mergedManga)
+                    case .failure(let error):
+                        self.showAlert(title: LegacyString("migration.failed.title"), message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func presentCompletion(
+        mode: LegacyMangaMigrationMode,
+        targetSource: AidokuRunnerLegacySource,
+        targetManga: AidokuRunnerLegacyManga
+    ) {
+        let title = mode == .copy
+            ? LegacyString("migration.copied.title")
+            : LegacyString("migration.completed.title")
+        let message = mode == .copy
+            ? LegacyString("migration.copied.message")
+            : LegacyString("migration.completed.message")
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: LegacyString("migration.show_entry"), style: .default) { [weak self] _ in
+            self?.showEntryAfterCompletion(mode: mode, source: targetSource, manga: targetManga)
+        })
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default) { [weak self] _ in
+            if mode == .migrate {
+                self?.replaceCurrentFlowWithTarget(source: targetSource, manga: targetManga)
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func showEntryAfterCompletion(
+        mode: LegacyMangaMigrationMode,
+        source: AidokuRunnerLegacySource,
+        manga: AidokuRunnerLegacyManga
+    ) {
+        if mode == .migrate {
+            replaceCurrentFlowWithTarget(source: source, manga: manga)
+        } else {
+            showEntry(source: source, manga: manga)
+        }
+    }
+
+    private func showEntry(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
+        navigationController?.pushViewController(
+            LegacyMangaDetailViewController(source: source, manga: manga),
+            animated: true
+        )
+    }
+
+    private func replaceCurrentFlowWithTarget(source: AidokuRunnerLegacySource, manga: AidokuRunnerLegacyManga) {
+        guard let navigationController = navigationController else { return }
+        var controllers = navigationController.viewControllers
+        if !controllers.isEmpty {
+            controllers.removeLast()
+        }
+        if !controllers.isEmpty {
+            controllers.removeLast()
+        }
+        controllers.append(LegacyMangaDetailViewController(source: source, manga: manga))
+        navigationController.setViewControllers(controllers, animated: true)
+    }
+
+    private func search(query: String) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.count >= 2 else {
+            sections = []
+            isLoading = false
+            message = trimmedQuery.isEmpty ? LegacyString("migration.search.empty_term") : LegacyString("migration.search.keep_typing")
+            tableView.reloadData()
+            return
+        }
+        guard !sources.isEmpty else {
+            sections = []
+            isLoading = false
+            message = LegacyString("migration.no_sources")
+            tableView.reloadData()
+            return
+        }
+
+        isLoading = true
+        sections = []
+        message = LegacyString("migration.search.searching")
+        tableView.reloadData()
+
+        let currentQuery = trimmedQuery
+        let group = DispatchGroup()
+        var collected: [Section] = []
+        let lock = NSLock()
+
+        for source in sources {
+            group.enter()
+            source.runner.getSearchMangaList(query: currentQuery, page: 1, filters: []) { result in
+                let section: Section?
+                switch result {
+                    case .success(let page):
+                        section = page.entries.isEmpty ? nil : Section(source: source, entries: page.entries, error: nil)
+                    case .failure(let error):
+                        section = Section(source: source, entries: [], error: error.localizedDescription)
+                }
+                if let section = section {
+                    lock.lock()
+                    collected.append(section)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self = self else { return }
+            let latestQuery = self.searchController.searchBar.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard latestQuery == currentQuery else { return }
+            self.sections = collected.sorted { lhs, rhs in
+                lhs.source.name.localizedCaseInsensitiveCompare(rhs.source.name) == .orderedAscending
+            }
+            self.isLoading = false
+            self.message = self.sections.isEmpty ? LegacyString("migration.search.no_results") : ""
+            self.tableView.reloadData()
+        }
+    }
+
+    private func showAlert(title: String, message: String?) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
+        present(alert, animated: true)
+    }
+}
+
+extension LegacyMangaMigrationViewController: UISearchBarDelegate {
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+        search(query: searchBar.text ?? "")
+    }
+}
+
+extension LegacyMangaMigrationViewController: UISearchResultsUpdating {
+    func updateSearchResults(for searchController: UISearchController) {
+        searchDebounceTimer?.invalidate()
+        let query = searchController.searchBar.text ?? ""
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.count >= 2 else {
+            sections = []
+            isLoading = false
+            message = trimmedQuery.isEmpty ? LegacyString("migration.search.empty_term") : LegacyString("migration.search.keep_typing")
+            tableView.reloadData()
+            return
+        }
+        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) { [weak self] _ in
+            self?.search(query: query)
+        }
+    }
+}
+
 final class LegacySourceMenuViewController: UITableViewController {
     private enum Row {
         case home
@@ -10591,6 +11104,9 @@ final class LegacyMangaDetailViewController: UITableViewController {
         alert.addAction(UIAlertAction(title: "Download", style: .default) { [weak self] _ in
             self?.showDownloadOptions()
         })
+        alert.addAction(UIAlertAction(title: LegacyString("migration.title"), style: .default) { [weak self] _ in
+            self?.openMigration()
+        })
         alert.addAction(UIAlertAction(title: "Share Cover Image", style: .default) { [weak self] _ in
             self?.shareCoverImage(from: sourceView)
         })
@@ -10608,6 +11124,13 @@ final class LegacyMangaDetailViewController: UITableViewController {
             popover.sourceRect = (sourceView ?? view).bounds
         }
         present(alert, animated: true)
+    }
+
+    private func openMigration() {
+        navigationController?.pushViewController(
+            LegacyMangaMigrationViewController(source: source, manga: manga),
+            animated: true
+        )
     }
 
     private func shareCoverImage(from sourceView: UIView?) {
