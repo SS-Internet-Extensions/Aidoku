@@ -571,6 +571,7 @@
 "cover.numbered" = "Cover %d";
 
 /* MARK: - Page actions */
+"page.title" = "Page %d";
 "page.copy_description" = "Copy Description";
 "page.copy_image" = "Copy Image";
 "page.download_image" = "Download Image";

@@ -10317,22 +10317,28 @@ private final class LegacyReaderPageActionPresenter {
         sourceRect: CGRect? = nil
     ) {
         let alert = UIAlertController(
-            title: "Page \(pageIndex + 1)",
+            title: String(format: LegacyString("page.title"), pageIndex + 1),
             message: pageDescription,
             preferredStyle: .actionSheet
         )
         if let pageDescription = pageDescription {
-            alert.addAction(UIAlertAction(title: "Copy Description", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: LegacyString("page.copy_description"), style: .default) { _ in
                 UIPasteboard.general.string = pageDescription
-                viewController.showLegacyReaderAlert(title: "Copied", message: "Page description copied to the clipboard.")
+                viewController.showLegacyReaderAlert(
+                    title: LegacyString("page.copied.title"),
+                    message: LegacyString("page.copied.description")
+                )
             })
         }
         if let image = image {
-            alert.addAction(UIAlertAction(title: "Copy Image", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: LegacyString("page.copy_image"), style: .default) { _ in
                 UIPasteboard.general.image = image
-                viewController.showLegacyReaderAlert(title: "Copied", message: "Page image copied to the clipboard.")
+                viewController.showLegacyReaderAlert(
+                    title: LegacyString("page.copied.title"),
+                    message: LegacyString("page.copied.image")
+                )
             })
-            alert.addAction(UIAlertAction(title: "Download Image", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: LegacyString("page.download_image"), style: .default) { _ in
                 UIImageWriteToSavedPhotosAlbum(
                     image,
                     viewController,
@@ -10340,7 +10346,7 @@ private final class LegacyReaderPageActionPresenter {
                     nil
                 )
             })
-            alert.addAction(UIAlertAction(title: "Share Image", style: .default) { _ in
+            alert.addAction(UIAlertAction(title: LegacyString("page.share_image"), style: .default) { _ in
                 let activity = UIActivityViewController(activityItems: [image], applicationActivities: nil)
                 if let popover = activity.popoverPresentationController {
                     popover.sourceView = sourceView ?? viewController.view
@@ -10349,7 +10355,7 @@ private final class LegacyReaderPageActionPresenter {
                 viewController.present(activity, animated: true)
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             let anchorView: UIView? = sourceView ?? viewController.view
             popover.sourceView = anchorView
@@ -10375,16 +10381,16 @@ private extension UIViewController {
         contextInfo: UnsafeRawPointer
     ) {
         if let error = error {
-            showLegacyReaderAlert(title: "Save Failed", message: error.localizedDescription)
+            showLegacyReaderAlert(title: LegacyString("page.save_failed.title"), message: error.localizedDescription)
         } else {
-            showLegacyReaderAlert(title: "Saved", message: "Page image saved to Photos.")
+            showLegacyReaderAlert(title: LegacyString("page.saved.title"), message: LegacyString("page.saved.message"))
         }
     }
 
     func showLegacyReaderAlert(title: String, message: String) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
@@ -10409,7 +10415,7 @@ final class LegacyChapterDownloadPickerViewController: UITableViewController, UI
         self.filteredChapters = chapters
         self.onSelect = onSelect
         super.init(style: .plain)
-        title = "Download Chapter"
+        title = LegacyString("download.chapter.title")
     }
 
     @available(*, unavailable)
@@ -10424,7 +10430,7 @@ final class LegacyChapterDownloadPickerViewController: UITableViewController, UI
         tableView.estimatedRowHeight = 72
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search chapters"
+        searchController.searchBar.placeholder = LegacyString("chapters.search_placeholder")
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
@@ -12828,7 +12834,10 @@ private final class LegacyReaderViewController: UITableViewController, UIGesture
             self.resolvePageDescription(pageIndex: pageIndex) { [weak self] pageDescription in
                 guard let self = self else { return }
                 guard image != nil || pageDescription != nil else {
-                    self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                    self.showLegacyReaderAlert(
+                        title: LegacyString("page.no_image.title"),
+                        message: LegacyString("page.no_image.message")
+                    )
                     return
                 }
                 LegacyReaderPageActionPresenter.present(
@@ -14008,7 +14017,10 @@ private final class LegacyPagedReaderViewController: UIViewController, UICollect
             self.resolvePageDescription(pageIndex: pageIndex) { [weak self] pageDescription in
                 guard let self = self else { return }
                 guard image != nil || pageDescription != nil else {
-                    self.showLegacyReaderAlert(title: "No Image", message: "This page image is not available yet.")
+                    self.showLegacyReaderAlert(
+                        title: LegacyString("page.no_image.title"),
+                        message: LegacyString("page.no_image.message")
+                    )
                     return
                 }
                 LegacyReaderPageActionPresenter.present(
