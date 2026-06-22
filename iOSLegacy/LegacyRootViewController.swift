@@ -6217,23 +6217,23 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     }
 
     private struct Section {
-        let title: String
+        let titleKey: String
         let rows: [Row]
     }
 
     private let sections: [Section] = [
-        Section(title: "Reader", rows: [.readerMode, .readerColors, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
-        Section(title: "Appearance", rows: [.darkTheme]),
-        Section(title: "Privacy", rows: [.incognitoMode, .privacyShield]),
-        Section(title: "Networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
-        Section(title: "Updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
-        Section(title: "Library", rows: [.readingInsights, .manageCategories, .downloads, .localFiles, .selfHosted, .trackers]),
+        Section(titleKey: "settings.section.reader", rows: [.readerMode, .readerColors, .readerMemory, .readerUpscale, .readerPageNumber, .readerTapZones]),
+        Section(titleKey: "settings.section.appearance", rows: [.darkTheme]),
+        Section(titleKey: "settings.section.privacy", rows: [.incognitoMode, .privacyShield]),
+        Section(titleKey: "settings.section.networking", rows: [.clearCookies, .clearWebViewData, .dnsOverHttps, .defaultUserAgent]),
+        Section(titleKey: "settings.section.updates", rows: [.automaticLibraryUpdates, .automaticSourceUpdates, .updateNotifications]),
+        Section(titleKey: "settings.section.library", rows: [.readingInsights, .manageCategories, .downloads, .localFiles, .selfHosted, .trackers]),
         Section(
-            title: "Backup & Restore",
+            titleKey: "settings.section.backup_restore",
             rows: [.createBackup, .restoreBackup, .importModernBackup, .exportModernBackup, .automaticModernBackups]
         ),
-        Section(title: "Storage", rows: [.clearImageCache, .clearHistory, .clearLibrary]),
-        Section(title: "About", rows: [.about])
+        Section(titleKey: "settings.section.storage", rows: [.clearImageCache, .clearHistory, .clearLibrary]),
+        Section(titleKey: "settings.section.about", rows: [.about])
     ]
 
     private func row(at indexPath: IndexPath) -> Row {
@@ -6253,7 +6253,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Settings"
+        title = LegacyString("settings.title")
         view.backgroundColor = LegacyPalette.background
         tableView.backgroundColor = LegacyPalette.background
         navigationController?.navigationBar.prefersLargeTitles = true
@@ -6269,7 +6269,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        return sections[section].title
+        return LegacyString(sections[section].titleKey)
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -6285,176 +6285,208 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         switch row {
             case .readerMode:
                 let mode = LegacyReaderMode.current
-                cell.textLabel?.text = "Reader Layout"
-                cell.detailTextLabel?.text = "\(mode.title) - \(mode.detail)"
+                cell.textLabel?.text = LegacyString("settings.reader_layout")
+                cell.detailTextLabel?.text = String(format: LegacyString("settings.reader_layout.detail"), mode.title, mode.detail)
             case .readerColors:
-                cell.textLabel?.text = "Reader Colors & Display"
-                cell.detailTextLabel?.text = "Background, brightness, color filter, grayscale, invert."
+                cell.textLabel?.text = LegacyString("settings.reader_colors")
+                cell.detailTextLabel?.text = LegacyString("settings.reader_colors.detail")
             case .readerMemory:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.reader.downsampleImages")
-                cell.textLabel?.text = "Reader Memory Mode"
-                cell.detailTextLabel?.text = enabled ? "Optimized for iPad Air Gen 1" : "Full-size image decoding"
+                cell.textLabel?.text = LegacyString("settings.reader_memory_mode")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.reader_memory_mode.on")
+                    : LegacyString("settings.reader_memory_mode.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .readerUpscale:
                 let enabled = aidokuLegacyReaderUpscaleImages()
                 let detail: String
                 if enabled {
-                    detail = "Sharpen low-resolution pages. Uses more CPU and memory."
+                    detail = LegacyString("settings.reader_upscale.on")
                 } else {
-                    detail = "Use fastest low-memory page decoding."
+                    detail = LegacyString("settings.reader_upscale.off")
                 }
-                cell.textLabel?.text = "Reader Upscale"
+                cell.textLabel?.text = LegacyString("settings.reader_upscale")
                 cell.detailTextLabel?.text = detail
                 cell.accessoryType = enabled ? .checkmark : .none
             case .readerPageNumber:
                 let enabled = aidokuLegacyReaderShowsPageNumber()
-                cell.textLabel?.text = "Reader Page Number"
-                cell.detailTextLabel?.text = enabled ? "Show page count in the reader." : "Hide page count in the reader."
+                cell.textLabel?.text = LegacyString("settings.reader_page_number")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.reader_page_number.on")
+                    : LegacyString("settings.reader_page_number.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .readerTapZones:
                 let enabled = aidokuLegacyReaderShowsTapZones()
-                cell.textLabel?.text = "Tap Zones Overlay"
-                cell.detailTextLabel?.text = enabled ? "Briefly show previous and next tap zones." : "Do not show tap zone hints."
+                cell.textLabel?.text = LegacyString("settings.tap_zones_overlay")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.tap_zones_overlay.on")
+                    : LegacyString("settings.tap_zones_overlay.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .darkTheme:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.appearance.darkTheme")
-                cell.textLabel?.text = "Dark Theme"
-                cell.detailTextLabel?.text = enabled ? "Use dark lists and navigation bars" : "Use the light legacy theme"
+                cell.textLabel?.text = LegacyString("settings.dark_theme")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.dark_theme.on")
+                    : LegacyString("settings.dark_theme.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .incognitoMode:
                 let enabled = aidokuLegacyIncognitoEnabled()
-                cell.textLabel?.text = "Incognito Mode"
+                cell.textLabel?.text = LegacyString("settings.incognito_mode")
                 cell.detailTextLabel?.text = enabled
-                    ? "Reading does not update history, insights, resume, or trackers."
-                    : "Reading updates history, insights, resume, and trackers."
+                    ? LegacyString("settings.incognito_mode.on")
+                    : LegacyString("settings.incognito_mode.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .privacyShield:
                 let enabled = aidokuLegacyPrivacyShieldEnabled()
-                cell.textLabel?.text = "Privacy Shield"
+                cell.textLabel?.text = LegacyString("settings.privacy_shield")
                 cell.detailTextLabel?.text = enabled
-                    ? "Hide app contents in the app switcher."
-                    : "Show app contents in the app switcher."
+                    ? LegacyString("settings.privacy_shield.on")
+                    : LegacyString("settings.privacy_shield.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .clearCookies:
-                cell.textLabel?.text = "Clear Cookies"
-                cell.detailTextLabel?.text = "Remove saved source and web view login cookies."
+                cell.textLabel?.text = LegacyString("settings.clear_cookies")
+                cell.detailTextLabel?.text = LegacyString("settings.clear_cookies.detail")
                 cell.accessoryType = .none
             case .clearWebViewData:
-                cell.textLabel?.text = "Clear Web View Data"
-                cell.detailTextLabel?.text = "Remove web view cache, storage, and cookies."
+                cell.textLabel?.text = LegacyString("settings.clear_web_view_data")
+                cell.detailTextLabel?.text = LegacyString("settings.clear_web_view_data.detail")
                 cell.accessoryType = .none
             case .dnsOverHttps:
-                cell.textLabel?.text = "DNS over HTTPS"
+                cell.textLabel?.text = LegacyString("settings.dns_over_https")
                 cell.detailTextLabel?.text = LegacyNetworkSettings.dohEnabled
-                    ? "On - \(LegacyNetworkSettings.dohProviderDisplayName)"
-                    : "Off - use system DNS for source requests."
+                    ? String(format: LegacyString("settings.dns_over_https.on"), LegacyNetworkSettings.dohProviderDisplayName)
+                    : LegacyString("settings.dns_over_https.off")
             case .defaultUserAgent:
-                cell.textLabel?.text = "Default User Agent"
+                cell.textLabel?.text = LegacyString("settings.default_user_agent")
                 cell.detailTextLabel?.text = LegacyNetworkSettings.defaultUserAgent
             case .automaticLibraryUpdates:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.library.automaticUpdates")
-                cell.textLabel?.text = "Automatic Library Updates"
-                cell.detailTextLabel?.text = enabled ? "Fetch manga details and chapters when Library opens" : "Update saved manga manually"
+                cell.textLabel?.text = LegacyString("settings.auto_library_updates")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.auto_library_updates.on")
+                    : LegacyString("settings.auto_library_updates.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .automaticSourceUpdates:
                 let enabled = UserDefaults.standard.bool(forKey: "AidokuLegacy.sources.automaticUpdates")
-                cell.textLabel?.text = "Automatic Source Updates"
-                cell.detailTextLabel?.text = enabled ? "Install source package updates when the app opens" : "Update installed sources manually"
+                cell.textLabel?.text = LegacyString("settings.auto_source_updates")
+                cell.detailTextLabel?.text = enabled
+                    ? LegacyString("settings.auto_source_updates.on")
+                    : LegacyString("settings.auto_source_updates.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .updateNotifications:
                 let enabled = LegacyUpdateNotificationManager.shared.isEnabled
-                cell.textLabel?.text = "Update Notifications"
+                cell.textLabel?.text = LegacyString("settings.update_notifications")
                 cell.detailTextLabel?.text = enabled
-                    ? "Notify when a library update finds new chapters."
-                    : "Do not send library update notifications."
+                    ? LegacyString("settings.update_notifications.on")
+                    : LegacyString("settings.update_notifications.off")
                 cell.accessoryType = enabled ? .checkmark : .none
             case .readingInsights:
                 let total = LegacyReadingStatsStore.shared.totalChapters
-                cell.textLabel?.text = "Reading Insights"
+                cell.textLabel?.text = LegacyString("settings.reading_insights")
                 cell.detailTextLabel?.text = total == 0
-                    ? "Track chapters read, active days, and streaks."
-                    : (total == 1 ? "1 chapter read all-time" : "\(total) chapters read all-time")
+                    ? LegacyString("settings.reading_insights.zero")
+                    : (total == 1
+                        ? LegacyString("settings.reading_insights.one")
+                        : String(format: LegacyString("settings.reading_insights.many"), total))
             case .manageCategories:
                 let count = LegacyCategoryStore.shared.categories.count
-                cell.textLabel?.text = "Library Categories"
+                cell.textLabel?.text = LegacyString("settings.library_categories")
                 let defaultCategory = LegacyCategoryStore.shared.defaultCategory
                 if count == 0 {
-                    cell.detailTextLabel?.text = "Create categories, set a default, and per-category sort."
+                    cell.detailTextLabel?.text = LegacyString("settings.library_categories.zero")
                 } else {
-                    let base = count == 1 ? "1 category" : "\(count) categories"
-                    cell.detailTextLabel?.text = defaultCategory.isEmpty ? base : "\(base) - Default: \(defaultCategory)"
+                    let base = count == 1
+                        ? LegacyString("settings.library_categories.one")
+                        : String(format: LegacyString("settings.library_categories.many"), count)
+                    cell.detailTextLabel?.text = defaultCategory.isEmpty
+                        ? base
+                        : String(format: LegacyString("settings.library_categories.default"), base, defaultCategory)
                 }
             case .downloads:
                 let count = LegacyDownloadStore.shared.downloadedChapters.count
-                cell.textLabel?.text = "Downloads"
-                var details = [count == 1 ? "1 downloaded chapter" : "\(count) downloaded chapters"]
+                cell.textLabel?.text = LegacyString("settings.downloads")
+                var details = [
+                    count == 1
+                        ? LegacyString("settings.downloads.one")
+                        : String(format: LegacyString("settings.downloads.many"), count)
+                ]
                 if aidokuLegacyDownloadsDeleteAfterReading() {
-                    details.append("delete after reading")
+                    details.append(LegacyString("settings.downloads.delete_after_reading"))
                 }
                 if aidokuLegacyDownloadsDownloadNextUnreadAfterReading() {
-                    details.append("download next unread")
+                    details.append(LegacyString("settings.downloads.download_next_unread"))
                 }
-                cell.detailTextLabel?.text = details.joined(separator: " - ")
+                cell.detailTextLabel?.text = details.joined(separator: LegacyString("settings.detail_separator"))
             case .localFiles:
                 let count = LegacyLocalFileStore.shared.mangaList.count
-                cell.textLabel?.text = "Local Files"
+                cell.textLabel?.text = LegacyString("settings.local_files")
                 cell.detailTextLabel?.text = count == 0
-                    ? "Import .cbz, .zip, or .pdf files to read offline."
-                    : (count == 1 ? "1 imported item" : "\(count) imported items")
+                    ? LegacyString("settings.local_files.zero")
+                    : (count == 1
+                        ? LegacyString("settings.local_files.one")
+                        : String(format: LegacyString("settings.local_files.many"), count))
             case .selfHosted:
                 let count = LegacyKomgaServerStore.shared.servers.count
-                cell.textLabel?.text = "Self-Hosted Servers"
+                cell.textLabel?.text = LegacyString("settings.self_hosted")
                 cell.detailTextLabel?.text = count == 0
-                    ? "Add a Komga or Kavita server to browse and read."
-                    : (count == 1 ? "1 server configured" : "\(count) servers configured")
+                    ? LegacyString("settings.self_hosted.zero")
+                    : (count == 1
+                        ? LegacyString("settings.self_hosted.one")
+                        : String(format: LegacyString("settings.self_hosted.many"), count))
             case .trackers:
-                cell.textLabel?.text = "Trackers"
+                cell.textLabel?.text = LegacyString("settings.trackers")
                 let connected = LegacyTrackerManager.shared.loggedInTrackers
                 if connected.isEmpty {
-                    cell.detailTextLabel?.text = "Connect AniList or MyAnimeList to sync progress."
+                    cell.detailTextLabel?.text = LegacyString("settings.trackers.empty")
                 } else {
-                    cell.detailTextLabel?.text = connected.map { $0.displayName }.joined(separator: ", ") + " connected."
+                    cell.detailTextLabel?.text = String(
+                        format: LegacyString("settings.trackers.connected"),
+                        connected.map { $0.displayName }.joined(separator: ", ")
+                    )
                 }
             case .createBackup:
-                cell.textLabel?.text = "Create Backup"
-                cell.detailTextLabel?.text = "Export library, history, updates, repos, and legacy settings."
+                cell.textLabel?.text = LegacyString("settings.create_backup")
+                cell.detailTextLabel?.text = LegacyString("settings.create_backup.detail")
             case .restoreBackup:
-                cell.textLabel?.text = "Restore Backup"
-                cell.detailTextLabel?.text = "Import a legacy JSON backup file."
+                cell.textLabel?.text = LegacyString("settings.restore_backup")
+                cell.detailTextLabel?.text = LegacyString("settings.restore_backup.detail")
             case .importModernBackup:
-                cell.textLabel?.text = "Import Modern Backup"
-                cell.detailTextLabel?.text = "Merge a modern Aidoku backup (.json) into the library."
+                cell.textLabel?.text = LegacyString("settings.import_modern_backup")
+                cell.detailTextLabel?.text = LegacyString("settings.import_modern_backup.detail")
             case .exportModernBackup:
-                cell.textLabel?.text = "Export Modern Backup"
-                cell.detailTextLabel?.text = "Save a modern Aidoku backup that newer apps can read."
+                cell.textLabel?.text = LegacyString("settings.export_modern_backup")
+                cell.detailTextLabel?.text = LegacyString("settings.export_modern_backup.detail")
             case .automaticModernBackups:
                 let scheduler = LegacyModernAutomaticBackupScheduler.shared
-                cell.textLabel?.text = "Automatic Modern Backups"
+                cell.textLabel?.text = LegacyString("settings.automatic_modern_backups")
                 if scheduler.isEnabled {
                     if let lastBackupDate = scheduler.lastBackupDate {
                         let formatter = DateFormatter()
                         formatter.dateStyle = .medium
                         formatter.timeStyle = .short
-                        cell.detailTextLabel?.text = "Daily on launch/background. Last: \(formatter.string(from: lastBackupDate))"
+                        cell.detailTextLabel?.text = String(
+                            format: LegacyString("settings.automatic_modern_backups.last"),
+                            formatter.string(from: lastBackupDate)
+                        )
                     } else {
-                        cell.detailTextLabel?.text = "Daily on launch/background. First backup pending."
+                        cell.detailTextLabel?.text = LegacyString("settings.automatic_modern_backups.pending")
                     }
                 } else {
-                    cell.detailTextLabel?.text = "Off - create modern backups manually."
+                    cell.detailTextLabel?.text = LegacyString("settings.automatic_modern_backups.off")
                 }
                 cell.accessoryType = scheduler.isEnabled ? .checkmark : .none
             case .clearImageCache:
-                cell.textLabel?.text = "Clear Image Cache"
-                cell.detailTextLabel?.text = "Remove cached covers and reader pages."
+                cell.textLabel?.text = LegacyString("settings.clear_image_cache")
+                cell.detailTextLabel?.text = LegacyString("settings.clear_image_cache.detail")
             case .clearHistory:
-                cell.textLabel?.text = "Clear History"
-                cell.detailTextLabel?.text = "Remove local reading progress."
+                cell.textLabel?.text = LegacyString("settings.clear_history")
+                cell.detailTextLabel?.text = LegacyString("settings.clear_history.detail")
             case .clearLibrary:
-                cell.textLabel?.text = "Clear Library"
-                cell.detailTextLabel?.text = "Remove saved manga from Aidoku Legacy."
+                cell.textLabel?.text = LegacyString("settings.clear_library")
+                cell.detailTextLabel?.text = LegacyString("settings.clear_library.detail")
             case .about:
-                cell.textLabel?.text = "Aidoku Legacy"
-                cell.detailTextLabel?.text = "iOS 12 personal-use reader with AidokuRunnerLegacy."
+                cell.textLabel?.text = LegacyString("settings.about.title")
+                cell.detailTextLabel?.text = LegacyString("settings.about.detail")
         }
         return cell
     }
@@ -6562,22 +6594,22 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             }
             present(controller, animated: true)
         } catch {
-            showAlert(title: "Backup Failed", message: error.localizedDescription)
+            showAlert(title: LegacyString("backup.failed.title"), message: error.localizedDescription)
         }
     }
 
     private func showRestoreOptions(from indexPath: IndexPath) {
         let backups = LegacyBackupManager.shared.backupURLs()
-        let alert = UIAlertController(title: "Restore Backup", message: nil, preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: LegacyString("backup.restore.title"), message: nil, preferredStyle: .actionSheet)
         if let latest = backups.first {
-            alert.addAction(UIAlertAction(title: "Restore Latest Local Backup", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("backup.restore_latest"), style: .default) { [weak self] _ in
                 self?.confirmRestore(url: latest)
             })
         }
-        alert.addAction(UIAlertAction(title: "Import Backup File", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("backup.import_file"), style: .default) { [weak self] _ in
             self?.openBackupPicker()
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             if let cell = tableView.cellForRow(at: indexPath) {
                 popover.sourceView = cell
@@ -6617,12 +6649,16 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                 case .success(let summary):
                     self.tableView.reloadData()
                     self.showAlert(
-                        title: "Backup Imported",
-                        message: "Added \(summary.libraryAdded) library, \(summary.historyAdded) history, "
-                            + "and \(summary.updatesAdded) update entries."
+                        title: LegacyString("backup.imported.title"),
+                        message: String(
+                            format: LegacyString("backup.imported.message"),
+                            summary.libraryAdded,
+                            summary.historyAdded,
+                            summary.updatesAdded
+                        )
                     )
                 case .failure(let error):
-                    self.showAlert(title: "Import Failed", message: error.localizedDescription)
+                    self.showAlert(title: LegacyString("backup.import_failed.title"), message: error.localizedDescription)
             }
         }
     }
@@ -6639,7 +6675,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
                     }
                     self.present(controller, animated: true)
                 case .failure(let error):
-                    self.showAlert(title: "Export Failed", message: error.localizedDescription)
+                    self.showAlert(title: LegacyString("backup.export_failed.title"), message: error.localizedDescription)
             }
         }
     }
@@ -6714,8 +6750,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             manager.requestAuthorization { [weak self] granted in
                 if !granted {
                     self?.showAlert(
-                        title: "Notifications Disabled",
-                        message: "Enable notifications for Aidoku Legacy in the Settings app to receive update alerts."
+                        title: LegacyString("settings.notifications_disabled.title"),
+                        message: LegacyString("settings.notifications_disabled.message")
                     )
                 }
                 self?.tableView.reloadRows(at: [indexPath], with: .automatic)
@@ -6814,12 +6850,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func confirmRestore(url: URL) {
         let alert = UIAlertController(
-            title: "Restore Backup",
-            message: "This replaces the local legacy library, history, updates, repositories, and settings.",
+            title: LegacyString("backup.restore.title"),
+            message: LegacyString("backup.restore.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Restore", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.restore"), style: .destructive) { [weak self] _ in
             self?.restoreBackup(url: url)
         })
         present(alert, animated: true)
@@ -6829,9 +6865,9 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         do {
             try LegacyBackupManager.shared.restore(from: url)
             tableView.reloadData()
-            showAlert(title: "Backup Restored", message: "Restart the app if a source setting does not refresh immediately.")
+            showAlert(title: LegacyString("backup.restored.title"), message: LegacyString("backup.restored.message"))
         } catch {
-            showAlert(title: "Restore Failed", message: error.localizedDescription)
+            showAlert(title: LegacyString("backup.restore_failed.title"), message: error.localizedDescription)
         }
     }
 
@@ -6852,18 +6888,20 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
     private func showReaderModePicker(from indexPath: IndexPath) {
         let currentMode = LegacyReaderMode.current
         let alert = UIAlertController(
-            title: "Reader Layout",
-            message: "Choose how chapter pages are displayed.",
+            title: LegacyString("settings.reader_layout"),
+            message: LegacyString("settings.reader_layout.message"),
             preferredStyle: .actionSheet
         )
         for mode in LegacyReaderMode.allCases {
-            let title = mode == currentMode ? "\(mode.title) (Current)" : mode.title
+            let title = mode == currentMode
+                ? String(format: LegacyString("settings.option.current"), mode.title)
+                : mode.title
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 LegacyReaderMode.setCurrent(mode)
                 self?.tableView.reloadRows(at: [indexPath], with: .automatic)
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         if let popover = alert.popoverPresentationController {
             if let cell = tableView.cellForRow(at: indexPath) {
                 popover.sourceView = cell
@@ -6878,12 +6916,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func confirmClearCookies(at indexPath: IndexPath) {
         let alert = UIAlertController(
-            title: "Clear Cookies",
-            message: "Remove all saved cookies, including source and web view logins?",
+            title: LegacyString("settings.clear_cookies"),
+            message: LegacyString("settings.clear_cookies.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { [weak self] _ in
             self?.clearCookies(at: indexPath)
         })
         present(alert, animated: true)
@@ -6898,19 +6936,19 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         store.fetchDataRecords(ofTypes: [WKWebsiteDataTypeCookies]) { records in
             store.removeData(ofTypes: [WKWebsiteDataTypeCookies], for: records) { [weak self] in
                 self?.tableView.reloadRows(at: [indexPath], with: .automatic)
-                self?.showAlert(title: "Cookies Cleared", message: "All saved cookies were removed.")
+                self?.showAlert(title: LegacyString("settings.cookies_cleared.title"), message: LegacyString("settings.cookies_cleared.message"))
             }
         }
     }
 
     private func confirmClearWebViewData(at indexPath: IndexPath) {
         let alert = UIAlertController(
-            title: "Clear Web View Data",
-            message: "Remove all web view cache, storage, and cookies?",
+            title: LegacyString("settings.clear_web_view_data"),
+            message: LegacyString("settings.clear_web_view_data.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { [weak self] _ in
             self?.clearWebViewData()
         })
         present(alert, animated: true)
@@ -6922,14 +6960,17 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             ofTypes: types,
             modifiedSince: Date(timeIntervalSince1970: 0)
         ) { [weak self] in
-            self?.showAlert(title: "Web View Data Cleared", message: "All web view data was removed.")
+            self?.showAlert(
+                title: LegacyString("settings.web_view_data_cleared.title"),
+                message: LegacyString("settings.web_view_data_cleared.message")
+            )
         }
     }
 
     private func showDoHOptions(from indexPath: IndexPath) {
         let alert = UIAlertController(
-            title: "DNS over HTTPS",
-            message: "Resolve hostnames over HTTPS for source and cover requests on the OpenSSL path (e.g. MangaDex). System requests are unaffected.",
+            title: LegacyString("settings.dns_over_https"),
+            message: LegacyString("settings.dns_over_https.message"),
             preferredStyle: .actionSheet
         )
 
@@ -6944,22 +6985,22 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
         alert.addAction(UIAlertAction(title: providerActionTitle("google", "Google"), style: .default) { [weak self] _ in
             self?.setDoH(enabled: true, provider: "google", at: indexPath)
         })
-        alert.addAction(UIAlertAction(title: providerActionTitle("custom", "Custom URL..."), style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: providerActionTitle("custom", LegacyString("settings.dns_over_https.custom_url")), style: .default) { [weak self] _ in
             self?.promptCustomDoHURL(at: indexPath)
         })
         if LegacyNetworkSettings.dohEnabled {
-            alert.addAction(UIAlertAction(title: "Turn Off", style: .destructive) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: LegacyString("settings.turn_off"), style: .destructive) { [weak self] _ in
                 self?.setDoH(enabled: false, provider: LegacyNetworkSettings.dohProvider, at: indexPath)
             })
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
         presentSheet(alert, from: indexPath)
     }
 
     private func promptCustomDoHURL(at indexPath: IndexPath) {
         let alert = UIAlertController(
-            title: "Custom DoH Resolver",
-            message: "Enter a JSON DoH (\"dns-json\") endpoint, e.g. https://dns.example/dns-query",
+            title: LegacyString("settings.custom_doh.title"),
+            message: LegacyString("settings.custom_doh.message"),
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -6969,11 +7010,11 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self] _ in
             let value = (alert.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty, let url = URL(string: value), url.scheme?.lowercased() == "https" else {
-                self?.showAlert(title: "Invalid URL", message: "Enter an https:// DoH endpoint.")
+                self?.showAlert(title: LegacyString("settings.invalid_url.title"), message: LegacyString("settings.invalid_doh_url.message"))
                 return
             }
             UserDefaults.standard.set(value, forKey: LegacyNetworkSettings.dohCustomURLKey)
@@ -6990,8 +7031,8 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func showUserAgentEditor(at indexPath: IndexPath) {
         let alert = UIAlertController(
-            title: "Default User Agent",
-            message: "Sent when a source sets no User-Agent. Leave blank to use the app default. Note: MangaDex rejects browser-style user agents.",
+            title: LegacyString("settings.default_user_agent"),
+            message: LegacyString("settings.default_user_agent.message"),
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -7000,12 +7041,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Reset to Default", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("settings.reset_to_default"), style: .destructive) { [weak self] _ in
             UserDefaults.standard.removeObject(forKey: LegacyNetworkSettings.userAgentKey)
             self?.tableView.reloadRows(at: [indexPath], with: .automatic)
         })
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.save"), style: .default) { [weak self] _ in
             let value = (alert.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if value.isEmpty {
                 UserDefaults.standard.removeObject(forKey: LegacyNetworkSettings.userAgentKey)
@@ -7032,12 +7073,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func confirmClearHistory() {
         let alert = UIAlertController(
-            title: "Clear History",
-            message: "Remove all reading history from Aidoku Legacy?",
+            title: LegacyString("settings.clear_history"),
+            message: LegacyString("clear_history.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             LegacyHistoryStore.shared.clear()
         })
         present(alert, animated: true)
@@ -7045,12 +7086,12 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func confirmClearLibrary() {
         let alert = UIAlertController(
-            title: "Clear Library",
-            message: "Remove all saved manga from Aidoku Legacy?",
+            title: LegacyString("settings.clear_library"),
+            message: LegacyString("clear_library.message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: LegacyString("button.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: LegacyString("button.clear"), style: .destructive) { _ in
             LegacyLibraryStore.shared.clear()
         })
         present(alert, animated: true)
@@ -7058,7 +7099,7 @@ final class LegacySettingsViewController: UITableViewController, UIDocumentPicke
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: LegacyString("button.ok"), style: .default))
         present(alert, animated: true)
     }
 }
