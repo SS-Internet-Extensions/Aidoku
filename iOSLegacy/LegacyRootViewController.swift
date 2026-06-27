@@ -1282,26 +1282,26 @@ private enum LegacyReaderMode: String, CaseIterable {
     var title: String {
         switch self {
             case .verticalScroll:
-                return "Vertical Scroll"
+                return LegacyString("reader_mode.vertical_scroll")
             case .verticalFit:
-                return "Vertical Fit to Screen"
+                return LegacyString("reader_mode.vertical_fit")
             case .pagedLTR:
-                return "Paged Left to Right"
+                return LegacyString("reader_mode.paged_ltr")
             case .pagedRTL:
-                return "Paged Right to Left"
+                return LegacyString("reader_mode.paged_rtl")
         }
     }
 
     var detail: String {
         switch self {
             case .verticalScroll:
-                return "Continuous scrolling with page-height images"
+                return LegacyString("reader_mode.vertical_scroll.detail")
             case .verticalFit:
-                return "Each page fits within the visible screen"
+                return LegacyString("reader_mode.vertical_fit.detail")
             case .pagedLTR:
-                return "Horizontal pages; swipe left for the next page"
+                return LegacyString("reader_mode.paged_ltr.detail")
             case .pagedRTL:
-                return "Horizontal pages; swipe right for the next page"
+                return LegacyString("reader_mode.paged_rtl.detail")
         }
     }
 
@@ -9250,12 +9250,16 @@ final class LegacySourceSettingsViewController: UITableViewController {
         let defaultsKey = "\(source.key).\(key)"
         switch setting.type {
             case "switch", "toggle":
-                return boolValue(for: setting) ? "On" : "Off"
+                return boolValue(for: setting)
+                    ? LegacyString("source_settings.state.on")
+                    : LegacyString("source_settings.state.off")
             case "login":
-                return isLoggedIn(setting) ? "Logged in" : setting.subtitle ?? "Not logged in"
+                return isLoggedIn(setting)
+                    ? LegacyString("source_settings.state.logged_in")
+                    : setting.subtitle ?? LegacyString("source_settings.state.not_logged_in")
             case "multi-select", "multi-single-select", "editable-list":
                 let values = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
-                return values.isEmpty ? "None" : values.joined(separator: ", ")
+                return values.isEmpty ? LegacyString("source_settings.state.none") : values.joined(separator: ", ")
             case "select", "segment":
                 let value = UserDefaults.standard.string(forKey: defaultsKey) ?? ""
                 return label(for: value, in: setting) ?? value

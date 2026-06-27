@@ -286,6 +286,16 @@
 "settings.about.title" = "Aidoku Legacy";
 "settings.about.detail" = "iOS 12 personal-use reader with AidokuRunnerLegacy.";
 
+/* MARK: - Reader mode */
+"reader_mode.vertical_scroll" = "Vertical Scroll";
+"reader_mode.vertical_fit" = "Vertical Fit to Screen";
+"reader_mode.paged_ltr" = "Paged Left to Right";
+"reader_mode.paged_rtl" = "Paged Right to Left";
+"reader_mode.vertical_scroll.detail" = "Continuous scrolling with page-height images";
+"reader_mode.vertical_fit.detail" = "Each page fits within the visible screen";
+"reader_mode.paged_ltr.detail" = "Horizontal pages; swipe left for the next page";
+"reader_mode.paged_rtl.detail" = "Horizontal pages; swipe right for the next page";
+
 /* MARK: - Local files */
 "local_files.importing" = "Importing...";
 "local_files.import_incomplete.title" = "Import Incomplete";
@@ -446,6 +456,11 @@
 "source_settings.languages" = "Languages";
 "source_settings.base_url" = "Base URL";
 "source_settings.editable_list.message" = "Enter comma-separated values.";
+"source_settings.state.on" = "On";
+"source_settings.state.off" = "Off";
+"source_settings.state.logged_in" = "Logged in";
+"source_settings.state.not_logged_in" = "Not logged in";
+"source_settings.state.none" = "None";
 
 /* MARK: - Source login */
 "login.password.placeholder" = "Password";
